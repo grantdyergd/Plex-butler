@@ -90,6 +90,12 @@ def setup_step1():
     if is_setup_complete():
         return redirect(url_for('login'))
     
+    existing_user = User.query.first()
+    if existing_user:
+        login_user(existing_user)
+        flash('Welcome back! Continuing setup...', 'info')
+        return redirect(url_for('setup_step2'))
+    
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
