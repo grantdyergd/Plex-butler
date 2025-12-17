@@ -8,32 +8,18 @@ import os
 import sys
 import time
 import smtplib
+import re
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 from typing import Optional
 import requests
 from plexapi.server import PlexServer
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 load_dotenv()
 
-SONARR_URL = os.getenv("SONARR_URL", "").rstrip("/")
-SONARR_API_KEY = os.getenv("SONARR_API_KEY", "")
-PLEX_URL = os.getenv("PLEX_URL", "").rstrip("/")
-PLEX_TOKEN = os.getenv("PLEX_TOKEN", "")
-OMBI_URL = os.getenv("OMBI_URL", "").rstrip("/")
-OMBI_API_KEY = os.getenv("OMBI_API_KEY", "")
-
-SMTP_HOST = os.getenv("SMTP_HOST", "")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER = os.getenv("SMTP_USER", "")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-SMTP_FROM = os.getenv("SMTP_FROM", "")
-
-SKIP_IF_ADDED_WITHIN_DAYS = int(os.getenv("SKIP_IF_ADDED_WITHIN_DAYS", "90"))
-SKIP_IF_WATCHED_WITHIN_DAYS = int(os.getenv("SKIP_IF_WATCHED_WITHIN_DAYS", "180"))
-DELETION_DELAY_SECONDS = float(os.getenv("DELETION_DELAY_SECONDS", "2.0"))
+ENV_FILE = ".env"
 
 EXCLUSION_FILE = "excluded_shows.txt"
 
@@ -71,6 +57,97 @@ def print_error(text: str):
     print(f"{Colors.RED}[ERROR]{Colors.ENDC} {text}")
 
 
+def get_config_value(key: str, prompt: str, required: bool = True, default: str = "") -> str:
+    value = os.getenv(key, "").strip()
+    if value:
+        return value
+    
+    if not required:
+        return default
+    
+    print(f"\n{Colors.YELLOW}Missing: {key}{Colors.ENDC}")
+    while True:
+        value = input(f"{prompt}: ").strip()
+        if value:
+            save_response = input(f"Save '{key}' to .env file for future runs? (y/n): ").strip().lower()
+            if save_response in ["y", "yes"]:
+                if not os.path.exists(ENV_FILE):
+                    with open(ENV_FILE, "w") as f:
+                        f.write(f"# TV Show Cleanup Configuration\n")
+                set_key(ENV_FILE, key, value)
+                print_success(f"Saved {key} to .env file")
+            return value
+        elif not required:
+            return default
+        print_error("This value is required. Please enter a valid value.")
+
+
+def load_config() -> dict:
+    print_header("Configuration")
+    
+    config = {}
+    
+    print_info("Checking required configuration...")
+    config["SONARR_URL"] = get_config_value(
+        "SONARR_URL",
+        "Enter your Sonarr URL (e.g., http://192.168.1.100:8989)"
+    ).rstrip("/")
+    
+    config["SONARR_API_KEY"] = get_config_value(
+        "SONARR_API_KEY",
+        "Enter your Sonarr API Key (Settings > General > Security)"
+    )
+    
+    config["PLEX_URL"] = get_config_value(
+        "PLEX_URL",
+        "Enter your Plex URL (e.g., http://192.168.1.100:32400)"
+    ).rstrip("/")
+    
+    config["PLEX_TOKEN"] = get_config_value(
+        "PLEX_TOKEN",
+        "Enter your Plex Token (see https://support.plex.tv/articles/204059436/)"
+    )
+    
+    print_info("\nChecking optional configuration...")
+    
+    config["OMBI_URL"] = os.getenv("OMBI_URL", "").rstrip("/")
+    config["OMBI_API_KEY"] = os.getenv("OMBI_API_KEY", "")
+    
+    if not config["OMBI_URL"]:
+        setup_ombi = input("Do you want to configure Ombi for requester notifications? (y/n): ").strip().lower()
+        if setup_ombi in ["y", "yes"]:
+            config["OMBI_URL"] = get_config_value(
+                "OMBI_URL",
+                "Enter your Ombi URL (e.g., http://192.168.1.100:5000)"
+            ).rstrip("/")
+            config["OMBI_API_KEY"] = get_config_value(
+                "OMBI_API_KEY",
+                "Enter your Ombi API Key"
+            )
+    
+    config["SMTP_HOST"] = os.getenv("SMTP_HOST", "")
+    config["SMTP_PORT"] = int(os.getenv("SMTP_PORT", "587"))
+    config["SMTP_USER"] = os.getenv("SMTP_USER", "")
+    config["SMTP_PASSWORD"] = os.getenv("SMTP_PASSWORD", "")
+    config["SMTP_FROM"] = os.getenv("SMTP_FROM", "")
+    
+    if not config["SMTP_HOST"] and config["OMBI_URL"]:
+        setup_smtp = input("Do you want to configure email notifications? (y/n): ").strip().lower()
+        if setup_smtp in ["y", "yes"]:
+            config["SMTP_HOST"] = get_config_value("SMTP_HOST", "Enter SMTP server host")
+            config["SMTP_PORT"] = int(get_config_value("SMTP_PORT", "Enter SMTP port", default="587") or "587")
+            config["SMTP_USER"] = get_config_value("SMTP_USER", "Enter SMTP username")
+            config["SMTP_PASSWORD"] = get_config_value("SMTP_PASSWORD", "Enter SMTP password")
+            config["SMTP_FROM"] = get_config_value("SMTP_FROM", "Enter 'From' email address")
+    
+    config["SKIP_IF_ADDED_WITHIN_DAYS"] = int(os.getenv("SKIP_IF_ADDED_WITHIN_DAYS", "90"))
+    config["SKIP_IF_WATCHED_WITHIN_DAYS"] = int(os.getenv("SKIP_IF_WATCHED_WITHIN_DAYS", "180"))
+    config["DELETION_DELAY_SECONDS"] = float(os.getenv("DELETION_DELAY_SECONDS", "2.0"))
+    
+    print_success("Configuration complete!")
+    return config
+
+
 def load_exclusions() -> set:
     exclusions = set()
     if os.path.exists(EXCLUSION_FILE):
@@ -88,32 +165,12 @@ def save_exclusion(show_title: str):
     print_success(f"Added '{show_title}' to exclusion list")
 
 
-def check_config() -> bool:
-    missing = []
-    if not SONARR_URL:
-        missing.append("SONARR_URL")
-    if not SONARR_API_KEY:
-        missing.append("SONARR_API_KEY")
-    if not PLEX_URL:
-        missing.append("PLEX_TOKEN")
-    if not PLEX_TOKEN:
-        missing.append("PLEX_TOKEN")
-    
-    if missing:
-        print_error("Missing required configuration:")
-        for var in missing:
-            print(f"  - {var}")
-        print("\nPlease set these environment variables or add them to a .env file")
-        return False
-    return True
-
-
-def get_sonarr_series() -> list:
+def get_sonarr_series(config: dict) -> list:
     print_info("Fetching series from Sonarr...")
     try:
         response = requests.get(
-            f"{SONARR_URL}/api/v3/series",
-            headers={"X-Api-Key": SONARR_API_KEY},
+            f"{config['SONARR_URL']}/api/v3/series",
+            headers={"X-Api-Key": config["SONARR_API_KEY"]},
             timeout=30
         )
         response.raise_for_status()
@@ -125,17 +182,46 @@ def get_sonarr_series() -> list:
         return []
 
 
-def get_plex_watch_history() -> dict:
-    print_info("Fetching watch history from Plex...")
+def extract_tvdb_id_from_guid(guid: str) -> Optional[int]:
+    if not guid:
+        return None
+    patterns = [
+        r'thetvdb://(\d+)',
+        r'tvdb://(\d+)',
+        r'com\.plexapp\.agents\.thetvdb://(\d+)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, guid)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def get_plex_watch_history(config: dict) -> dict:
+    print_info("Fetching watch history from Plex (using TVDB IDs)...")
     watch_history = {}
     
     try:
-        plex = PlexServer(PLEX_URL, PLEX_TOKEN)
+        plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"])
         
         for section in plex.library.sections():
             if section.type == "show":
                 for show in section.all():
                     last_watched = None
+                    tvdb_id = None
+                    
+                    try:
+                        for guid in show.guids:
+                            extracted_id = extract_tvdb_id_from_guid(guid.id)
+                            if extracted_id:
+                                tvdb_id = extracted_id
+                                break
+                        
+                        if not tvdb_id and hasattr(show, 'guid'):
+                            tvdb_id = extract_tvdb_id_from_guid(show.guid)
+                    except Exception:
+                        pass
+                    
                     try:
                         for episode in show.episodes():
                             if episode.lastViewedAt:
@@ -145,25 +231,34 @@ def get_plex_watch_history() -> dict:
                         pass
                     
                     if last_watched:
-                        watch_history[show.title.lower()] = last_watched
+                        if tvdb_id:
+                            watch_history[tvdb_id] = {
+                                "last_watched": last_watched,
+                                "title": show.title
+                            }
+                        watch_history[f"title:{show.title.lower()}"] = {
+                            "last_watched": last_watched,
+                            "title": show.title
+                        }
         
-        print_success(f"Retrieved watch history for {len(watch_history)} shows")
+        tvdb_count = sum(1 for k in watch_history if isinstance(k, int))
+        print_success(f"Retrieved watch history for {len(watch_history)} shows ({tvdb_count} with TVDB ID)")
         return watch_history
     except Exception as e:
         print_error(f"Failed to connect to Plex: {e}")
         return {}
 
 
-def get_ombi_requests() -> dict:
-    if not OMBI_URL or not OMBI_API_KEY:
+def get_ombi_requests(config: dict) -> dict:
+    if not config.get("OMBI_URL") or not config.get("OMBI_API_KEY"):
         print_warning("Ombi not configured, skipping requester lookup")
         return {}
     
     print_info("Fetching TV requests from Ombi...")
     try:
         response = requests.get(
-            f"{OMBI_URL}/api/v1/Request/tv",
-            headers={"ApiKey": OMBI_API_KEY},
+            f"{config['OMBI_URL']}/api/v1/Request/tv",
+            headers={"ApiKey": config["OMBI_API_KEY"]},
             timeout=30
         )
         response.raise_for_status()
@@ -202,10 +297,12 @@ def should_skip_show(
     exclusions: set,
     watch_history: dict,
     cutoff_added: datetime,
-    cutoff_watched: datetime
+    cutoff_watched: datetime,
+    config: dict
 ) -> tuple[bool, str]:
     title = series.get("title", "Unknown")
     title_lower = title.lower()
+    tvdb_id = series.get("tvdbId")
     
     if title_lower in exclusions:
         return True, "In exclusion list"
@@ -216,23 +313,29 @@ def should_skip_show(
             added_date = datetime.fromisoformat(added_str.replace("Z", "+00:00"))
             if added_date.replace(tzinfo=None) > cutoff_added:
                 days_ago = (datetime.now() - added_date.replace(tzinfo=None)).days
-                return True, f"Added {days_ago} days ago (within {SKIP_IF_ADDED_WITHIN_DAYS} days)"
+                return True, f"Added {days_ago} days ago (within {config['SKIP_IF_ADDED_WITHIN_DAYS']} days)"
         except ValueError:
             pass
     
-    if title_lower in watch_history:
-        last_watched = watch_history[title_lower]
+    watch_entry = None
+    if tvdb_id and tvdb_id in watch_history:
+        watch_entry = watch_history[tvdb_id]
+    elif f"title:{title_lower}" in watch_history:
+        watch_entry = watch_history[f"title:{title_lower}"]
+    
+    if watch_entry:
+        last_watched = watch_entry["last_watched"]
         if isinstance(last_watched, datetime):
             if last_watched.replace(tzinfo=None) > cutoff_watched:
                 days_ago = (datetime.now() - last_watched.replace(tzinfo=None)).days
-                return True, f"Watched {days_ago} days ago (within {SKIP_IF_WATCHED_WITHIN_DAYS} days)"
+                return True, f"Watched {days_ago} days ago (within {config['SKIP_IF_WATCHED_WITHIN_DAYS']} days)"
     
     return False, ""
 
 
-def delete_from_plex(show_title: str) -> bool:
+def delete_from_plex(show_title: str, config: dict) -> bool:
     try:
-        plex = PlexServer(PLEX_URL, PLEX_TOKEN)
+        plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"])
         
         for section in plex.library.sections():
             if section.type == "show":
@@ -251,11 +354,11 @@ def delete_from_plex(show_title: str) -> bool:
         return False
 
 
-def delete_from_sonarr(series_id: int, show_title: str, delete_files: bool = True) -> bool:
+def delete_from_sonarr(series_id: int, show_title: str, config: dict, delete_files: bool = True) -> bool:
     try:
         response = requests.delete(
-            f"{SONARR_URL}/api/v3/series/{series_id}",
-            headers={"X-Api-Key": SONARR_API_KEY},
+            f"{config['SONARR_URL']}/api/v3/series/{series_id}",
+            headers={"X-Api-Key": config["SONARR_API_KEY"]},
             params={"deleteFiles": str(delete_files).lower()},
             timeout=30
         )
@@ -267,14 +370,15 @@ def delete_from_sonarr(series_id: int, show_title: str, delete_files: bool = Tru
         return False
 
 
-def send_notification_email(email: str, show_title: str, requester_name: str) -> bool:
-    if not all([SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM]):
+def send_notification_email(email: str, show_title: str, requester_name: str, config: dict) -> bool:
+    if not all([config.get("SMTP_HOST"), config.get("SMTP_USER"), 
+                config.get("SMTP_PASSWORD"), config.get("SMTP_FROM")]):
         print_warning(f"SMTP not configured, skipping email to {email}")
         return False
     
     try:
         msg = MIMEMultipart()
-        msg["From"] = SMTP_FROM
+        msg["From"] = config["SMTP_FROM"]
         msg["To"] = email
         msg["Subject"] = f"TV Show Removed: {show_title}"
         
@@ -291,9 +395,9 @@ Media Library Cleanup Bot
 """
         msg.attach(MIMEText(body, "plain"))
         
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        with smtplib.SMTP(config["SMTP_HOST"], config["SMTP_PORT"]) as server:
             server.starttls()
-            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.login(config["SMTP_USER"], config["SMTP_PASSWORD"])
             server.send_message(msg)
         
         print_success(f"Sent notification email to {email}")
@@ -303,28 +407,25 @@ Media Library Cleanup Bot
         return False
 
 
-def run_cleanup(dry_run: bool = True):
+def run_cleanup(config: dict, dry_run: bool = True):
     print_header("TV Show Cleanup Tool")
-    
-    if not check_config():
-        return
     
     mode = "DRY RUN" if dry_run else "LIVE MODE"
     print(f"{Colors.BOLD}Mode: {Colors.YELLOW if dry_run else Colors.RED}{mode}{Colors.ENDC}\n")
     
-    cutoff_added = datetime.now() - timedelta(days=SKIP_IF_ADDED_WITHIN_DAYS)
-    cutoff_watched = datetime.now() - timedelta(days=SKIP_IF_WATCHED_WITHIN_DAYS)
+    cutoff_added = datetime.now() - timedelta(days=config["SKIP_IF_ADDED_WITHIN_DAYS"])
+    cutoff_watched = datetime.now() - timedelta(days=config["SKIP_IF_WATCHED_WITHIN_DAYS"])
     
     exclusions = load_exclusions()
     print_info(f"Loaded {len(exclusions)} shows from exclusion list")
     
-    series_list = get_sonarr_series()
+    series_list = get_sonarr_series(config)
     if not series_list:
         print_error("No series found in Sonarr. Exiting.")
         return
     
-    watch_history = get_plex_watch_history()
-    ombi_requesters = get_ombi_requests()
+    watch_history = get_plex_watch_history(config)
+    ombi_requesters = get_ombi_requests(config)
     
     print_header("Analyzing Shows")
     
@@ -338,7 +439,7 @@ def run_cleanup(dry_run: bool = True):
         status = get_show_status(series)
         
         skip, reason = should_skip_show(
-            series, exclusions, watch_history, cutoff_added, cutoff_watched
+            series, exclusions, watch_history, cutoff_added, cutoff_watched, config
         )
         
         if skip:
@@ -359,6 +460,13 @@ def run_cleanup(dry_run: bool = True):
     print(f"  {Colors.GREEN}Skipped (protected): {len(skipped)}{Colors.ENDC}")
     print(f"  {Colors.RED}Candidates for deletion: {len(candidates)}{Colors.ENDC}")
     
+    if skipped:
+        show_skipped = input(f"\nShow details of {len(skipped)} skipped shows? (y/n): ").strip().lower()
+        if show_skipped in ["y", "yes"]:
+            print(f"\n{Colors.GREEN}Protected Shows:{Colors.ENDC}")
+            for show in skipped:
+                print(f"  - {show['title']}: {show['reason']}")
+    
     if not candidates:
         print_success("\nNo shows to delete. Your library is well-maintained!")
         return
@@ -369,6 +477,7 @@ def run_cleanup(dry_run: bool = True):
         status_color = Colors.GREEN if "Continuing" in show["status"] else Colors.YELLOW
         print(f"\n{Colors.BOLD}{i}. {show['title']}{Colors.ENDC}")
         print(f"   Status: {status_color}{show['status']}{Colors.ENDC}")
+        print(f"   TVDB ID: {show['tvdb_id'] or 'Unknown'}")
         if show["requester_email"]:
             print(f"   Requested by: {show['requester_name']} ({show['requester_email']})")
         else:
@@ -419,56 +528,63 @@ def run_cleanup(dry_run: bool = True):
     for show in final_candidates:
         print(f"\n{Colors.BOLD}Processing: {show['title']}{Colors.ENDC}")
         
-        delete_from_plex(show["title"])
+        delete_from_plex(show["title"], config)
         
-        if delete_from_sonarr(show["id"], show["title"]):
+        if delete_from_sonarr(show["id"], show["title"], config):
             deleted_count += 1
             
             if show["requester_email"]:
                 send_notification_email(
                     show["requester_email"],
                     show["title"],
-                    show["requester_name"]
+                    show["requester_name"],
+                    config
                 )
         
-        print_info(f"Waiting {DELETION_DELAY_SECONDS}s before next deletion...")
-        time.sleep(DELETION_DELAY_SECONDS)
+        print_info(f"Waiting {config['DELETION_DELAY_SECONDS']}s before next deletion...")
+        time.sleep(config["DELETION_DELAY_SECONDS"])
     
     print_header("Cleanup Complete")
     print_success(f"Successfully deleted {deleted_count} of {len(final_candidates)} shows")
 
 
 def main():
-    print_header("TV Show Cleanup Tool - Setup")
+    print_header("TV Show Cleanup Tool")
     
     print(f"""
-{Colors.BOLD}Current Configuration:{Colors.ENDC}
-  - Skip shows added within: {SKIP_IF_ADDED_WITHIN_DAYS} days
-  - Skip shows watched within: {SKIP_IF_WATCHED_WITHIN_DAYS} days
-  - Deletion delay: {DELETION_DELAY_SECONDS} seconds
+{Colors.CYAN}This tool helps you clean up your TV show library by:{Colors.ENDC}
+  1. Scanning your Sonarr library
+  2. Identifying shows that haven't been watched recently
+  3. Excluding shows you want to keep
+  4. Safely removing unwanted shows from Plex and Sonarr
+  5. Notifying original requesters via email
 
-{Colors.BOLD}Required Environment Variables:{Colors.ENDC}
-  - SONARR_URL: {'Configured' if SONARR_URL else 'Not set'}
-  - SONARR_API_KEY: {'Configured' if SONARR_API_KEY else 'Not set'}
-  - PLEX_URL: {'Configured' if PLEX_URL else 'Not set'}
-  - PLEX_TOKEN: {'Configured' if PLEX_TOKEN else 'Not set'}
-  
-{Colors.BOLD}Optional Environment Variables:{Colors.ENDC}
-  - OMBI_URL: {'Configured' if OMBI_URL else 'Not set'}
-  - OMBI_API_KEY: {'Configured' if OMBI_API_KEY else 'Not set'}
-  - SMTP_HOST: {'Configured' if SMTP_HOST else 'Not set'}
-  - SMTP_PORT: {SMTP_PORT}
-  - SMTP_USER: {'Configured' if SMTP_USER else 'Not set'}
-  - SMTP_PASSWORD: {'Configured' if SMTP_PASSWORD else 'Not set'}
-  - SMTP_FROM: {'Configured' if SMTP_FROM else 'Not set'}
+{Colors.YELLOW}The tool will always run a DRY RUN first (no actual deletions)
+until you explicitly confirm with the --execute flag.{Colors.ENDC}
+""")
+    
+    config = load_config()
+    
+    print(f"""
+{Colors.BOLD}Active Settings:{Colors.ENDC}
+  - Skip shows added within: {config['SKIP_IF_ADDED_WITHIN_DAYS']} days
+  - Skip shows watched within: {config['SKIP_IF_WATCHED_WITHIN_DAYS']} days
+  - Deletion delay: {config['DELETION_DELAY_SECONDS']} seconds
+  - Ombi integration: {'Enabled' if config.get('OMBI_URL') else 'Disabled'}
+  - Email notifications: {'Enabled' if config.get('SMTP_HOST') else 'Disabled'}
 """)
     
     if "--execute" in sys.argv:
-        run_cleanup(dry_run=False)
+        print(f"{Colors.RED}{Colors.BOLD}WARNING: Running in LIVE MODE - deletions will be permanent!{Colors.ENDC}")
+        confirm = input("Type 'CONTINUE' to proceed: ").strip()
+        if confirm != "CONTINUE":
+            print_info("Exiting...")
+            return
+        run_cleanup(config, dry_run=False)
     else:
         print(f"{Colors.CYAN}Running in DRY RUN mode (safe - no changes will be made){Colors.ENDC}")
         print(f"To execute deletions, run with: python cleanup.py --execute\n")
-        run_cleanup(dry_run=True)
+        run_cleanup(config, dry_run=True)
 
 
 if __name__ == "__main__":

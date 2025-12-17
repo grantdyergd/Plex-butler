@@ -45,18 +45,37 @@ An automated TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This too
 
 ## Usage
 
+### First Run Setup
+When you run the tool for the first time, it will prompt you for any missing configuration:
+- Sonarr URL and API key
+- Plex URL and token
+- Optionally: Ombi and SMTP settings for requester notifications
+
+You can choose to save these credentials to a `.env` file for future runs.
+
 ### Dry Run (Safe Test Mode)
 ```bash
 python cleanup.py
 ```
+This mode shows what would be deleted without making any changes.
 
 ### Execute Deletions
 ```bash
 python cleanup.py --execute
 ```
+Only run this after reviewing the dry run results.
 
 ## Exclusion List
 Add show titles to `excluded_shows.txt` (one per line) to permanently protect them from deletion. Lines starting with `#` are comments.
 
+## How It Works
+1. Fetches all series from Sonarr
+2. Gets watch history from Plex (uses TVDB IDs for reliable matching)
+3. Filters out protected shows (recently added, recently watched, in exclusion list)
+4. Shows deletion candidates and prompts for manual review
+5. On --execute: Deletes from both Plex and Sonarr, notifies requesters via email
+
 ## Recent Changes
+- Added interactive credential prompts with .env persistence (Dec 2025)
+- Improved Plex matching using TVDB IDs instead of titles only
 - Initial creation (Dec 2025)
