@@ -230,7 +230,7 @@ def get_plex_watch_history(config: dict, log: Callable) -> dict:
 
 def get_ombi_requests(config: dict, log: Callable) -> dict:
     if not config.get("OMBI_URL") or not config.get("OMBI_API_KEY"):
-        log("[WARNING] Ombi not configured")
+        log("[WARNING] Ombi not configured - skipping requester lookup")
         return {}
     
     log("[INFO] Fetching TV requests from Ombi...")
@@ -243,18 +243,35 @@ def get_ombi_requests(config: dict, log: Callable) -> dict:
         response.raise_for_status()
         requests_data = response.json()
         
+        log(f"[INFO] Ombi returned {len(requests_data)} total TV requests")
+        
         requesters = {}
         for req in requests_data:
-            tvdb_id = req.get("tvDbId")
-            requester_email = req.get("requestedUser", {}).get("email", "")
-            requester_name = req.get("requestedUser", {}).get("userName", "Unknown")
-            if tvdb_id and requester_email:
+            tvdb_id = req.get("tvDbId") or req.get("thetvdbid") or req.get("tvdbId")
+            title = req.get("title", "Unknown")
+            
+            requester_user = req.get("requestedUser") or {}
+            requester_email = requester_user.get("email", "") or requester_user.get("Email", "")
+            requester_name = requester_user.get("userName", "") or requester_user.get("username", "") or requester_user.get("alias", "Unknown")
+            
+            if not requester_email:
+                child_requests = req.get("childRequests", [])
+                for child in child_requests:
+                    child_user = child.get("requestedUser") or {}
+                    requester_email = child_user.get("email", "") or child_user.get("Email", "")
+                    requester_name = child_user.get("userName", "") or child_user.get("username", "") or child_user.get("alias", "Unknown")
+                    if requester_email:
+                        break
+            
+            if tvdb_id:
                 requesters[tvdb_id] = {
                     "email": requester_email,
-                    "name": requester_name
+                    "name": requester_name,
+                    "title": title
                 }
         
-        log(f"[SUCCESS] Found {len(requesters)} TV requests in Ombi")
+        with_email = sum(1 for r in requesters.values() if r.get("email"))
+        log(f"[SUCCESS] Found {len(requesters)} TV requests in Ombi ({with_email} with email addresses)")
         return requesters
     except requests.RequestException as e:
         log(f"[WARNING] Failed to fetch Ombi requests: {e}")
