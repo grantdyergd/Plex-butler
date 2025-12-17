@@ -404,21 +404,22 @@ def run_cleanup_api():
     
     def run_cleanup_thread():
         global cleanup_status
-        try:
-            from cleanup_web import run_cleanup_with_settings
-            result = run_cleanup_with_settings(
-                get_setting, 
-                dry_run=dry_run,
-                log_callback=lambda msg: cleanup_status['log'].append(msg)
-            )
-            cleanup_status['last_result'] = result
-        except Exception as e:
-            cleanup_status['last_result'] = {'error': str(e)}
-            cleanup_status['log'].append(f"[ERROR] {str(e)}")
-        finally:
-            with cleanup_lock:
-                cleanup_status['running'] = False
-                cleanup_status['last_run'] = datetime.now().isoformat()
+        with app.app_context():
+            try:
+                from cleanup_web import run_cleanup_with_settings
+                result = run_cleanup_with_settings(
+                    get_setting, 
+                    dry_run=dry_run,
+                    log_callback=lambda msg: cleanup_status['log'].append(msg)
+                )
+                cleanup_status['last_result'] = result
+            except Exception as e:
+                cleanup_status['last_result'] = {'error': str(e)}
+                cleanup_status['log'].append(f"[ERROR] {str(e)}")
+            finally:
+                with cleanup_lock:
+                    cleanup_status['running'] = False
+                    cleanup_status['last_run'] = datetime.now().isoformat()
     
     thread = threading.Thread(target=run_cleanup_thread)
     thread.start()
