@@ -1,0 +1,5 @@
+# Add show titles to exclude from deletion (one per line)
+# Lines starting with # are comments
+# Example:
+# Breaking Bad
+# Game of Thrones
