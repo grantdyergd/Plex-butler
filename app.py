@@ -421,8 +421,20 @@ def cleanup_status_api():
     return jsonify(cleanup_status)
 
 
-with app.app_context():
-    db.create_all()
+def init_db():
+    with app.app_context():
+        db.create_all()
+
+init_db()
+
+
+@app.route('/health')
+def health_check():
+    try:
+        db.session.execute(db.text('SELECT 1'))
+        return jsonify({'status': 'healthy', 'database': 'connected'})
+    except Exception as e:
+        return jsonify({'status': 'unhealthy', 'database': str(e)}), 500
 
 
 if __name__ == '__main__':
