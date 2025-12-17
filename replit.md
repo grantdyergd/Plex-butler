@@ -65,6 +65,16 @@ python cleanup.py --execute
 ```
 Only run this after reviewing the dry run results.
 
+### Automated Mode (for Scheduled Deployments)
+```bash
+python cleanup.py --auto              # Automated dry run
+python cleanup.py --auto --execute    # Automated with deletions
+```
+In automated mode:
+- All configuration must be set via environment variables/secrets
+- No interactive prompts - the script runs unattended
+- Uses exclusion list only (no manual review per show)
+
 ## Exclusion List
 Add show titles to `excluded_shows.txt` (one per line) to permanently protect them from deletion. Lines starting with `#` are comments.
 

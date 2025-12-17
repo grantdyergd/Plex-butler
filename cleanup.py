@@ -2,6 +2,12 @@
 """
 TV Show Cleanup Tool for Plex, Sonarr, and Ombi
 Intelligently removes unwatched shows while respecting exclusions and notifying requesters.
+
+Usage:
+  python cleanup.py                    # Interactive dry run
+  python cleanup.py --execute          # Interactive with actual deletions
+  python cleanup.py --auto             # Automated dry run (for scheduled jobs)
+  python cleanup.py --auto --execute   # Automated with actual deletions
 """
 
 import os
@@ -20,41 +26,43 @@ from dotenv import load_dotenv, set_key
 load_dotenv()
 
 ENV_FILE = ".env"
-
 EXCLUSION_FILE = "excluded_shows.txt"
+
+AUTO_MODE = "--auto" in sys.argv
+EXECUTE_MODE = "--execute" in sys.argv
 
 
 class Colors:
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
+    HEADER = '\033[95m' if not AUTO_MODE else ''
+    BLUE = '\033[94m' if not AUTO_MODE else ''
+    CYAN = '\033[96m' if not AUTO_MODE else ''
+    GREEN = '\033[92m' if not AUTO_MODE else ''
+    YELLOW = '\033[93m' if not AUTO_MODE else ''
+    RED = '\033[91m' if not AUTO_MODE else ''
+    ENDC = '\033[0m' if not AUTO_MODE else ''
+    BOLD = '\033[1m' if not AUTO_MODE else ''
 
 
 def print_header(text: str):
-    print(f"\n{Colors.HEADER}{Colors.BOLD}{'='*60}{Colors.ENDC}")
-    print(f"{Colors.HEADER}{Colors.BOLD}{text.center(60)}{Colors.ENDC}")
-    print(f"{Colors.HEADER}{Colors.BOLD}{'='*60}{Colors.ENDC}\n")
+    print(f"\n{'='*60}")
+    print(f"{text.center(60)}")
+    print(f"{'='*60}\n")
 
 
 def print_info(text: str):
-    print(f"{Colors.CYAN}[INFO]{Colors.ENDC} {text}")
+    print(f"[INFO] {text}")
 
 
 def print_success(text: str):
-    print(f"{Colors.GREEN}[SUCCESS]{Colors.ENDC} {text}")
+    print(f"[SUCCESS] {text}")
 
 
 def print_warning(text: str):
-    print(f"{Colors.YELLOW}[WARNING]{Colors.ENDC} {text}")
+    print(f"[WARNING] {text}")
 
 
 def print_error(text: str):
-    print(f"{Colors.RED}[ERROR]{Colors.ENDC} {text}")
+    print(f"[ERROR] {text}")
 
 
 def get_config_value(key: str, prompt: str, required: bool = True, default: str = "") -> str:
@@ -63,6 +71,13 @@ def get_config_value(key: str, prompt: str, required: bool = True, default: str 
         return value
     
     if not required:
+        return default
+    
+    if AUTO_MODE:
+        if required:
+            print_error(f"Missing required environment variable: {key}")
+            print_error("In automated mode, all required variables must be set as environment variables.")
+            sys.exit(1)
         return default
     
     print(f"\n{Colors.YELLOW}Missing: {key}{Colors.ENDC}")
@@ -108,12 +123,11 @@ def load_config() -> dict:
         "Enter your Plex Token (see https://support.plex.tv/articles/204059436/)"
     )
     
-    print_info("\nChecking optional configuration...")
-    
     config["OMBI_URL"] = os.getenv("OMBI_URL", "").rstrip("/")
     config["OMBI_API_KEY"] = os.getenv("OMBI_API_KEY", "")
     
-    if not config["OMBI_URL"]:
+    if not AUTO_MODE and not config["OMBI_URL"]:
+        print_info("\nChecking optional configuration...")
         setup_ombi = input("Do you want to configure Ombi for requester notifications? (y/n): ").strip().lower()
         if setup_ombi in ["y", "yes"]:
             config["OMBI_URL"] = get_config_value(
@@ -131,7 +145,7 @@ def load_config() -> dict:
     config["SMTP_PASSWORD"] = os.getenv("SMTP_PASSWORD", "")
     config["SMTP_FROM"] = os.getenv("SMTP_FROM", "")
     
-    if not config["SMTP_HOST"] and config["OMBI_URL"]:
+    if not AUTO_MODE and not config["SMTP_HOST"] and config["OMBI_URL"]:
         setup_smtp = input("Do you want to configure email notifications? (y/n): ").strip().lower()
         if setup_smtp in ["y", "yes"]:
             config["SMTP_HOST"] = get_config_value("SMTP_HOST", "Enter SMTP server host")
@@ -411,7 +425,8 @@ def run_cleanup(config: dict, dry_run: bool = True):
     print_header("TV Show Cleanup Tool")
     
     mode = "DRY RUN" if dry_run else "LIVE MODE"
-    print(f"{Colors.BOLD}Mode: {Colors.YELLOW if dry_run else Colors.RED}{mode}{Colors.ENDC}\n")
+    auto_label = " (AUTOMATED)" if AUTO_MODE else ""
+    print(f"Mode: {mode}{auto_label}\n")
     
     cutoff_added = datetime.now() - timedelta(days=config["SKIP_IF_ADDED_WITHIN_DAYS"])
     cutoff_watched = datetime.now() - timedelta(days=config["SKIP_IF_WATCHED_WITHIN_DAYS"])
@@ -455,15 +470,15 @@ def run_cleanup(config: dict, dry_run: bool = True):
                 "requester_name": requester.get("name", "")
             })
     
-    print(f"\n{Colors.BOLD}Summary:{Colors.ENDC}")
+    print(f"\nSummary:")
     print(f"  Total shows: {len(series_list)}")
-    print(f"  {Colors.GREEN}Skipped (protected): {len(skipped)}{Colors.ENDC}")
-    print(f"  {Colors.RED}Candidates for deletion: {len(candidates)}{Colors.ENDC}")
+    print(f"  Skipped (protected): {len(skipped)}")
+    print(f"  Candidates for deletion: {len(candidates)}")
     
-    if skipped:
+    if not AUTO_MODE and skipped:
         show_skipped = input(f"\nShow details of {len(skipped)} skipped shows? (y/n): ").strip().lower()
         if show_skipped in ["y", "yes"]:
-            print(f"\n{Colors.GREEN}Protected Shows:{Colors.ENDC}")
+            print(f"\nProtected Shows:")
             for show in skipped:
                 print(f"  - {show['title']}: {show['reason']}")
     
@@ -474,33 +489,36 @@ def run_cleanup(config: dict, dry_run: bool = True):
     print_header("Deletion Candidates")
     
     for i, show in enumerate(candidates, 1):
-        status_color = Colors.GREEN if "Continuing" in show["status"] else Colors.YELLOW
-        print(f"\n{Colors.BOLD}{i}. {show['title']}{Colors.ENDC}")
-        print(f"   Status: {status_color}{show['status']}{Colors.ENDC}")
+        print(f"\n{i}. {show['title']}")
+        print(f"   Status: {show['status']}")
         print(f"   TVDB ID: {show['tvdb_id'] or 'Unknown'}")
         if show["requester_email"]:
             print(f"   Requested by: {show['requester_name']} ({show['requester_email']})")
         else:
             print(f"   Requested by: Unknown/Not via Ombi")
     
-    print_header("Manual Review")
-    
-    final_candidates = []
-    for show in candidates:
-        while True:
-            response = input(f"Exclude '{show['title']}'? (yes/no/skip): ").strip().lower()
-            if response in ["yes", "y"]:
-                save_exclusion(show["title"])
-                exclusions.add(show["title"].lower())
-                break
-            elif response in ["no", "n"]:
-                final_candidates.append(show)
-                break
-            elif response in ["skip", "s"]:
-                print_info(f"Skipping '{show['title']}' for this run only")
-                break
-            else:
-                print("Please enter 'yes', 'no', or 'skip'")
+    if AUTO_MODE:
+        final_candidates = candidates
+        print_info(f"\nAutomated mode: All {len(candidates)} candidates will be processed")
+    else:
+        print_header("Manual Review")
+        
+        final_candidates = []
+        for show in candidates:
+            while True:
+                response = input(f"Exclude '{show['title']}'? (yes/no/skip): ").strip().lower()
+                if response in ["yes", "y"]:
+                    save_exclusion(show["title"])
+                    exclusions.add(show["title"].lower())
+                    break
+                elif response in ["no", "n"]:
+                    final_candidates.append(show)
+                    break
+                elif response in ["skip", "s"]:
+                    print_info(f"Skipping '{show['title']}' for this run only")
+                    break
+                else:
+                    print("Please enter 'yes', 'no', or 'skip'")
     
     if not final_candidates:
         print_success("\nNo shows selected for deletion!")
@@ -508,25 +526,28 @@ def run_cleanup(config: dict, dry_run: bool = True):
     
     print_header(f"{'Test Results' if dry_run else 'Deletion Phase'}")
     
-    print(f"\n{Colors.BOLD}Shows to be deleted ({len(final_candidates)}):{Colors.ENDC}")
+    print(f"\nShows to be deleted ({len(final_candidates)}):")
     for show in final_candidates:
         print(f"  - {show['title']}")
     
     if dry_run:
-        print(f"\n{Colors.YELLOW}{Colors.BOLD}This was a DRY RUN - no changes were made.{Colors.ENDC}")
+        print(f"\nThis was a DRY RUN - no changes were made.")
         print("To perform actual deletion, run with --execute flag")
         return
     
-    confirm = input(f"\n{Colors.RED}Are you SURE you want to delete these {len(final_candidates)} shows? (type 'DELETE' to confirm): {Colors.ENDC}")
-    if confirm != "DELETE":
-        print_info("Deletion cancelled")
-        return
+    if not AUTO_MODE:
+        confirm = input(f"\nAre you SURE you want to delete these {len(final_candidates)} shows? (type 'DELETE' to confirm): ")
+        if confirm != "DELETE":
+            print_info("Deletion cancelled")
+            return
+    else:
+        print_info(f"Automated mode: Proceeding with deletion of {len(final_candidates)} shows")
     
     print_header("Executing Deletions")
     
     deleted_count = 0
     for show in final_candidates:
-        print(f"\n{Colors.BOLD}Processing: {show['title']}{Colors.ENDC}")
+        print(f"\nProcessing: {show['title']}")
         
         delete_from_plex(show["title"], config)
         
@@ -551,22 +572,26 @@ def run_cleanup(config: dict, dry_run: bool = True):
 def main():
     print_header("TV Show Cleanup Tool")
     
-    print(f"""
-{Colors.CYAN}This tool helps you clean up your TV show library by:{Colors.ENDC}
+    if AUTO_MODE:
+        print("Running in AUTOMATED mode (non-interactive)")
+        print("All configuration must be set via environment variables.\n")
+    else:
+        print(f"""
+This tool helps you clean up your TV show library by:
   1. Scanning your Sonarr library
   2. Identifying shows that haven't been watched recently
   3. Excluding shows you want to keep
   4. Safely removing unwanted shows from Plex and Sonarr
   5. Notifying original requesters via email
 
-{Colors.YELLOW}The tool will always run a DRY RUN first (no actual deletions)
-until you explicitly confirm with the --execute flag.{Colors.ENDC}
+The tool will always run a DRY RUN first (no actual deletions)
+until you explicitly confirm with the --execute flag.
 """)
     
     config = load_config()
     
     print(f"""
-{Colors.BOLD}Active Settings:{Colors.ENDC}
+Active Settings:
   - Skip shows added within: {config['SKIP_IF_ADDED_WITHIN_DAYS']} days
   - Skip shows watched within: {config['SKIP_IF_WATCHED_WITHIN_DAYS']} days
   - Deletion delay: {config['DELETION_DELAY_SECONDS']} seconds
@@ -574,16 +599,19 @@ until you explicitly confirm with the --execute flag.{Colors.ENDC}
   - Email notifications: {'Enabled' if config.get('SMTP_HOST') else 'Disabled'}
 """)
     
-    if "--execute" in sys.argv:
-        print(f"{Colors.RED}{Colors.BOLD}WARNING: Running in LIVE MODE - deletions will be permanent!{Colors.ENDC}")
-        confirm = input("Type 'CONTINUE' to proceed: ").strip()
-        if confirm != "CONTINUE":
-            print_info("Exiting...")
-            return
+    if EXECUTE_MODE:
+        if not AUTO_MODE:
+            print("WARNING: Running in LIVE MODE - deletions will be permanent!")
+            confirm = input("Type 'CONTINUE' to proceed: ").strip()
+            if confirm != "CONTINUE":
+                print_info("Exiting...")
+                return
+        else:
+            print("AUTOMATED LIVE MODE: Deletions will be executed without prompts")
         run_cleanup(config, dry_run=False)
     else:
-        print(f"{Colors.CYAN}Running in DRY RUN mode (safe - no changes will be made){Colors.ENDC}")
-        print(f"To execute deletions, run with: python cleanup.py --execute\n")
+        print("Running in DRY RUN mode (safe - no changes will be made)")
+        print("To execute deletions, run with: python cleanup.py --execute\n")
         run_cleanup(config, dry_run=True)
 
 

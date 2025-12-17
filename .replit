@@ -27,3 +27,7 @@ args = "python cleanup.py"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[deployment]
+deploymentTarget = "scheduled"
+run = ["python", "cleanup.py", "--auto", "--execute"]
