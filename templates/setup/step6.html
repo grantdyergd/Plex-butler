@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Setup - Cleanup Settings{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h4><i class="bi bi-tv me-2"></i>TV Show Cleanup Setup</h4>
+            </div>
+            <div class="card-body p-4">
+                <div class="wizard-steps">
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step active">6</div>
+                </div>
+                
+                <h5 class="text-center mb-4"><i class="bi bi-sliders me-2"></i>Cleanup Settings</h5>
+                <p class="text-muted text-center mb-4">Configure how the cleanup tool identifies shows to remove.</p>
+                
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="skip_added_days" class="form-label">Skip Recently Added Shows</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="skip_added_days" name="skip_added_days" 
+                                   value="{{ skip_added_days|default('90') }}" min="0">
+                            <span class="input-group-text bg-dark text-light border-secondary">days</span>
+                        </div>
+                        <div class="form-text">Shows added within this many days will be protected</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="skip_watched_days" class="form-label">Skip Recently Watched Shows</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="skip_watched_days" name="skip_watched_days" 
+                                   value="{{ skip_watched_days|default('180') }}" min="0">
+                            <span class="input-group-text bg-dark text-light border-secondary">days</span>
+                        </div>
+                        <div class="form-text">Shows watched within this many days will be protected</div>
+                    </div>
+                    <div class="mb-4">
+                        <label for="deletion_delay" class="form-label">Deletion Delay</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="deletion_delay" name="deletion_delay" 
+                                   value="{{ deletion_delay|default('2.0') }}" min="0" step="0.5">
+                            <span class="input-group-text bg-dark text-light border-secondary">seconds</span>
+                        </div>
+                        <div class="form-text">Pause between each deletion to prevent mistakes</div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <a href="{{ url_for('setup_step5') }}" class="btn btn-secondary">
+                            <i class="bi bi-arrow-left me-2"></i>Back
+                        </a>
+                        <button type="submit" class="btn btn-success flex-grow-1">
+                            <i class="bi bi-check-circle me-2"></i>Complete Setup
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Setup - Email Configuration{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h4><i class="bi bi-tv me-2"></i>TV Show Cleanup Setup</h4>
+            </div>
+            <div class="card-body p-4">
+                <div class="wizard-steps">
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step completed"><i class="bi bi-check"></i></div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step active">5</div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step">6</div>
+                </div>
+                
+                <h5 class="text-center mb-4"><i class="bi bi-envelope me-2"></i>Email Configuration (Optional)</h5>
+                <p class="text-muted text-center mb-4">Set up email notifications to alert requesters when shows are removed.</p>
+                
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-2"></i>
+                    This step is optional. Skip if you don't want email notifications.
+                </div>
+                
+                <form method="POST">
+                    <div class="row">
+                        <div class="col-md-8 mb-3">
+                            <label for="smtp_host" class="form-label">SMTP Host</label>
+                            <input type="text" class="form-control" id="smtp_host" name="smtp_host" 
+                                   value="{{ smtp_host|default('') }}" placeholder="smtp.gmail.com">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="smtp_port" class="form-label">Port</label>
+                            <input type="number" class="form-control" id="smtp_port" name="smtp_port" 
+                                   value="{{ smtp_port|default('587') }}" placeholder="587">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="smtp_user" class="form-label">SMTP Username</label>
+                        <input type="text" class="form-control" id="smtp_user" name="smtp_user" 
+                               value="{{ smtp_user|default('') }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="smtp_password" class="form-label">SMTP Password</label>
+                        <input type="password" class="form-control" id="smtp_password" name="smtp_password">
+                    </div>
+                    <div class="mb-4">
+                        <label for="smtp_from" class="form-label">From Email Address</label>
+                        <input type="email" class="form-control" id="smtp_from" name="smtp_from" 
+                               value="{{ smtp_from|default('') }}" placeholder="noreply@example.com">
+                    </div>
+                    <div class="d-flex gap-2">
+                        <a href="{{ url_for('setup_step4') }}" class="btn btn-secondary">
+                            <i class="bi bi-arrow-left me-2"></i>Back
+                        </a>
+                        <button type="submit" class="btn btn-primary flex-grow-1">
+                            Continue <i class="bi bi-arrow-right ms-2"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

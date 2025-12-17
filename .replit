@@ -21,13 +21,18 @@ args = "TV Show Cleanup"
 name = "TV Show Cleanup"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python cleanup.py"
-
-[workflows.workflow.metadata]
-outputType = "console"
+args = "python app.py"
+waitForPort = 5000
 
 [deployment]
-deploymentTarget = "scheduled"
-run = ["python", "cleanup.py", "--auto", "--execute"]
+deploymentTarget = "autoscale"
+run = ["gunicorn", "--bind=0.0.0.0:5000", "--reuse-port", "app:app"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Settings - TV Show Cleanup{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="bi bi-gear me-2"></i>Settings</h2>
+    </div>
+</div>
+
+<form method="POST">
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-hdd-rack me-2"></i>Sonarr</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="sonarr_url" class="form-label">URL</label>
+                        <input type="url" class="form-control" id="sonarr_url" name="sonarr_url" 
+                               value="{{ settings.sonarr_url }}" required>
+                    </div>
+                    <div class="mb-0">
+                        <label for="sonarr_api_key" class="form-label">API Key</label>
+                        <input type="password" class="form-control" id="sonarr_api_key" name="sonarr_api_key" 
+                               value="{{ settings.sonarr_api_key }}" required>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-play-circle me-2"></i>Plex</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="plex_url" class="form-label">URL</label>
+                        <input type="url" class="form-control" id="plex_url" name="plex_url" 
+                               value="{{ settings.plex_url }}" required>
+                    </div>
+                    <div class="mb-0">
+                        <label for="plex_token" class="form-label">Token</label>
+                        <input type="password" class="form-control" id="plex_token" name="plex_token" 
+                               value="{{ settings.plex_token }}" required>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-envelope-paper me-2"></i>Ombi (Optional)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="ombi_url" class="form-label">URL</label>
+                        <input type="url" class="form-control" id="ombi_url" name="ombi_url" 
+                               value="{{ settings.ombi_url }}">
+                    </div>
+                    <div class="mb-0">
+                        <label for="ombi_api_key" class="form-label">API Key</label>
+                        <input type="password" class="form-control" id="ombi_api_key" name="ombi_api_key" 
+                               value="{{ settings.ombi_api_key }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-envelope me-2"></i>Email (Optional)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-8 mb-3">
+                            <label for="smtp_host" class="form-label">SMTP Host</label>
+                            <input type="text" class="form-control" id="smtp_host" name="smtp_host" 
+                                   value="{{ settings.smtp_host }}">
+                        </div>
+                        <div class="col-4 mb-3">
+                            <label for="smtp_port" class="form-label">Port</label>
+                            <input type="number" class="form-control" id="smtp_port" name="smtp_port" 
+                                   value="{{ settings.smtp_port }}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="smtp_user" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="smtp_user" name="smtp_user" 
+                               value="{{ settings.smtp_user }}">
+                    </div>
+                    <div class="mb-3">
+                        <label for="smtp_password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="smtp_password" name="smtp_password">
+                    </div>
+                    <div class="mb-0">
+                        <label for="smtp_from" class="form-label">From Address</label>
+                        <input type="email" class="form-control" id="smtp_from" name="smtp_from" 
+                               value="{{ settings.smtp_from }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-sliders me-2"></i>Cleanup Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="skip_added_days" class="form-label">Skip Recently Added</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="skip_added_days" name="skip_added_days" 
+                                   value="{{ settings.skip_added_days }}" min="0">
+                            <span class="input-group-text bg-dark text-light border-secondary">days</span>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="skip_watched_days" class="form-label">Skip Recently Watched</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="skip_watched_days" name="skip_watched_days" 
+                                   value="{{ settings.skip_watched_days }}" min="0">
+                            <span class="input-group-text bg-dark text-light border-secondary">days</span>
+                        </div>
+                    </div>
+                    <div class="mb-0">
+                        <label for="deletion_delay" class="form-label">Deletion Delay</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="deletion_delay" name="deletion_delay" 
+                                   value="{{ settings.deletion_delay }}" min="0" step="0.5">
+                            <span class="input-group-text bg-dark text-light border-secondary">seconds</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row">
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-check-lg me-2"></i>Save Settings
+            </button>
+        </div>
+    </div>
+</form>
+{% endblock %}

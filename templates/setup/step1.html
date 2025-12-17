@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Setup - Create Account{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header text-center">
+                <h4><i class="bi bi-tv me-2"></i>TV Show Cleanup Setup</h4>
+            </div>
+            <div class="card-body p-4">
+                <div class="wizard-steps">
+                    <div class="wizard-step active">1</div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step">2</div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step">3</div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step">4</div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step">5</div>
+                    <div class="wizard-line"></div>
+                    <div class="wizard-step">6</div>
+                </div>
+                
+                <h5 class="text-center mb-4"><i class="bi bi-person-plus me-2"></i>Create Your Account</h5>
+                <p class="text-muted text-center mb-4">First, let's create an admin account to secure your cleanup tool.</p>
+                
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" name="username" 
+                               value="{{ username|default('') }}" required minlength="3" autofocus>
+                        <div class="form-text">At least 3 characters</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required minlength="6">
+                        <div class="form-text">At least 6 characters</div>
+                    </div>
+                    <div class="mb-4">
+                        <label for="confirm_password" class="form-label">Confirm Password</label>
+                        <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        Continue <i class="bi bi-arrow-right ms-2"></i>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

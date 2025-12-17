@@ -1,12 +1,15 @@
 # TV Show Cleanup Tool
 
 ## Overview
-An automated TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool intelligently identifies shows that can be safely deleted based on watch history, age, and exclusion lists, while notifying original requesters via email.
+A web-based TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool features a setup wizard, user authentication, and a dashboard to intelligently identify and remove unwatched shows while respecting exclusions and notifying original requesters via email.
 
 ## Features
+- Web-based setup wizard for easy configuration
+- Username/password authentication for secure access
+- Dashboard to run and monitor cleanup jobs
 - Scans Sonarr library for all TV series
 - Filters shows based on configurable criteria (added date, watch history, exclusion list)
-- Interactive review mode with manual exclusion prompts
+- Interactive exclusion list management
 - Dry-run mode for safe testing before actual deletion
 - Deletes from both Plex and Sonarr with file cleanup
 - Email notifications to Ombi requesters
@@ -15,77 +18,84 @@ An automated TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This too
 ## Project Structure
 ```
 .
-├── cleanup.py          # Main cleanup script
+├── app.py              # Flask web application
+├── cleanup_web.py      # Cleanup logic for web integration
+├── cleanup.py          # CLI cleanup script (legacy)
+├── templates/          # HTML templates
+│   ├── base.html
+│   ├── login.html
+│   ├── dashboard.html
+│   ├── settings.html
+│   ├── exclusions.html
+│   └── setup/          # Setup wizard templates
 ├── excluded_shows.txt  # Persistent exclusion list
-├── .env               # Environment configuration (create this)
-└── replit.md          # This documentation
+└── replit.md           # This documentation
 ```
 
-## Configuration
+## Getting Started
 
-### Required Environment Variables
-- `SONARR_URL` - Sonarr server URL (e.g., http://localhost:8989)
-- `SONARR_API_KEY` - Sonarr API key (Settings > General > Security)
-- `PLEX_URL` - Plex server URL (e.g., http://localhost:32400)
-- `PLEX_TOKEN` - Plex authentication token
+### First Run
+1. Access the web interface
+2. Complete the setup wizard:
+   - Create your admin username and password
+   - Enter your Sonarr URL and API key
+   - Enter your Plex URL and token
+   - Optionally configure Ombi for requester lookup
+   - Optionally configure email notifications
+   - Set cleanup parameters (days thresholds)
+3. Log in with your credentials
+4. Use the dashboard to run cleanup jobs
 
-### Optional Environment Variables
-- `OMBI_URL` - Ombi server URL
-- `OMBI_API_KEY` - Ombi API key
-- `SMTP_HOST` - SMTP server for email notifications
-- `SMTP_PORT` - SMTP port (default: 587)
-- `SMTP_USER` - SMTP username
-- `SMTP_PASSWORD` - SMTP password
-- `SMTP_FROM` - From email address
+### Configuration Values Needed
+- **Sonarr URL** - Your Sonarr server URL (e.g., http://192.168.1.100:8989)
+- **Sonarr API Key** - Found in Sonarr: Settings > General > Security
+- **Plex URL** - Your Plex server URL (e.g., http://192.168.1.100:32400)
+- **Plex Token** - Your Plex authentication token
 
-### Configurable Parameters
-- `SKIP_IF_ADDED_WITHIN_DAYS` - Skip recently added shows (default: 90)
-- `SKIP_IF_WATCHED_WITHIN_DAYS` - Skip recently watched shows (default: 180)
-- `DELETION_DELAY_SECONDS` - Delay between deletions (default: 2.0)
+### Optional Configuration
+- **Ombi URL** - Ombi server URL for requester tracking
+- **Ombi API Key** - Ombi API key
+- **SMTP Settings** - For email notifications to requesters
 
 ## Usage
 
-### First Run Setup
-When you run the tool for the first time, it will prompt you for any missing configuration:
-- Sonarr URL and API key
-- Plex URL and token
-- Optionally: Ombi and SMTP settings for requester notifications
+### Dashboard
+- **Dry Run**: Scans library and shows what would be deleted without making changes
+- **Execute**: Actually deletes shows after confirmation
 
-You can choose to save these credentials to a `.env` file for future runs.
+### Exclusion List
+Add show titles to protect them from deletion. Managed via the web interface.
 
-### Dry Run (Safe Test Mode)
+### Settings
+All configuration can be updated via the Settings page after initial setup.
+
+## CLI Usage (Legacy)
+The command-line interface is still available for automated/scheduled use:
+
 ```bash
-python cleanup.py
+python cleanup.py                    # Interactive dry run
+python cleanup.py --execute          # Interactive with actual deletions
+python cleanup.py --auto             # Automated dry run (for scheduled jobs)
+python cleanup.py --auto --execute   # Automated with actual deletions
 ```
-This mode shows what would be deleted without making any changes.
 
-### Execute Deletions
-```bash
-python cleanup.py --execute
-```
-Only run this after reviewing the dry run results.
-
-### Automated Mode (for Scheduled Deployments)
-```bash
-python cleanup.py --auto              # Automated dry run
-python cleanup.py --auto --execute    # Automated with deletions
-```
-In automated mode:
-- All configuration must be set via environment variables/secrets
-- No interactive prompts - the script runs unattended
-- Uses exclusion list only (no manual review per show)
-
-## Exclusion List
-Add show titles to `excluded_shows.txt` (one per line) to permanently protect them from deletion. Lines starting with `#` are comments.
+## Environment Variables
+For deployment, the following environment variables should be set:
+- `DATABASE_URL` - PostgreSQL database connection (auto-configured on Replit)
+- `SESSION_SECRET` - Session encryption key
 
 ## How It Works
-1. Fetches all series from Sonarr
-2. Gets watch history from Plex (uses TVDB IDs for reliable matching)
-3. Filters out protected shows (recently added, recently watched, in exclusion list)
-4. Shows deletion candidates and prompts for manual review
-5. On --execute: Deletes from both Plex and Sonarr, notifies requesters via email
+1. User completes setup wizard with credentials
+2. Dashboard connects to Sonarr to fetch all TV series
+3. Gets watch history from Plex (uses TVDB IDs for reliable matching)
+4. Filters out protected shows (recently added, recently watched, in exclusion list)
+5. Shows deletion candidates in dashboard
+6. On execute: Deletes from both Plex and Sonarr, notifies requesters via email
 
 ## Recent Changes
-- Added interactive credential prompts with .env persistence (Dec 2025)
+- Added web interface with setup wizard (Dec 2025)
+- Added user authentication
+- Added dashboard for running and monitoring cleanup jobs
+- Added settings page for configuration management
+- Added exclusion list management UI
 - Improved Plex matching using TVDB IDs instead of titles only
-- Initial creation (Dec 2025)
