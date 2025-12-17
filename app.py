@@ -108,14 +108,19 @@ def setup_step1():
                 flash(error, 'error')
             return render_template('setup/step1.html', username=username)
         
-        user = User(username=username)
-        user.set_password(password)
-        db.session.add(user)
-        db.session.commit()
-        
-        login_user(user)
-        flash('Account created successfully!', 'success')
-        return redirect(url_for('setup_step2'))
+        try:
+            user = User(username=username)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+            
+            login_user(user)
+            flash('Account created successfully!', 'success')
+            return redirect(url_for('setup_step2'))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error creating account: {str(e)}', 'error')
+            return render_template('setup/step1.html', username=username)
     
     return render_template('setup/step1.html')
 
