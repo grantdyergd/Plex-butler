@@ -174,11 +174,18 @@ def get_plex_watch_history(config: dict, log: Callable) -> dict:
     watch_history = {}
     
     try:
-        plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"])
+        plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=60)
         
         for section in plex.library.sections():
             if section.type == "show":
-                for show in section.all():
+                shows = section.all()
+                total_shows = len(shows)
+                log(f"[INFO] Processing {total_shows} shows from Plex library '{section.title}'...")
+                
+                for i, show in enumerate(shows):
+                    if (i + 1) % 25 == 0:
+                        log(f"[INFO] Progress: {i + 1}/{total_shows} shows processed...")
+                    
                     last_watched = None
                     tvdb_id = None
                     
