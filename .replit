@@ -30,8 +30,8 @@ args = "python app.py"
 waitForPort = 5000
 
 [deployment]
-deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind=0.0.0.0:5000", "--reuse-port", "app:app"]
+deploymentTarget = "scheduled"
+run = ["python", "cleanup.py", "--auto"]
 
 [[ports]]
 localPort = 5000
