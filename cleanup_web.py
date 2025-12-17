@@ -20,6 +20,8 @@ def run_cleanup_with_settings(get_setting: Callable, dry_run: bool = True, log_c
             log_callback(message)
         print(message)
     
+    test_mode_limit = int(get_setting('TEST_MODE_LIMIT', '0') or '0')
+    
     config = {
         'SONARR_URL': get_setting('SONARR_URL', ''),
         'SONARR_API_KEY': get_setting('SONARR_API_KEY', ''),
@@ -38,7 +40,10 @@ def run_cleanup_with_settings(get_setting: Callable, dry_run: bool = True, log_c
     }
     
     mode = "DRY RUN" if dry_run else "LIVE MODE"
-    log(f"[INFO] Starting cleanup in {mode}")
+    if test_mode_limit > 0:
+        log(f"[INFO] Starting cleanup in {mode} (TEST MODE: limited to {test_mode_limit} shows)")
+    else:
+        log(f"[INFO] Starting cleanup in {mode}")
     
     cutoff_added = datetime.now() - timedelta(days=config['SKIP_IF_ADDED_WITHIN_DAYS'])
     cutoff_watched = datetime.now() - timedelta(days=config['SKIP_IF_WATCHED_WITHIN_DAYS'])
@@ -51,7 +56,11 @@ def run_cleanup_with_settings(get_setting: Callable, dry_run: bool = True, log_c
         log("[ERROR] No series found in Sonarr")
         return {'error': 'No series found in Sonarr'}
     
-    watch_history = get_plex_watch_history(config, log)
+    if test_mode_limit > 0:
+        series_list = series_list[:test_mode_limit]
+        log(f"[INFO] Test mode: limiting to first {test_mode_limit} shows")
+    
+    watch_history = get_plex_watch_history(config, log, test_mode_limit)
     ombi_requesters = get_ombi_requests(config, log)
     
     log("[INFO] Analyzing shows...")
@@ -169,7 +178,7 @@ def extract_tvdb_id_from_guid(guid: str) -> Optional[int]:
     return None
 
 
-def get_plex_watch_history(config: dict, log: Callable) -> dict:
+def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
     log("[INFO] Fetching watch history from Plex...")
     watch_history = {}
     
@@ -180,7 +189,11 @@ def get_plex_watch_history(config: dict, log: Callable) -> dict:
             if section.type == "show":
                 shows = section.all()
                 total_shows = len(shows)
-                log(f"[INFO] Processing {total_shows} shows from Plex library '{section.title}'...")
+                if limit > 0:
+                    shows = shows[:limit]
+                    log(f"[INFO] Processing {limit} shows from Plex library '{section.title}' (test mode)...")
+                else:
+                    log(f"[INFO] Processing {total_shows} shows from Plex library '{section.title}'...")
                 
                 for i, show in enumerate(shows):
                     if (i + 1) % 25 == 0:

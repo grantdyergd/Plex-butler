@@ -324,6 +324,7 @@ def settings_page():
         set_setting('SKIP_IF_ADDED_WITHIN_DAYS', request.form.get('skip_added_days', '90').strip())
         set_setting('SKIP_IF_WATCHED_WITHIN_DAYS', request.form.get('skip_watched_days', '180').strip())
         set_setting('DELETION_DELAY_SECONDS', request.form.get('deletion_delay', '2.0').strip())
+        set_setting('TEST_MODE_LIMIT', request.form.get('test_mode_limit', '0').strip())
         
         flash('Settings saved successfully!', 'success')
         return redirect(url_for('settings_page'))
@@ -342,6 +343,7 @@ def settings_page():
         'skip_added_days': get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90'),
         'skip_watched_days': get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180'),
         'deletion_delay': get_setting('DELETION_DELAY_SECONDS', '2.0'),
+        'test_mode_limit': get_setting('TEST_MODE_LIMIT', '0'),
     }
     return render_template('settings.html', settings=settings)
 
