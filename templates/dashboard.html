@@ -312,6 +312,8 @@ function renderCandidates() {
     const countSpan = document.getElementById('candidate-count');
     const totalSizeSpan = document.getElementById('total-size');
     
+    console.log('renderCandidates called, candidates:', candidates.length);
+    
     countSpan.textContent = candidates.length;
     const totalBytes = candidates.reduce((sum, s) => sum + (s.size_bytes || 0), 0);
     totalSizeSpan.textContent = formatSize(totalBytes);
@@ -323,6 +325,8 @@ function renderCandidates() {
     }
     
     section.style.display = 'block';
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    console.log('Section displayed:', section.style.display);
     container.innerHTML = '';
     
     document.querySelectorAll('.sortable').forEach(th => {
