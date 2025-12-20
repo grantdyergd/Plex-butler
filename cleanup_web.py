@@ -70,14 +70,17 @@ def extract_tvdb_id_from_guid(guid: str) -> Optional[int]:
 
 
 def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
-    """Get watch history from Plex using bulk history fetch for speed."""
+    """Get watch history from Plex using bulk history fetch for speed.
+    
+    Fetches watch history for ALL users on the Plex server, not just the token owner.
+    """
     watch_history = {}
     
     if not config.get("PLEX_URL") or not config.get("PLEX_TOKEN"):
         log("[WARNING] Plex not configured - using title matching only")
         return {}
     
-    log("[INFO] Fetching watch history from Plex (optimized)...")
+    log("[INFO] Fetching watch history from Plex (all users)...")
     
     try:
         plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=60)
@@ -88,11 +91,11 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
         
         for section in plex.library.sections():
             if section.type == "show":
-                log(f"[INFO] Fetching history from '{section.title}'...")
+                log(f"[INFO] Fetching history from '{section.title}' (all users)...")
                 
                 try:
-                    history = section.history(maxresults=50000)
-                    log(f"[INFO] Processing {len(history)} history entries...")
+                    history = section.history(maxresults=50000, includeExternal=True)
+                    log(f"[INFO] Processing {len(history)} history entries from all users...")
                     
                     for item in history:
                         try:
