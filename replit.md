@@ -19,6 +19,7 @@ A web-based TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool
 - Deletes from both Plex and Sonarr with file cleanup
 - Email notifications to Ombi requesters
 - Slow, deliberate deletion with delays to prevent mistakes
+- Deletion history tracking with search and re-add links to Sonarr
 
 ## Project Structure
 ```
