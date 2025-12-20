@@ -90,7 +90,7 @@ class MovieExclusion(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 def is_setup_complete():
@@ -454,8 +454,8 @@ def exclusions():
                 flash(f"Added '{movie_title}{year_str}' to movie exclusions", 'success')
         
         elif action == 'remove_movie':
-            movie_id = request.form.get('movie_id')
-            if movie_id:
+            movie_id = request.form.get('movie_id', '').strip()
+            if movie_id and movie_id.isdigit():
                 exclusion = MovieExclusion.query.get(int(movie_id))
                 if exclusion:
                     db.session.delete(exclusion)
@@ -791,7 +791,7 @@ def test_email_api():
     
     config = {
         'SMTP_HOST': get_setting('SMTP_HOST', ''),
-        'SMTP_PORT': int(get_setting('SMTP_PORT', '587') or '587'),
+        'SMTP_PORT': int(get_setting('SMTP_PORT', '587') or '587') if get_setting('SMTP_PORT', '587') else 587,
         'SMTP_USER': get_setting('SMTP_USER', ''),
         'SMTP_PASSWORD': os.environ.get('SMTP_PASSWORD', ''),
         'SMTP_FROM': get_setting('SMTP_FROM', ''),
