@@ -417,6 +417,35 @@ def get_all_shows():
     return jsonify(all_shows)
 
 
+@app.route('/api/exclusions/add', methods=['POST'])
+@login_required
+def add_exclusion_api():
+    """Add a show to exclusions immediately via API."""
+    data = request.get_json()
+    title = data.get('title', '').strip() if data else ''
+    
+    if not title:
+        return jsonify({'success': False, 'error': 'No title provided'}), 400
+    
+    exclusion_file = 'excluded_shows.txt'
+    
+    existing = set()
+    if os.path.exists(exclusion_file):
+        with open(exclusion_file, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    existing.add(line.lower())
+    
+    if title.lower() in existing:
+        return jsonify({'success': True, 'message': 'Already excluded'})
+    
+    with open(exclusion_file, 'a') as f:
+        f.write(f"{title}\n")
+    
+    return jsonify({'success': True, 'message': f'Added "{title}" to exclusion list'})
+
+
 @app.route('/api/cleanup/scan', methods=['POST'])
 @login_required
 def scan_cleanup_api():

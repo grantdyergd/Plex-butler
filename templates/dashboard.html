@@ -100,6 +100,17 @@
                             <i class="bi bi-x-circle me-1"></i>Clear
                         </button>
                     </div>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-danger" onclick="selectByPriority('High', 'delete')" title="Select all High priority for deletion">
+                            High
+                        </button>
+                        <button class="btn btn-sm btn-warning text-dark" onclick="selectByPriority('Medium', 'delete')" title="Select all Medium priority for deletion">
+                            Med
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="selectByPriority('Low', 'delete')" title="Select all Low priority for deletion">
+                            Low
+                        </button>
+                    </div>
                     <button class="btn btn-sm btn-outline-info" onclick="exportCSV()">
                         <i class="bi bi-download me-1"></i>Export CSV
                     </button>
@@ -347,8 +358,10 @@ function renderCandidates() {
     
     candidates.forEach((show, index) => {
         const row = document.createElement('tr');
+        row.id = `row-${index}`;
         const priorityLabel = show.priority_label || 'Low';
         const priorityReasons = (show.priority_reasons || []).join(', ');
+        const escapedTitle = escapeHtml(show.title).replace(/'/g, "\\'");
         
         let priorityBadgeClass = 'bg-secondary';
         if (priorityLabel === 'High') priorityBadgeClass = 'bg-danger';
@@ -371,10 +384,11 @@ function renderCandidates() {
             <td>
                 <div class="btn-group btn-group-sm" role="group">
                     <input type="radio" class="btn-check" name="action-${index}" id="delete-${index}" value="delete" autocomplete="off">
-                    <label class="btn btn-outline-danger" for="delete-${index}" title="Delete"><i class="bi bi-trash"></i></label>
+                    <label class="btn btn-outline-danger" for="delete-${index}" title="Mark for Delete"><i class="bi bi-trash"></i></label>
                     
-                    <input type="radio" class="btn-check" name="action-${index}" id="exclude-${index}" value="exclude" autocomplete="off">
-                    <label class="btn btn-outline-warning" for="exclude-${index}" title="Exclude"><i class="bi bi-shield-plus"></i></label>
+                    <button type="button" class="btn btn-warning" onclick="excludeShowImmediately(${index}, '${escapedTitle}')" title="Exclude Now">
+                        <i class="bi bi-shield-plus"></i>
+                    </button>
                     
                     <input type="radio" class="btn-check" name="action-${index}" id="ignore-${index}" value="ignore" autocomplete="off" checked>
                     <label class="btn btn-outline-secondary" for="ignore-${index}" title="Ignore"><i class="bi bi-dash"></i></label>
@@ -389,6 +403,46 @@ function selectAllAction(action) {
     candidates.forEach((_, index) => {
         const radio = document.getElementById(`${action}-${index}`);
         if (radio) radio.checked = true;
+    });
+}
+
+function selectByPriority(priority, action) {
+    candidates.forEach((show, index) => {
+        if (show.priority_label === priority) {
+            const radio = document.getElementById(`${action}-${index}`);
+            if (radio) radio.checked = true;
+        }
+    });
+    const count = candidates.filter(s => s.priority_label === priority).length;
+    appendLog(`[INFO] Selected ${count} ${priority} priority shows for ${action}`, 'info');
+}
+
+function excludeShowImmediately(index, title) {
+    const row = document.getElementById(`row-${index}`);
+    if (row) {
+        row.style.opacity = '0.5';
+        row.querySelector('.btn-group').innerHTML = '<span class="badge bg-warning">Excluding...</span>';
+    }
+    
+    fetch('/api/exclusions/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: title })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            appendLog(`[SUCCESS] Added "${title}" to exclusion list`, 'success');
+            candidates = candidates.filter((_, i) => i !== index);
+            renderCandidates();
+        } else {
+            appendLog(`[ERROR] Failed to exclude: ${data.error || 'Unknown error'}`, 'error');
+            if (row) row.style.opacity = '1';
+        }
+    })
+    .catch(err => {
+        appendLog(`[ERROR] Failed to exclude: ${err.message}`, 'error');
+        if (row) row.style.opacity = '1';
     });
 }
 
