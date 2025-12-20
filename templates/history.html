@@ -1,20 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Deletion History - TV Show Cleanup{% endblock %}
+{% block title %}Deletion History - Media Cleanup{% endblock %}
 
 {% block content %}
 <div class="row mb-4">
     <div class="col-12">
         <h2><i class="bi bi-clock-history me-2"></i>Deletion History</h2>
-        <p class="text-muted">A record of all shows that have been removed from your library.</p>
+        <p class="text-muted">A record of all media that has been removed from your library.</p>
     </div>
 </div>
 
 {% if deletions %}
 <div class="row mb-3">
-    <div class="col-md-6">
+    <div class="col-md-4">
         <input type="text" class="form-control" id="search-input" placeholder="Search by title...">
     </div>
-    <div class="col-md-6 text-end">
+    <div class="col-md-4">
+        <select class="form-select" id="filter-type" onchange="filterByType()">
+            <option value="">All Media</option>
+            <option value="tv">TV Shows</option>
+            <option value="movie">Movies</option>
+        </select>
+    </div>
+    <div class="col-md-4 text-end">
         <span class="badge bg-secondary fs-6">{{ deletions|length }} total deletions</span>
     </div>
 </div>
@@ -25,6 +32,7 @@
             <table class="table table-dark table-hover mb-0">
                 <thead>
                     <tr>
+                        <th>Type</th>
                         <th>Title</th>
                         <th>Deleted</th>
                         <th>Size</th>
@@ -35,9 +43,19 @@
                 </thead>
                 <tbody id="history-table">
                     {% for d in deletions %}
-                    <tr class="history-row" data-title="{{ d.title|lower }}">
+                    <tr class="history-row" data-title="{{ d.title|lower }}" data-type="{{ d.media_type or 'tv' }}">
+                        <td>
+                            {% if d.media_type == 'movie' %}
+                            <span class="badge bg-primary"><i class="bi bi-film me-1"></i>Movie</span>
+                            {% else %}
+                            <span class="badge bg-info"><i class="bi bi-tv me-1"></i>TV</span>
+                            {% endif %}
+                        </td>
                         <td>
                             <strong>{{ d.title }}</strong>
+                            {% if d.year %}
+                            <small class="text-muted">({{ d.year }})</small>
+                            {% endif %}
                             {% if d.priority_label %}
                             <br><span class="badge {% if d.priority_label == 'High' %}bg-danger{% elif d.priority_label == 'Medium' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ d.priority_label }}</span>
                             {% endif %}
@@ -66,27 +84,47 @@
                             {% else %}
                             <span class="badge bg-danger"><i class="bi bi-trash me-1"></i>Deleted</span>
                             {% endif %}
-                            {% if d.deleted_from_sonarr_db %}
-                            <br><small class="text-muted">Removed from Sonarr DB</small>
+                            {% if d.deleted_from_sonarr_db or d.deleted_from_radarr_db %}
+                            <br><small class="text-muted">Removed from DB</small>
                             {% endif %}
                         </td>
                         <td>
-                            {% if sonarr_url and d.tvdb_id %}
-                            <a href="{{ sonarr_url }}/add/new?term=tvdb:{{ d.tvdb_id }}" 
-                               target="_blank" 
-                               class="btn btn-sm btn-outline-success"
-                               title="Re-add in Sonarr">
-                                <i class="bi bi-plus-circle me-1"></i>Re-add
-                            </a>
-                            {% elif sonarr_url %}
-                            <a href="{{ sonarr_url }}/add/new?term={{ d.title|urlencode }}" 
-                               target="_blank" 
-                               class="btn btn-sm btn-outline-success"
-                               title="Search in Sonarr">
-                                <i class="bi bi-search me-1"></i>Search
-                            </a>
+                            {% if d.media_type == 'movie' %}
+                                {% if radarr_url and d.tmdb_id %}
+                                <a href="{{ radarr_url }}/add/new?term=tmdb:{{ d.tmdb_id }}" 
+                                   target="_blank" 
+                                   class="btn btn-sm btn-outline-success"
+                                   title="Re-add in Radarr">
+                                    <i class="bi bi-plus-circle me-1"></i>Re-add
+                                </a>
+                                {% elif radarr_url %}
+                                <a href="{{ radarr_url }}/add/new?term={{ d.title|urlencode }}" 
+                                   target="_blank" 
+                                   class="btn btn-sm btn-outline-success"
+                                   title="Search in Radarr">
+                                    <i class="bi bi-search me-1"></i>Search
+                                </a>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
                             {% else %}
-                            <span class="text-muted">-</span>
+                                {% if sonarr_url and d.tvdb_id %}
+                                <a href="{{ sonarr_url }}/add/new?term=tvdb:{{ d.tvdb_id }}" 
+                                   target="_blank" 
+                                   class="btn btn-sm btn-outline-success"
+                                   title="Re-add in Sonarr">
+                                    <i class="bi bi-plus-circle me-1"></i>Re-add
+                                </a>
+                                {% elif sonarr_url %}
+                                <a href="{{ sonarr_url }}/add/new?term={{ d.title|urlencode }}" 
+                                   target="_blank" 
+                                   class="btn btn-sm btn-outline-success"
+                                   title="Search in Sonarr">
+                                    <i class="bi bi-search me-1"></i>Search
+                                </a>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
                             {% endif %}
                         </td>
                     </tr>
@@ -111,12 +149,26 @@
 {% endif %}
 
 <script>
-document.getElementById('search-input')?.addEventListener('input', function(e) {
-    const searchTerm = e.target.value.toLowerCase();
+document.getElementById('search-input')?.addEventListener('input', filterRows);
+
+function filterRows() {
+    const searchTerm = (document.getElementById('search-input')?.value || '').toLowerCase();
+    const typeFilter = document.getElementById('filter-type')?.value || '';
+    
     document.querySelectorAll('.history-row').forEach(row => {
         const title = row.dataset.title;
-        row.style.display = title.includes(searchTerm) ? '' : 'none';
+        const type = row.dataset.type;
+        
+        let show = true;
+        if (searchTerm && !title.includes(searchTerm)) show = false;
+        if (typeFilter && type !== typeFilter) show = false;
+        
+        row.style.display = show ? '' : 'none';
     });
-});
+}
+
+function filterByType() {
+    filterRows();
+}
 </script>
 {% endblock %}
