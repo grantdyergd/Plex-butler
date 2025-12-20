@@ -561,17 +561,47 @@ function excludeShowImmediately(index, title) {
     .then(data => {
         if (data.success) {
             appendLog(`[SUCCESS] Added "${title}" to exclusion list`, 'success');
-            candidates = candidates.filter((_, i) => i !== index);
-            renderCandidates();
+            // Remove the row immediately with animation
+            if (row) {
+                row.style.transition = 'opacity 0.3s';
+                row.style.opacity = '0';
+                setTimeout(() => {
+                    // Remove from candidates array and re-render
+                    candidates = candidates.filter((_, i) => i !== index);
+                    renderCandidates();
+                }, 300);
+            } else {
+                candidates = candidates.filter((_, i) => i !== index);
+                renderCandidates();
+            }
         } else {
             appendLog(`[ERROR] Failed to exclude: ${data.error || 'Unknown error'}`, 'error');
-            if (row) row.style.opacity = '1';
+            if (row) {
+                row.style.opacity = '1';
+                row.querySelector('.btn-group').innerHTML = rebuildButtonGroup(index, title);
+            }
         }
     })
     .catch(err => {
         appendLog(`[ERROR] Failed to exclude: ${err.message}`, 'error');
-        if (row) row.style.opacity = '1';
+        if (row) {
+            row.style.opacity = '1';
+            row.querySelector('.btn-group').innerHTML = rebuildButtonGroup(index, title);
+        }
     });
+}
+
+function rebuildButtonGroup(index, title) {
+    const escapedTitle = escapeHtml(title).replace(/'/g, "\\'");
+    return `
+        <input type="radio" class="btn-check" name="action-${index}" id="delete-${index}" value="delete" autocomplete="off">
+        <label class="btn btn-outline-danger" for="delete-${index}" title="Mark for Delete"><i class="bi bi-trash"></i></label>
+        <button type="button" class="btn btn-warning" onclick="excludeShowImmediately(${index}, '${escapedTitle}')" title="Exclude Now">
+            <i class="bi bi-shield-plus"></i>
+        </button>
+        <input type="radio" class="btn-check" name="action-${index}" id="ignore-${index}" value="ignore" autocomplete="off" checked>
+        <label class="btn btn-outline-secondary" for="ignore-${index}" title="Ignore"><i class="bi bi-dash"></i></label>
+    `;
 }
 
 function escapeHtml(text) {
