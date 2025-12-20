@@ -1,38 +1,42 @@
-# TV Show Cleanup Tool
+# Media Cleanup Tool
 
 ## Overview
-A web-based TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool features a setup wizard, user authentication, and a dashboard to intelligently identify and remove unwatched shows while respecting exclusions and notifying original requesters via email.
+A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. This tool features a setup wizard, user authentication, and separate dashboards for TV shows and movies to intelligently identify and remove unwatched media while respecting exclusions and notifying original requesters via email.
 
 ## Features
 - Web-based setup wizard for easy configuration
 - Username/password authentication for secure access
-- Dashboard to run and monitor cleanup jobs
+- **Separate dashboards for TV Shows and Movies**
 - Scans Sonarr library for all TV series
+- **Scans Radarr library for all movies**
 - Checks watch history across ALL Plex users (not just admin)
-- Filters shows based on configurable criteria (added date, watch history, exclusion list)
-- Interactive exclusion list management
-- Rich data display: size, episode count, view count, monitored status
+- Filters media based on configurable criteria (added date, watch history, exclusion list)
+- Interactive exclusion list management (separate lists for TV and Movies)
+- Rich data display: size, episode count/runtime, view count, monitored status
 - Sortable columns (by status, size, title, dates, etc.)
-- Warnings for large shows (>50GB) and continuing series
+- Warnings for large media (>50GB)
 - CSV export of candidates for offline review
 - Quarantine mode: move files to trash folder instead of deleting
-- Deletes from both Plex and Sonarr with file cleanup
+- Deletes from both Plex and Sonarr/Radarr with file cleanup
 - Email notifications to Ombi requesters
 - Slow, deliberate deletion with delays to prevent mistakes
-- Deletion history tracking with search and re-add links to Sonarr
+- Deletion history tracking with search, filter by type, and re-add links
 
 ## Project Structure
 ```
 .
 ├── app.py              # Flask web application
-├── cleanup_web.py      # Cleanup logic for web integration
+├── cleanup_web.py      # TV show cleanup logic for web integration
+├── cleanup_movies.py   # Movie cleanup logic for Radarr integration
 ├── cleanup.py          # CLI cleanup script (legacy)
 ├── templates/          # HTML templates
 │   ├── base.html
 │   ├── login.html
-│   ├── dashboard.html
+│   ├── dashboard.html  # TV Shows dashboard
+│   ├── movies.html     # Movies dashboard
 │   ├── settings.html
-│   ├── exclusions.html
+│   ├── exclusions.html # Tabbed TV/Movies exclusions
+│   ├── history.html    # Deletion history with type filter
 │   └── setup/          # Setup wizard templates
 ├── excluded_shows.txt  # Persistent exclusion list
 └── replit.md           # This documentation
@@ -55,6 +59,8 @@ A web-based TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool
 ### Configuration Values Needed
 - **Sonarr URL** - Your Sonarr server URL (e.g., http://192.168.1.100:8989)
 - **Sonarr API Key** - Found in Sonarr: Settings > General > Security
+- **Radarr URL** - Your Radarr server URL (e.g., http://192.168.1.100:7878)
+- **Radarr API Key** - Found in Radarr: Settings > General > Security
 - **Plex URL** - Your Plex server URL (e.g., http://192.168.1.100:32400)
 - **Plex Token** - Your Plex authentication token
 
