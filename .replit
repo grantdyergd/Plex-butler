@@ -15,19 +15,19 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "TV Show Cleanup"
+args = "Media Scrubber"
 
 [[workflows.workflow]]
-name = "TV Show Cleanup"
+name = "Media Scrubber"
 author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "python app.py"
 waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [deployment]
 deploymentTarget = "autoscale"

@@ -1,0 +1,615 @@
+{% extends "base.html" %}
+{% block title %}Media Scrubber{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 text-center">
+        <h2><i class="bi bi-broom me-2"></i>Media Scrubber</h2>
+        <p class="text-muted">Clean up your Plex library by removing unwatched TV shows and movies</p>
+    </div>
+</div>
+
+<ul class="nav nav-tabs nav-justified mb-4" id="mediaTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tv-tab" data-bs-toggle="tab" data-bs-target="#tv-pane" type="button" role="tab">
+            <i class="bi bi-tv me-2"></i>TV Shows
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="movies-tab" data-bs-toggle="tab" data-bs-target="#movies-pane" type="button" role="tab">
+            <i class="bi bi-film me-2"></i>Movies
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="mediaTabContent">
+    <div class="tab-pane fade show active" id="tv-pane" role="tabpanel">
+        <div class="row mb-4">
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-hdd-rack display-4 text-info mb-3"></i>
+                        <h5>Sonarr</h5>
+                        <p class="text-muted small mb-0">{{ settings.sonarr_url or 'Not configured' }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-play-circle display-4 text-warning mb-3"></i>
+                        <h5>Plex</h5>
+                        <p class="text-muted small mb-0">{{ settings.plex_url or 'Not configured' }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-envelope-paper display-4 text-success mb-3"></i>
+                        <h5>Ombi</h5>
+                        <p class="text-muted small mb-0">{{ settings.ombi_url or 'Not configured' }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Protection Rules</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <i class="bi bi-calendar-plus text-info me-2"></i>
+                                Skip shows added within <strong>{{ settings.skip_added_days }}</strong> days
+                            </li>
+                            <li class="mb-2">
+                                <i class="bi bi-eye text-warning me-2"></i>
+                                Skip shows watched within <strong>{{ settings.skip_watched_days }}</strong> days
+                            </li>
+                            <li>
+                                <i class="bi bi-list-check text-success me-2"></i>
+                                Skip shows in the <a href="{{ url_for('exclusions') }}">exclusion list</a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-search me-2"></i>Scan TV Library</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Scan your TV library to find shows eligible for cleanup.</p>
+                        <button id="btn-scan-tv" class="btn btn-primary w-100" onclick="startTVScan()">
+                            <i class="bi bi-search me-2"></i>Scan for TV Candidates
+                        </button>
+                        <div id="tv-status-badge" class="mt-3" style="display: none;">
+                            <span class="badge bg-info">
+                                <i class="bi bi-hourglass-split me-1"></i>
+                                <span id="tv-status-text">Scanning...</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tv-candidates-section" class="row mb-4" style="display: none;">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>TV Deletion Candidates (<span id="tv-candidate-count">0</span>) - <span id="tv-total-size">0 GB</span></h5>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-outline-danger" onclick="selectAllTVAction('delete')">
+                                    <i class="bi bi-trash me-1"></i>Delete All
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="selectAllTVAction('exclude')">
+                                    <i class="bi bi-shield-plus me-1"></i>Exclude All
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="selectAllTVAction('ignore')">
+                                    <i class="bi bi-x-circle me-1"></i>Clear
+                                </button>
+                            </div>
+                            <button class="btn btn-sm btn-outline-info" onclick="exportTVCSV()">
+                                <i class="bi bi-download me-1"></i>Export CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-striped table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Priority</th>
+                                        <th>Title</th>
+                                        <th>Status</th>
+                                        <th>Size</th>
+                                        <th>Views</th>
+                                        <th>Why Delete?</th>
+                                        <th>Added</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tv-candidates-table">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <div class="row align-items-center">
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="delete-from-sonarr-db" checked>
+                                    <label class="form-check-label" for="delete-from-sonarr-db">
+                                        Remove from Sonarr DB
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="tv-quarantine-mode">
+                                    <label class="form-check-label" for="tv-quarantine-mode">
+                                        Quarantine mode
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <button id="btn-execute-tv" class="btn btn-danger" onclick="executeTVActions()">
+                                    <i class="bi bi-play-fill me-2"></i>Execute TV Actions
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-terminal me-2"></i>TV Activity Log</h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="clearTVLog()">
+                            <i class="bi bi-trash me-1"></i>Clear
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="tv-log-container" class="log-container">
+                            <p class="text-muted mb-0">Run a scan to see output here...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="movies-pane" role="tabpanel">
+        <div class="row mb-4">
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-film display-4 text-primary mb-3"></i>
+                        <h5>Radarr</h5>
+                        <p class="text-muted small mb-0">{{ settings.radarr_url or 'Not configured' }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-play-circle display-4 text-warning mb-3"></i>
+                        <h5>Plex</h5>
+                        <p class="text-muted small mb-0">{{ settings.plex_url or 'Not configured' }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card h-100">
+                    <div class="card-body text-center">
+                        <i class="bi bi-envelope-paper display-4 text-success mb-3"></i>
+                        <h5>Ombi</h5>
+                        <p class="text-muted small mb-0">{{ settings.ombi_url or 'Not configured' }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Protection Rules</h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li class="mb-2">
+                                <i class="bi bi-calendar-plus text-info me-2"></i>
+                                Skip movies added within <strong>{{ settings.skip_added_days }}</strong> days
+                            </li>
+                            <li class="mb-2">
+                                <i class="bi bi-eye text-warning me-2"></i>
+                                Skip movies watched within <strong>{{ settings.skip_watched_days }}</strong> days
+                            </li>
+                            <li>
+                                <i class="bi bi-list-check text-success me-2"></i>
+                                Skip movies in the <a href="{{ url_for('exclusions') }}">exclusion list</a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <div class="card h-100">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-search me-2"></i>Scan Movie Library</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">Scan your movie library to find movies eligible for cleanup.</p>
+                        <button id="btn-scan-movies" class="btn btn-primary w-100" onclick="startMovieScan()">
+                            <i class="bi bi-search me-2"></i>Scan for Movie Candidates
+                        </button>
+                        <div id="movie-status-badge" class="mt-3" style="display: none;">
+                            <span class="badge bg-info">
+                                <i class="bi bi-hourglass-split me-1"></i>
+                                <span id="movie-status-text">Scanning...</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="movie-candidates-section" class="row mb-4" style="display: none;">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Movie Deletion Candidates (<span id="movie-candidate-count">0</span>) - <span id="movie-total-size">0 GB</span></h5>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-outline-danger" onclick="selectAllMovieAction('delete')">
+                                    <i class="bi bi-trash me-1"></i>Delete All
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="selectAllMovieAction('exclude')">
+                                    <i class="bi bi-shield-plus me-1"></i>Exclude All
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" onclick="selectAllMovieAction('ignore')">
+                                    <i class="bi bi-x-circle me-1"></i>Clear
+                                </button>
+                            </div>
+                            <button class="btn btn-sm btn-outline-info" onclick="exportMovieCSV()">
+                                <i class="bi bi-download me-1"></i>Export CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-dark table-striped table-hover mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Priority</th>
+                                        <th>Title</th>
+                                        <th>Year</th>
+                                        <th>Size</th>
+                                        <th>Views</th>
+                                        <th>Why Delete?</th>
+                                        <th>Added</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="movie-candidates-table">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <div class="row align-items-center">
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="delete-from-radarr-db" checked>
+                                    <label class="form-check-label" for="delete-from-radarr-db">
+                                        Remove from Radarr DB
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="movie-quarantine-mode">
+                                    <label class="form-check-label" for="movie-quarantine-mode">
+                                        Quarantine mode
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <button id="btn-execute-movies" class="btn btn-danger" onclick="executeMovieActions()">
+                                    <i class="bi bi-play-fill me-2"></i>Execute Movie Actions
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-terminal me-2"></i>Movie Activity Log</h5>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="clearMovieLog()">
+                            <i class="bi bi-trash me-1"></i>Clear
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="movie-log-container" class="log-container">
+                            <p class="text-muted mb-0">Run a scan to see output here...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let tvPollInterval = null;
+let moviePollInterval = null;
+let tvCandidates = [];
+let movieCandidates = [];
+
+const LARGE_SIZE_THRESHOLD = 50 * 1024 * 1024 * 1024;
+
+function formatSize(bytes) {
+    if (!bytes) return '0 B';
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i];
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return 'N/A';
+    try {
+        return new Date(dateStr).toLocaleDateString();
+    } catch { return dateStr; }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function startTVScan() {
+    document.getElementById('btn-scan-tv').disabled = true;
+    document.getElementById('tv-status-badge').style.display = 'block';
+    document.getElementById('tv-status-text').textContent = 'Scanning TV library...';
+    document.getElementById('tv-candidates-section').style.display = 'none';
+    
+    fetch('/api/cleanup/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) { alert(data.error); document.getElementById('btn-scan-tv').disabled = false; return; }
+        tvPollInterval = setInterval(pollTVStatus, 1000);
+    });
+}
+
+function pollTVStatus() {
+    fetch('/api/cleanup/status').then(r => r.json()).then(data => {
+        updateTVLog(data.log || []);
+        if (!data.running) {
+            clearInterval(tvPollInterval);
+            document.getElementById('btn-scan-tv').disabled = false;
+            document.getElementById('tv-status-badge').style.display = 'none';
+            if (data.candidates && data.candidates.length > 0) {
+                tvCandidates = data.candidates;
+                document.getElementById('tv-candidates-section').style.display = 'block';
+                renderTVCandidates();
+            }
+        }
+    });
+}
+
+function updateTVLog(logLines) {
+    const container = document.getElementById('tv-log-container');
+    if (logLines.length === 0) return;
+    container.innerHTML = logLines.map(line => {
+        let cls = line.includes('[ERROR]') ? 'error' : line.includes('[SUCCESS]') ? 'success' : line.includes('[WARNING]') ? 'warning' : 'info';
+        return `<p class="log-line ${cls}">${escapeHtml(line)}</p>`;
+    }).join('');
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearTVLog() {
+    document.getElementById('tv-log-container').innerHTML = '<p class="text-muted mb-0">Run a scan to see output here...</p>';
+}
+
+function renderTVCandidates() {
+    const tbody = document.getElementById('tv-candidates-table');
+    let totalSize = 0;
+    tvCandidates.forEach(s => totalSize += s.size_bytes || 0);
+    document.getElementById('tv-candidate-count').textContent = tvCandidates.length;
+    document.getElementById('tv-total-size').textContent = formatSize(totalSize);
+    
+    tbody.innerHTML = tvCandidates.map((show, i) => {
+        const priorityClass = show.priority_label === 'High' ? 'bg-danger' : show.priority_label === 'Medium' ? 'bg-warning text-dark' : 'bg-secondary';
+        const reasons = (show.priority_reasons || []).slice(0, 3).join(', ');
+        return `<tr data-index="${i}">
+            <td><span class="badge ${priorityClass}">${show.priority_score}</span><small class="d-block text-muted">${show.priority_label}</small></td>
+            <td><strong>${escapeHtml(show.title)}</strong></td>
+            <td>${show.status || 'N/A'}</td>
+            <td>${formatSize(show.size_bytes)}</td>
+            <td>${show.view_count || 0}</td>
+            <td><small>${escapeHtml(reasons)}</small></td>
+            <td>${formatDate(show.added_date)}</td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    <input type="radio" class="btn-check" name="tv-action-${i}" id="tv-delete-${i}" value="delete">
+                    <label class="btn btn-outline-danger" for="tv-delete-${i}"><i class="bi bi-trash"></i></label>
+                    <input type="radio" class="btn-check" name="tv-action-${i}" id="tv-exclude-${i}" value="exclude">
+                    <label class="btn btn-outline-warning" for="tv-exclude-${i}"><i class="bi bi-shield-plus"></i></label>
+                    <input type="radio" class="btn-check" name="tv-action-${i}" id="tv-ignore-${i}" value="ignore" checked>
+                    <label class="btn btn-outline-secondary" for="tv-ignore-${i}"><i class="bi bi-dash"></i></label>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function selectAllTVAction(action) {
+    tvCandidates.forEach((_, i) => { const r = document.getElementById(`tv-${action}-${i}`); if (r) r.checked = true; });
+}
+
+function exportTVCSV() {
+    let csv = 'Title,Status,Size,Views,Priority,Reason,Added\n';
+    tvCandidates.forEach(s => {
+        csv += `"${s.title}","${s.status}","${formatSize(s.size_bytes)}",${s.view_count || 0},"${s.priority_label}","${s.reason || ''}","${formatDate(s.added_date)}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'tv_cleanup_' + new Date().toISOString().split('T')[0] + '.csv'; a.click();
+}
+
+function executeTVActions() {
+    const actions = [];
+    tvCandidates.forEach((show, i) => {
+        if (document.getElementById(`tv-delete-${i}`)?.checked) {
+            actions.push({ action: 'delete', title: show.title, id: show.id, path: show.path, tvdb_id: show.tvdb_id,
+                deleteFromSonarr: document.getElementById('delete-from-sonarr-db').checked,
+                quarantine: document.getElementById('tv-quarantine-mode').checked,
+                size_bytes: show.size_bytes, priority_score: show.priority_score, priority_label: show.priority_label });
+        } else if (document.getElementById(`tv-exclude-${i}`)?.checked) {
+            actions.push({ action: 'exclude', title: show.title });
+        }
+    });
+    if (actions.filter(a => a.action === 'delete').length === 0) { alert('No shows selected for deletion.'); return; }
+    if (!confirm(`Delete ${actions.filter(a => a.action === 'delete').length} show(s)?`)) return;
+    
+    document.getElementById('btn-execute-tv').disabled = true;
+    fetch('/api/cleanup/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions }) })
+    .then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); document.getElementById('btn-execute-tv').disabled = false; return; }
+        tvPollInterval = setInterval(pollTVStatus, 1000);
+    });
+}
+
+function startMovieScan() {
+    document.getElementById('btn-scan-movies').disabled = true;
+    document.getElementById('movie-status-badge').style.display = 'block';
+    document.getElementById('movie-status-text').textContent = 'Scanning movie library...';
+    document.getElementById('movie-candidates-section').style.display = 'none';
+    
+    fetch('/api/movies/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) { alert(data.error); document.getElementById('btn-scan-movies').disabled = false; return; }
+        moviePollInterval = setInterval(pollMovieStatus, 1000);
+    });
+}
+
+function pollMovieStatus() {
+    fetch('/api/movies/status').then(r => r.json()).then(data => {
+        updateMovieLog(data.log || []);
+        if (!data.running) {
+            clearInterval(moviePollInterval);
+            document.getElementById('btn-scan-movies').disabled = false;
+            document.getElementById('movie-status-badge').style.display = 'none';
+            if (data.candidates && data.candidates.length > 0) {
+                movieCandidates = data.candidates;
+                document.getElementById('movie-candidates-section').style.display = 'block';
+                renderMovieCandidates();
+            }
+        }
+    });
+}
+
+function updateMovieLog(logLines) {
+    const container = document.getElementById('movie-log-container');
+    if (logLines.length === 0) return;
+    container.innerHTML = logLines.map(line => {
+        let cls = line.includes('[ERROR]') ? 'error' : line.includes('[SUCCESS]') ? 'success' : line.includes('[WARNING]') ? 'warning' : 'info';
+        return `<p class="log-line ${cls}">${escapeHtml(line)}</p>`;
+    }).join('');
+    container.scrollTop = container.scrollHeight;
+}
+
+function clearMovieLog() {
+    document.getElementById('movie-log-container').innerHTML = '<p class="text-muted mb-0">Run a scan to see output here...</p>';
+}
+
+function renderMovieCandidates() {
+    const tbody = document.getElementById('movie-candidates-table');
+    let totalSize = 0;
+    movieCandidates.forEach(m => totalSize += m.size_bytes || 0);
+    document.getElementById('movie-candidate-count').textContent = movieCandidates.length;
+    document.getElementById('movie-total-size').textContent = formatSize(totalSize);
+    
+    tbody.innerHTML = movieCandidates.map((movie, i) => {
+        const priorityClass = movie.priority_label === 'High' ? 'bg-danger' : movie.priority_label === 'Medium' ? 'bg-warning text-dark' : 'bg-secondary';
+        const reasons = (movie.priority_reasons || []).slice(0, 3).join(', ');
+        return `<tr data-index="${i}">
+            <td><span class="badge ${priorityClass}">${movie.priority_score}</span><small class="d-block text-muted">${movie.priority_label}</small></td>
+            <td><strong>${escapeHtml(movie.title)}</strong></td>
+            <td>${movie.year || 'N/A'}</td>
+            <td>${formatSize(movie.size_bytes)}</td>
+            <td>${movie.view_count || 0}</td>
+            <td><small>${escapeHtml(reasons)}</small></td>
+            <td>${formatDate(movie.added)}</td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    <input type="radio" class="btn-check" name="movie-action-${i}" id="movie-delete-${i}" value="delete">
+                    <label class="btn btn-outline-danger" for="movie-delete-${i}"><i class="bi bi-trash"></i></label>
+                    <input type="radio" class="btn-check" name="movie-action-${i}" id="movie-exclude-${i}" value="exclude">
+                    <label class="btn btn-outline-warning" for="movie-exclude-${i}"><i class="bi bi-shield-plus"></i></label>
+                    <input type="radio" class="btn-check" name="movie-action-${i}" id="movie-ignore-${i}" value="ignore" checked>
+                    <label class="btn btn-outline-secondary" for="movie-ignore-${i}"><i class="bi bi-dash"></i></label>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function selectAllMovieAction(action) {
+    movieCandidates.forEach((_, i) => { const r = document.getElementById(`movie-${action}-${i}`); if (r) r.checked = true; });
+}
+
+function exportMovieCSV() {
+    let csv = 'Title,Year,Size,Views,Priority,Reason,Added\n';
+    movieCandidates.forEach(m => {
+        csv += `"${m.title}",${m.year || ''},"${formatSize(m.size_bytes)}",${m.view_count || 0},"${m.priority_label}","${m.reason || ''}","${formatDate(m.added)}"\n`;
+    });
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'movie_cleanup_' + new Date().toISOString().split('T')[0] + '.csv'; a.click();
+}
+
+function executeMovieActions() {
+    const actions = [];
+    movieCandidates.forEach((movie, i) => {
+        if (document.getElementById(`movie-delete-${i}`)?.checked) {
+            actions.push({ action: 'delete', title: movie.title, id: movie.id, path: movie.path, tmdb_id: movie.tmdb_id, imdb_id: movie.imdb_id,
+                deleteFromRadarr: document.getElementById('delete-from-radarr-db').checked,
+                quarantine: document.getElementById('movie-quarantine-mode').checked,
+                size_bytes: movie.size_bytes, year: movie.year, priority_score: movie.priority_score, priority_label: movie.priority_label });
+        } else if (document.getElementById(`movie-exclude-${i}`)?.checked) {
+            actions.push({ action: 'exclude', title: movie.title, year: movie.year, tmdb_id: movie.tmdb_id });
+        }
+    });
+    if (actions.filter(a => a.action === 'delete').length === 0) { alert('No movies selected for deletion.'); return; }
+    if (!confirm(`Delete ${actions.filter(a => a.action === 'delete').length} movie(s)?`)) return;
+    
+    document.getElementById('btn-execute-movies').disabled = true;
+    fetch('/api/movies/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions }) })
+    .then(r => r.json()).then(data => {
+        if (data.error) { alert(data.error); document.getElementById('btn-execute-movies').disabled = false; return; }
+        moviePollInterval = setInterval(pollMovieStatus, 1000);
+    });
+}
+</script>
+{% endblock %}

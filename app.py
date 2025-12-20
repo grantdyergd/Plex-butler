@@ -123,7 +123,21 @@ def index():
         return redirect(url_for('setup_step1'))
     if not current_user.is_authenticated:
         return redirect(url_for('login'))
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('home'))
+
+
+@app.route('/home')
+@login_required
+def home():
+    settings = {
+        'sonarr_url': get_setting('SONARR_URL'),
+        'radarr_url': get_setting('RADARR_URL'),
+        'plex_url': get_setting('PLEX_URL'),
+        'ombi_url': get_setting('OMBI_URL'),
+        'skip_added_days': get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90'),
+        'skip_watched_days': get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180'),
+    }
+    return render_template('home.html', settings=settings)
 
 
 @app.route('/setup/step1', methods=['GET', 'POST'])
