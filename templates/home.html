@@ -631,7 +631,7 @@ function renderTVCandidates() {
         const warnings = isLarge ? '<span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>' : '';
         const statusClass = show.status === 'Ended' ? 'text-muted' : 'text-success';
         
-        return `<tr data-index="${i}">
+        return `<tr data-index="${i}" id="tv-row-${i}">
             <td><span class="badge ${priorityClass}">${show.priority_score}</span><br><small class="text-light">${show.priority_label}</small></td>
             <td><strong class="text-white">${escapeHtml(show.title)}</strong>${warnings}</td>
             <td class="${statusClass}">${show.status || 'N/A'}</td>
@@ -642,20 +642,45 @@ function renderTVCandidates() {
             <td class="text-light">${formatDate(show.added_date)}</td>
             <td>
                 <div class="btn-group btn-group-sm">
-                    <input type="radio" class="btn-check" name="tv-action-${i}" id="tv-delete-${i}" value="delete">
-                    <label class="btn btn-outline-danger" for="tv-delete-${i}"><i class="bi bi-trash"></i></label>
-                    <input type="radio" class="btn-check" name="tv-action-${i}" id="tv-exclude-${i}" value="exclude">
-                    <label class="btn btn-outline-warning" for="tv-exclude-${i}"><i class="bi bi-shield-plus"></i></label>
-                    <input type="radio" class="btn-check" name="tv-action-${i}" id="tv-ignore-${i}" value="ignore" checked>
-                    <label class="btn btn-outline-secondary" for="tv-ignore-${i}"><i class="bi bi-dash"></i></label>
+                    <input type="checkbox" class="btn-check" id="tv-delete-${i}" value="delete">
+                    <label class="btn btn-outline-danger" for="tv-delete-${i}" title="Select for deletion"><i class="bi bi-trash"></i></label>
+                    <button class="btn btn-outline-warning" onclick="excludeTVNow(${i})" title="Exclude immediately"><i class="bi bi-shield-plus"></i></button>
                 </div>
             </td>
         </tr>`;
     }).join('');
 }
 
+function excludeTVNow(index) {
+    const show = tvCandidates[index];
+    if (!show) return;
+    
+    fetch('/api/exclusions/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: show.title })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            tvCandidates.splice(index, 1);
+            tvFilteredIndices = [];
+            applyTVFilters();
+            const logContainer = document.getElementById('tv-log-container');
+            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${show.title}" - moved to exclusion list</p>`;
+        } else {
+            alert('Failed to exclude: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
 function selectAllTVAction(action) {
-    tvFilteredIndices.forEach(i => { const r = document.getElementById(`tv-${action}-${i}`); if (r) r.checked = true; });
+    if (action === 'delete') {
+        tvFilteredIndices.forEach(i => { const r = document.getElementById(`tv-delete-${i}`); if (r) r.checked = true; });
+    } else if (action === 'ignore') {
+        tvFilteredIndices.forEach(i => { const r = document.getElementById(`tv-delete-${i}`); if (r) r.checked = false; });
+    }
 }
 
 function selectTVByPriority(priority) {
@@ -685,12 +710,10 @@ function executeTVActions() {
                 deleteFromSonarr: document.getElementById('delete-from-sonarr-db').checked,
                 quarantine: document.getElementById('tv-quarantine-mode').checked,
                 size_bytes: show.size_bytes, priority_score: show.priority_score, priority_label: show.priority_label });
-        } else if (document.getElementById(`tv-exclude-${i}`)?.checked) {
-            actions.push({ action: 'exclude', title: show.title });
         }
     });
-    if (actions.filter(a => a.action === 'delete').length === 0) { alert('No shows selected for deletion.'); return; }
-    if (!confirm(`Delete ${actions.filter(a => a.action === 'delete').length} show(s)?`)) return;
+    if (actions.length === 0) { alert('No shows selected for deletion.'); return; }
+    if (!confirm(`Delete ${actions.length} show(s)?`)) return;
     
     document.getElementById('btn-execute-tv').disabled = true;
     fetch('/api/cleanup/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions }) })
@@ -834,7 +857,7 @@ function renderMovieCandidates() {
         const isLarge = (movie.size_bytes || 0) >= 50 * 1024 * 1024 * 1024;
         const warnings = isLarge ? '<span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>' : '';
         
-        return `<tr data-index="${i}">
+        return `<tr data-index="${i}" id="movie-row-${i}">
             <td><span class="badge ${priorityClass}">${movie.priority_score}</span><br><small class="text-light">${movie.priority_label}</small></td>
             <td><strong class="text-white">${escapeHtml(movie.title)}</strong>${warnings}</td>
             <td class="text-light">${movie.year || 'N/A'}</td>
@@ -845,20 +868,45 @@ function renderMovieCandidates() {
             <td class="text-light">${formatDate(movie.added)}</td>
             <td>
                 <div class="btn-group btn-group-sm">
-                    <input type="radio" class="btn-check" name="movie-action-${i}" id="movie-delete-${i}" value="delete">
-                    <label class="btn btn-outline-danger" for="movie-delete-${i}"><i class="bi bi-trash"></i></label>
-                    <input type="radio" class="btn-check" name="movie-action-${i}" id="movie-exclude-${i}" value="exclude">
-                    <label class="btn btn-outline-warning" for="movie-exclude-${i}"><i class="bi bi-shield-plus"></i></label>
-                    <input type="radio" class="btn-check" name="movie-action-${i}" id="movie-ignore-${i}" value="ignore" checked>
-                    <label class="btn btn-outline-secondary" for="movie-ignore-${i}"><i class="bi bi-dash"></i></label>
+                    <input type="checkbox" class="btn-check" id="movie-delete-${i}" value="delete">
+                    <label class="btn btn-outline-danger" for="movie-delete-${i}" title="Select for deletion"><i class="bi bi-trash"></i></label>
+                    <button class="btn btn-outline-warning" onclick="excludeMovieNow(${i})" title="Exclude immediately"><i class="bi bi-shield-plus"></i></button>
                 </div>
             </td>
         </tr>`;
     }).join('');
 }
 
+function excludeMovieNow(index) {
+    const movie = movieCandidates[index];
+    if (!movie) return;
+    
+    fetch('/api/movies/exclude', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: movie.title, year: movie.year, tmdb_id: movie.tmdb_id })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            movieCandidates.splice(index, 1);
+            movieFilteredIndices = [];
+            applyMovieFilters();
+            const logContainer = document.getElementById('movie-log-container');
+            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${movie.title}" - moved to exclusion list</p>`;
+        } else {
+            alert('Failed to exclude: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(err => alert('Error: ' + err));
+}
+
 function selectAllMovieAction(action) {
-    movieFilteredIndices.forEach(i => { const r = document.getElementById(`movie-${action}-${i}`); if (r) r.checked = true; });
+    if (action === 'delete') {
+        movieFilteredIndices.forEach(i => { const r = document.getElementById(`movie-delete-${i}`); if (r) r.checked = true; });
+    } else if (action === 'ignore') {
+        movieFilteredIndices.forEach(i => { const r = document.getElementById(`movie-delete-${i}`); if (r) r.checked = false; });
+    }
 }
 
 function selectMoviesByPriority(priority) {
@@ -888,12 +936,10 @@ function executeMovieActions() {
                 deleteFromRadarr: document.getElementById('delete-from-radarr-db').checked,
                 quarantine: document.getElementById('movie-quarantine-mode').checked,
                 size_bytes: movie.size_bytes, year: movie.year, priority_score: movie.priority_score, priority_label: movie.priority_label });
-        } else if (document.getElementById(`movie-exclude-${i}`)?.checked) {
-            actions.push({ action: 'exclude', title: movie.title, year: movie.year, tmdb_id: movie.tmdb_id });
         }
     });
-    if (actions.filter(a => a.action === 'delete').length === 0) { alert('No movies selected for deletion.'); return; }
-    if (!confirm(`Delete ${actions.filter(a => a.action === 'delete').length} movie(s)?`)) return;
+    if (actions.length === 0) { alert('No movies selected for deletion.'); return; }
+    if (!confirm(`Delete ${actions.length} movie(s)?`)) return;
     
     document.getElementById('btn-execute-movies').disabled = true;
     fetch('/api/movies/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actions }) })
