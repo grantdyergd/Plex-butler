@@ -658,7 +658,11 @@ function excludeTVNow(index) {
     fetch('/api/exclusions/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: show.title })
+        body: JSON.stringify({ 
+            title: show.title,
+            requester_email: show.requester_email,
+            requester_name: show.requester_name
+        })
     })
     .then(r => r.json())
     .then(data => {
@@ -667,7 +671,8 @@ function excludeTVNow(index) {
             tvFilteredIndices = [];
             applyTVFilters();
             const logContainer = document.getElementById('tv-log-container');
-            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${show.title}" - moved to exclusion list</p>`;
+            const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
+            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${show.title}" - moved to exclusion list${emailMsg}</p>`;
         } else {
             alert('Failed to exclude: ' + (data.error || 'Unknown error'));
         }
@@ -884,7 +889,13 @@ function excludeMovieNow(index) {
     fetch('/api/movies/exclude', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: movie.title, year: movie.year, tmdb_id: movie.tmdb_id })
+        body: JSON.stringify({ 
+            title: movie.title, 
+            year: movie.year, 
+            tmdb_id: movie.tmdb_id,
+            requester_email: movie.requester_email,
+            requester_name: movie.requester_name
+        })
     })
     .then(r => r.json())
     .then(data => {
@@ -893,7 +904,8 @@ function excludeMovieNow(index) {
             movieFilteredIndices = [];
             applyMovieFilters();
             const logContainer = document.getElementById('movie-log-container');
-            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${movie.title}" - moved to exclusion list</p>`;
+            const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
+            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${movie.title}" - moved to exclusion list${emailMsg}</p>`;
         } else {
             alert('Failed to exclude: ' + (data.error || 'Unknown error'));
         }

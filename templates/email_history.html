@@ -1,0 +1,213 @@
+{% extends 'base.html' %}
+
+{% block title %}Email History - Media Scrubber{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h4 class="mb-0"><i class="bi bi-envelope me-2"></i>Email History</h4>
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <select id="type-filter" class="form-select" onchange="loadEmailHistory()">
+                    <option value="">All Types</option>
+                    <option value="tv">TV Shows</option>
+                    <option value="movie">Movies</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <select id="status-filter" class="form-select" onchange="loadEmailHistory()">
+                    <option value="">All Status</option>
+                    <option value="success">Successful</option>
+                    <option value="failed">Failed</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <input type="text" id="search-filter" class="form-control" placeholder="Search recipient or title..." oninput="loadEmailHistory()">
+            </div>
+        </div>
+        
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Type</th>
+                        <th>Media Title</th>
+                        <th>Recipient</th>
+                        <th>Subject</th>
+                        <th>Sent</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="email-table-body">
+                    <tr><td colspan="7" class="text-center text-muted">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <p id="email-count" class="text-muted mt-2">0 emails</p>
+    </div>
+</div>
+
+<div class="modal fade" id="emailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-envelope-open me-2"></i>Email Details</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <strong>To:</strong> <span id="modal-recipient" class="text-info"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Subject:</strong> <span id="modal-subject"></span>
+                </div>
+                <div class="mb-3">
+                    <strong>Sent:</strong> <span id="modal-sent"></span>
+                    <span id="modal-status-badge" class="ms-2"></span>
+                </div>
+                <div class="mb-3" id="modal-error-container" style="display: none;">
+                    <strong>Error:</strong> <span id="modal-error" class="text-danger"></span>
+                </div>
+                <hr>
+                <div class="card bg-white">
+                    <div class="card-body p-0">
+                        <iframe id="modal-body-frame" style="width: 100%; height: 400px; border: none;"></iframe>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allEmails = [];
+
+function formatDate(isoDate) {
+    if (!isoDate) return 'N/A';
+    const d = new Date(isoDate);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function loadEmailHistory() {
+    try {
+        const response = await fetch('/api/email-history');
+        allEmails = await response.json();
+        renderEmailTable();
+    } catch (err) {
+        console.error('Error loading email history:', err);
+        document.getElementById('email-table-body').innerHTML = 
+            '<tr><td colspan="7" class="text-center text-danger">Error loading email history</td></tr>';
+    }
+}
+
+function renderEmailTable() {
+    const typeFilter = document.getElementById('type-filter').value;
+    const statusFilter = document.getElementById('status-filter').value;
+    const searchFilter = document.getElementById('search-filter').value.toLowerCase();
+    
+    let filtered = allEmails.filter(email => {
+        if (typeFilter && email.media_type !== typeFilter) return false;
+        if (statusFilter === 'success' && !email.was_successful) return false;
+        if (statusFilter === 'failed' && email.was_successful) return false;
+        if (searchFilter) {
+            const searchText = (email.recipient_name || '') + (email.recipient_email || '') + (email.media_title || '');
+            if (!searchText.toLowerCase().includes(searchFilter)) return false;
+        }
+        return true;
+    });
+    
+    const tbody = document.getElementById('email-table-body');
+    
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No emails found</td></tr>';
+        document.getElementById('email-count').textContent = '0 emails';
+        return;
+    }
+    
+    tbody.innerHTML = filtered.map(email => {
+        const statusBadge = email.was_successful 
+            ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Sent</span>'
+            : '<span class="badge bg-danger"><i class="bi bi-x-circle"></i> Failed</span>';
+        
+        const typeBadge = email.media_type === 'tv' 
+            ? '<span class="badge bg-info">TV</span>'
+            : '<span class="badge bg-primary">Movie</span>';
+        
+        const recipient = email.recipient_name 
+            ? `${escapeHtml(email.recipient_name)} <${escapeHtml(email.recipient_email)}>`
+            : escapeHtml(email.recipient_email);
+        
+        return `<tr>
+            <td>${statusBadge}</td>
+            <td>${typeBadge}</td>
+            <td class="text-white">${escapeHtml(email.media_title)}</td>
+            <td class="text-info">${recipient}</td>
+            <td class="text-light">${escapeHtml(email.subject)}</td>
+            <td class="text-light">${formatDate(email.sent_at)}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-info" onclick="viewEmail(${email.id})" title="View email">
+                    <i class="bi bi-eye"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+    
+    document.getElementById('email-count').textContent = filtered.length + ' email' + (filtered.length === 1 ? '' : 's');
+}
+
+async function viewEmail(emailId) {
+    try {
+        const response = await fetch(`/api/email-history/${emailId}`);
+        const email = await response.json();
+        
+        const recipient = email.recipient_name 
+            ? `${email.recipient_name} <${email.recipient_email}>`
+            : email.recipient_email;
+        
+        document.getElementById('modal-recipient').textContent = recipient;
+        document.getElementById('modal-subject').textContent = email.subject;
+        document.getElementById('modal-sent').textContent = formatDate(email.sent_at);
+        
+        const statusBadge = email.was_successful 
+            ? '<span class="badge bg-success">Sent Successfully</span>'
+            : '<span class="badge bg-danger">Failed</span>';
+        document.getElementById('modal-status-badge').innerHTML = statusBadge;
+        
+        const errorContainer = document.getElementById('modal-error-container');
+        if (email.error_message) {
+            document.getElementById('modal-error').textContent = email.error_message;
+            errorContainer.style.display = 'block';
+        } else {
+            errorContainer.style.display = 'none';
+        }
+        
+        const iframe = document.getElementById('modal-body-frame');
+        iframe.srcdoc = email.body_html || '<p>No content available</p>';
+        
+        const modal = new bootstrap.Modal(document.getElementById('emailModal'));
+        modal.show();
+    } catch (err) {
+        console.error('Error loading email details:', err);
+        alert('Error loading email details');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadEmailHistory);
+</script>
+{% endblock %}

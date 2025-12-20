@@ -646,6 +646,7 @@ def send_exclusion_email(media_type, title, recipient_name, recipient_email, yea
     
     media_label = f"{title} ({year})" if year else title
     greeting = f"Hi {recipient_name}," if recipient_name else "Hi,"
+    media_type_display = "TV show" if media_type == "tv" else "movie"
     
     subject = f"Media Update: {media_label}"
     body_html = f"""
@@ -670,11 +671,11 @@ def send_exclusion_email(media_type, title, recipient_name, recipient_email, yea
             </div>
             <div class="content">
                 <p>{greeting}</p>
-                <p>We wanted to let you know that a {media_type} you requested has been added to our permanent exclusion list:</p>
+                <p>We wanted to let you know that a {media_type_display} you requested has been added to our permanent exclusion list:</p>
                 <div class="media-title">{media_label}</div>
                 <div class="info-box">
                     <p><strong>What this means:</strong></p>
-                    <p>This {media_type} will be protected from future cleanup operations and will remain in our library indefinitely.</p>
+                    <p>This {media_type_display} will be protected from future cleanup operations and will remain in our library indefinitely.</p>
                 </div>
                 <p>If you have any questions, please reach out to your media server administrator.</p>
                 <p>Best regards,<br>Media Scrubber</p>
@@ -907,7 +908,7 @@ def add_exclusion_api():
         
         email_sent = False
         if requester_email:
-            email_sent, _ = send_exclusion_email('TV show', title, requester_name, requester_email)
+            email_sent, _ = send_exclusion_email('tv', title, requester_name, requester_email)
         
         return jsonify({'success': True, 'message': f'Added "{title}" to exclusion list', 'email_sent': email_sent})
     except Exception as e:

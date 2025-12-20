@@ -18,7 +18,8 @@ A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. Thi
 - CSV export of candidates for offline review
 - Quarantine mode: move files to trash folder instead of deleting
 - Deletes from both Plex and Sonarr/Radarr with file cleanup
-- Email notifications to Ombi requesters
+- Email notifications to Ombi requesters when excluding items
+- Email history tracking with clickable emails to view full content
 - Slow, deliberate deletion with delays to prevent mistakes
 - Deletion history tracking with search, filter by type, and re-add links
 
@@ -32,11 +33,13 @@ A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. Thi
 ├── templates/          # HTML templates
 │   ├── base.html
 │   ├── login.html
-│   ├── dashboard.html  # TV Shows dashboard
-│   ├── movies.html     # Movies dashboard
+│   ├── home.html       # Unified home with TV/Movies tabs
+│   ├── dashboard.html  # TV Shows dashboard (legacy)
+│   ├── movies.html     # Movies dashboard (legacy)
 │   ├── settings.html
 │   ├── exclusions.html # Tabbed TV/Movies exclusions
 │   ├── history.html    # Deletion history with type filter
+│   ├── email_history.html # Email history with clickable content
 │   └── setup/          # Setup wizard templates
 ├── excluded_shows.txt  # Persistent exclusion list
 └── replit.md           # This documentation
