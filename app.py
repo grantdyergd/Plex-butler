@@ -393,7 +393,28 @@ def exclusions():
                 if line and not line.startswith('#'):
                     excluded_shows.append(line)
     
-    return render_template('exclusions.html', excluded_shows=excluded_shows)
+    has_shows = cleanup_status.get('candidates') or cleanup_status.get('skipped')
+    return render_template('exclusions.html', excluded_shows=excluded_shows, has_shows=has_shows)
+
+
+@app.route('/api/shows', methods=['GET'])
+@login_required
+def get_all_shows():
+    """Get all shows from last scan for autocomplete."""
+    all_shows = []
+    
+    candidates = cleanup_status.get('candidates', [])
+    skipped = cleanup_status.get('skipped', [])
+    
+    for show in candidates + skipped:
+        all_shows.append({
+            'title': show.get('title', ''),
+            'status': show.get('status', ''),
+            'id': show.get('id')
+        })
+    
+    all_shows.sort(key=lambda x: x['title'].lower())
+    return jsonify(all_shows)
 
 
 @app.route('/api/cleanup/scan', methods=['POST'])
