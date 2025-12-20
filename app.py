@@ -627,6 +627,108 @@ def movie_cleanup_status_api():
     return jsonify(movie_cleanup_status)
 
 
+def send_exclusion_email(media_type, title, recipient_name, recipient_email, year=None):
+    """Send exclusion notification email and record in history."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    import os
+    
+    smtp_host = get_setting('SMTP_HOST')
+    smtp_port_val = get_setting('SMTP_PORT', '587') or '587'
+    smtp_port = int(smtp_port_val) if smtp_port_val.isdigit() else 587
+    smtp_user = get_setting('SMTP_USER')
+    smtp_password = os.environ.get('SMTP_PASSWORD', '')
+    smtp_from = get_setting('SMTP_FROM')
+    
+    if not all([smtp_host, smtp_user, smtp_password, smtp_from, recipient_email]):
+        return False, 'Email not configured or no recipient'
+    
+    media_label = f"{title} ({year})" if year else title
+    greeting = f"Hi {recipient_name}," if recipient_name else "Hi,"
+    
+    subject = f"Media Update: {media_label}"
+    body_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #0f1729; color: #e2e8f0; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center; }}
+            .header h1 {{ margin: 0; color: white; font-size: 24px; }}
+            .content {{ background-color: #1e293b; padding: 30px; border-radius: 0 0 12px 12px; }}
+            .media-title {{ color: #60a5fa; font-size: 20px; font-weight: bold; margin: 15px 0; }}
+            .info-box {{ background-color: #334155; padding: 15px; border-radius: 8px; margin: 15px 0; }}
+            .footer {{ text-align: center; margin-top: 20px; color: #94a3b8; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Media Scrubber</h1>
+            </div>
+            <div class="content">
+                <p>{greeting}</p>
+                <p>We wanted to let you know that a {media_type} you requested has been added to our permanent exclusion list:</p>
+                <div class="media-title">{media_label}</div>
+                <div class="info-box">
+                    <p><strong>What this means:</strong></p>
+                    <p>This {media_type} will be protected from future cleanup operations and will remain in our library indefinitely.</p>
+                </div>
+                <p>If you have any questions, please reach out to your media server administrator.</p>
+                <p>Best regards,<br>Media Scrubber</p>
+            </div>
+            <div class="footer">
+                <p>This is an automated message from Media Scrubber</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = smtp_from
+        msg['To'] = recipient_email
+        msg.attach(MIMEText(body_html, 'html'))
+        
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        
+        email_record = EmailHistory(
+            media_type=media_type,
+            media_title=title,
+            action_type='exclusion',
+            recipient_name=recipient_name,
+            recipient_email=recipient_email,
+            subject=subject,
+            body_html=body_html,
+            was_successful=True
+        )
+        db.session.add(email_record)
+        db.session.commit()
+        return True, 'Email sent successfully'
+    except Exception as e:
+        email_record = EmailHistory(
+            media_type=media_type,
+            media_title=title,
+            action_type='exclusion',
+            recipient_name=recipient_name,
+            recipient_email=recipient_email,
+            subject=subject,
+            body_html=body_html,
+            was_successful=False,
+            error_message=str(e)
+        )
+        db.session.add(email_record)
+        db.session.commit()
+        return False, str(e)
+
+
 @app.route('/api/movies/exclude', methods=['POST'])
 @login_required
 def exclude_movie_api():
@@ -638,6 +740,8 @@ def exclude_movie_api():
     title = data.get('title')
     year = data.get('year')
     tmdb_id = data.get('tmdb_id')
+    requester_email = data.get('requester_email')
+    requester_name = data.get('requester_name')
     
     existing = MovieExclusion.query.filter(
         db.func.lower(MovieExclusion.title) == title.lower(),
@@ -651,7 +755,11 @@ def exclude_movie_api():
     db.session.add(new_exclusion)
     db.session.commit()
     
-    return jsonify({'success': True, 'message': f"Added '{title}' to exclusion list"})
+    email_sent = False
+    if requester_email:
+        email_sent, _ = send_exclusion_email('movie', title, requester_name, requester_email, year)
+    
+    return jsonify({'success': True, 'message': f"Added '{title}' to exclusion list", 'email_sent': email_sent})
 
 
 @app.route('/api/history', methods=['GET'])
@@ -736,6 +844,8 @@ def add_exclusion_api():
     """Add a show to exclusions immediately via API."""
     data = request.get_json()
     title = data.get('title', '').strip() if data else ''
+    requester_email = data.get('requester_email') if data else None
+    requester_name = data.get('requester_name') if data else None
     
     if not title:
         return jsonify({'success': False, 'error': 'No title provided'}), 400
@@ -748,7 +858,12 @@ def add_exclusion_api():
         new_exclusion = Exclusion(title=title)
         db.session.add(new_exclusion)
         db.session.commit()
-        return jsonify({'success': True, 'message': f'Added "{title}" to exclusion list'})
+        
+        email_sent = False
+        if requester_email:
+            email_sent, _ = send_exclusion_email('TV show', title, requester_name, requester_email)
+        
+        return jsonify({'success': True, 'message': f'Added "{title}" to exclusion list', 'email_sent': email_sent})
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
