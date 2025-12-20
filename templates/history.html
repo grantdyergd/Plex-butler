@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Deletion History - TV Show Cleanup{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="bi bi-clock-history me-2"></i>Deletion History</h2>
+        <p class="text-muted">A record of all shows that have been removed from your library.</p>
+    </div>
+</div>
+
+{% if deletions %}
+<div class="row mb-3">
+    <div class="col-md-6">
+        <input type="text" class="form-control" id="search-input" placeholder="Search by title...">
+    </div>
+    <div class="col-md-6 text-end">
+        <span class="badge bg-secondary fs-6">{{ deletions|length }} total deletions</span>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-dark table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Deleted</th>
+                        <th>Size</th>
+                        <th>Requester</th>
+                        <th>Mode</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="history-table">
+                    {% for d in deletions %}
+                    <tr class="history-row" data-title="{{ d.title|lower }}">
+                        <td>
+                            <strong>{{ d.title }}</strong>
+                            {% if d.priority_label %}
+                            <br><span class="badge {% if d.priority_label == 'High' %}bg-danger{% elif d.priority_label == 'Medium' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">{{ d.priority_label }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small>{{ d.deleted_at.strftime('%b %d, %Y') }}</small>
+                            <br><small class="text-muted">{{ d.deleted_at.strftime('%I:%M %p') }}</small>
+                        </td>
+                        <td>
+                            {% if d.size_bytes %}
+                            <small>{{ "%.1f"|format(d.size_bytes / 1073741824) }} GB</small>
+                            {% else %}
+                            <small class="text-muted">-</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if d.requester_name %}
+                            <small>{{ d.requester_name }}</small>
+                            {% else %}
+                            <small class="text-muted">No requester</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if d.was_quarantined %}
+                            <span class="badge bg-warning text-dark"><i class="bi bi-folder-symlink me-1"></i>Quarantined</span>
+                            {% else %}
+                            <span class="badge bg-danger"><i class="bi bi-trash me-1"></i>Deleted</span>
+                            {% endif %}
+                            {% if d.deleted_from_sonarr_db %}
+                            <br><small class="text-muted">Removed from Sonarr DB</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if sonarr_url and d.tvdb_id %}
+                            <a href="{{ sonarr_url }}/add/new?term=tvdb:{{ d.tvdb_id }}" 
+                               target="_blank" 
+                               class="btn btn-sm btn-outline-success"
+                               title="Re-add in Sonarr">
+                                <i class="bi bi-plus-circle me-1"></i>Re-add
+                            </a>
+                            {% elif sonarr_url %}
+                            <a href="{{ sonarr_url }}/add/new?term={{ d.title|urlencode }}" 
+                               target="_blank" 
+                               class="btn btn-sm btn-outline-success"
+                               title="Search in Sonarr">
+                                <i class="bi bi-search me-1"></i>Search
+                            </a>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% else %}
+<div class="card">
+    <div class="card-body text-center py-5">
+        <i class="bi bi-inbox text-muted" style="font-size: 4rem;"></i>
+        <h4 class="mt-3 text-muted">No Deletion History</h4>
+        <p class="text-muted">When you delete shows, they'll appear here so you can easily re-add them later.</p>
+        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+            <i class="bi bi-speedometer2 me-2"></i>Go to Dashboard
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<script>
+document.getElementById('search-input')?.addEventListener('input', function(e) {
+    const searchTerm = e.target.value.toLowerCase();
+    document.querySelectorAll('.history-row').forEach(row => {
+        const title = row.dataset.title;
+        row.style.display = title.includes(searchTerm) ? '' : 'none';
+    });
+});
+</script>
+{% endblock %}

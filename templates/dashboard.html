@@ -667,7 +667,13 @@ function executeActions() {
                 quarantine: quarantineMode,
                 path: show.path,
                 requester_email: show.requester_email || '',
-                requester_name: show.requester_name || ''
+                requester_name: show.requester_name || '',
+                tvdb_id: show.tvdb_id,
+                size_bytes: show.size_bytes,
+                season_count: show.season_count,
+                episode_count: show.episode_count,
+                priority_score: show.priority_score,
+                priority_label: show.priority_label
             });
         }
     });

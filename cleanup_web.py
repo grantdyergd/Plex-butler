@@ -41,6 +41,44 @@ def add_to_exclusions_db(title: str) -> bool:
         return False
 
 
+def record_deletion_history(
+    title: str,
+    sonarr_id: int = None,
+    tvdb_id: int = None,
+    size_bytes: int = None,
+    season_count: int = None,
+    episode_count: int = None,
+    requester_name: str = None,
+    requester_email: str = None,
+    priority_score: int = None,
+    priority_label: str = None,
+    was_quarantined: bool = False,
+    deleted_from_sonarr_db: bool = False
+) -> bool:
+    """Record a deletion in the history database."""
+    try:
+        from app import DeletionHistory, db
+        record = DeletionHistory(
+            title=title,
+            sonarr_id=sonarr_id,
+            tvdb_id=tvdb_id,
+            size_bytes=size_bytes,
+            season_count=season_count,
+            episode_count=episode_count,
+            requester_name=requester_name,
+            requester_email=requester_email,
+            priority_score=priority_score,
+            priority_label=priority_label,
+            was_quarantined=was_quarantined,
+            deleted_from_sonarr_db=deleted_from_sonarr_db
+        )
+        db.session.add(record)
+        db.session.commit()
+        return True
+    except Exception:
+        return False
+
+
 def quarantine_files(source_path: str, quarantine_path: str, title: str, log: Callable) -> bool:
     """Move show files to quarantine folder instead of deleting them."""
     import shutil
@@ -639,6 +677,21 @@ def execute_actions(
         
         if sonarr_deleted:
             deleted_count += 1
+            
+            record_deletion_history(
+                title=title,
+                sonarr_id=series_id,
+                tvdb_id=action.get('tvdb_id'),
+                size_bytes=action.get('size_bytes'),
+                season_count=action.get('season_count'),
+                episode_count=action.get('episode_count'),
+                requester_name=requester_name,
+                requester_email=requester_email,
+                priority_score=action.get('priority_score'),
+                priority_label=action.get('priority_label'),
+                was_quarantined=quarantine and bool(config.get('QUARANTINE_PATH')),
+                deleted_from_sonarr_db=delete_from_db
+            )
             
             if requester_email:
                 send_notification_email(
