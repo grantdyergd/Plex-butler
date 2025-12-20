@@ -621,7 +621,6 @@ function executeActions() {
     
     candidates.forEach((show, index) => {
         const deleteRadio = document.getElementById(`delete-${index}`);
-        const excludeRadio = document.getElementById(`exclude-${index}`);
         
         if (deleteRadio && deleteRadio.checked) {
             if ((show.size_bytes || 0) >= LARGE_SIZE_THRESHOLD) largeShowsCount++;
@@ -635,31 +634,22 @@ function executeActions() {
                 deleteFromSonarr: deleteFromDb,
                 quarantine: quarantineMode,
                 path: show.path,
-                requester_email: show.requester_email,
-                requester_name: show.requester_name
-            });
-        } else if (excludeRadio && excludeRadio.checked) {
-            actions.push({
-                action: 'exclude',
-                title: show.title
+                requester_email: show.requester_email || '',
+                requester_name: show.requester_name || ''
             });
         }
     });
     
     if (actions.length === 0) {
-        alert('No actions selected. Please select at least one show to delete or exclude.');
+        alert('No shows selected for deletion. Use the red trash button to mark shows, then click Execute.');
         return;
     }
     
-    const deleteCount = actions.filter(a => a.action === 'delete').length;
-    const excludeCount = actions.filter(a => a.action === 'exclude').length;
+    const deleteCount = actions.length;
     
     let confirmMsg = `You are about to:\n`;
-    if (deleteCount > 0) {
-        confirmMsg += `- Delete ${deleteCount} show(s) (${formatSize(totalDeleteSize)})\n`;
-        if (quarantineMode) confirmMsg += `  (Files will be moved to quarantine folder)\n`;
-    }
-    if (excludeCount > 0) confirmMsg += `- Add ${excludeCount} show(s) to exclusion list\n`;
+    confirmMsg += `- Delete ${deleteCount} show(s) (${formatSize(totalDeleteSize)})\n`;
+    if (quarantineMode) confirmMsg += `  (Files will be moved to quarantine folder)\n`;
     
     if (largeShowsCount > 0) {
         confirmMsg += `\n\u26a0\ufe0f WARNING: ${largeShowsCount} show(s) are over 50GB!\n`;
@@ -684,12 +674,26 @@ function executeActions() {
     statusBadge.style.display = 'block';
     statusText.textContent = 'Executing actions...';
     
+    let jsonBody;
+    try {
+        jsonBody = JSON.stringify({ actions: actions });
+    } catch (e) {
+        alert('Error preparing actions: ' + e.message);
+        resetButtons();
+        return;
+    }
+    
     fetch('/api/cleanup/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ actions: actions })
+        body: jsonBody
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Server returned ' + response.status);
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.error) {
             alert('Error: ' + data.error);
@@ -699,7 +703,7 @@ function executeActions() {
         }
     })
     .catch(error => {
-        alert('Error executing actions: ' + error);
+        alert('Error executing actions: ' + error.message);
         resetButtons();
     });
 }
