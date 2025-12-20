@@ -238,8 +238,20 @@ function checkStatus() {
             if (candidates.length > 0) {
                 appendLog('[SUCCESS] Scan complete. Found ' + candidates.length + ' candidates for review.', 'success');
             }
-            sortCandidates();
-            renderCandidates();
+            try {
+                sortCandidates();
+                console.log('Sort completed');
+            } catch (e) {
+                console.error('Sort error:', e);
+                appendLog('[ERROR] Sort failed: ' + e.message, 'error');
+            }
+            try {
+                renderCandidates();
+                console.log('Render completed');
+            } catch (e) {
+                console.error('Render error:', e);
+                appendLog('[ERROR] Render failed: ' + e.message, 'error');
+            }
         } else if (data.phase === 'completed' && !data.running) {
             clearInterval(pollInterval);
             resetButtons();
