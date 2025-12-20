@@ -97,9 +97,9 @@ def extract_tvdb_id_from_guid(guid: str) -> Optional[int]:
 
 
 def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
-    """Get watch history from Plex using bulk history fetch for speed.
+    """Get watch history from Plex using server-level history for ALL users.
     
-    Fetches watch history for ALL users on the Plex server, not just the token owner.
+    Uses plex.history() at server level which properly includes all users' watch history.
     Returns view counts in addition to last watched dates.
     """
     watch_history = {}
@@ -111,85 +111,79 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
     log("[INFO] Fetching watch history from Plex (all users)...")
     
     try:
-        plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=60)
+        plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=120)
         
         show_last_watched = {}
         show_view_counts = {}
         show_tvdb_ids = {}
         show_titles = {}
         
+        log("[INFO] Fetching server-level watch history (includes all users)...")
+        try:
+            history = plex.history(maxresults=50000)
+            log(f"[INFO] Processing {len(history)} total history entries...")
+            
+            for item in history:
+                try:
+                    if item.type != 'episode':
+                        continue
+                    
+                    if hasattr(item, 'grandparentTitle') and item.grandparentTitle:
+                        show_title = item.grandparentTitle
+                        show_key = item.grandparentRatingKey if hasattr(item, 'grandparentRatingKey') else show_title
+                    else:
+                        continue
+                    
+                    viewed_at = item.viewedAt if hasattr(item, 'viewedAt') else None
+                    if not viewed_at:
+                        continue
+                    
+                    show_view_counts[show_key] = show_view_counts.get(show_key, 0) + 1
+                    
+                    if show_key not in show_last_watched or viewed_at > show_last_watched[show_key]:
+                        show_last_watched[show_key] = viewed_at
+                        show_titles[show_key] = show_title
+                except Exception:
+                    continue
+            
+            log(f"[SUCCESS] Found history for {len(show_last_watched)} unique shows")
+            
+        except Exception as e:
+            log(f"[WARNING] Server history failed: {e}, trying per-show scan...")
+        
         for section in plex.library.sections():
             if section.type == "show":
-                log(f"[INFO] Fetching history from '{section.title}' (all users)...")
-                
-                try:
-                    try:
-                        history = section.history(maxresults=50000, includeExternal=True)
-                    except TypeError as te:
-                        if 'includeExternal' in str(te):
-                            log(f"[INFO] Plex server doesn't support includeExternal, using standard history...")
-                            history = section.history(maxresults=50000)
-                        else:
-                            raise
-                    log(f"[INFO] Processing {len(history)} history entries...")
-                    
-                    for item in history:
-                        try:
-                            if hasattr(item, 'grandparentTitle'):
-                                show_title = item.grandparentTitle
-                                show_key = item.grandparentRatingKey if hasattr(item, 'grandparentRatingKey') else show_title
-                            elif hasattr(item, 'parentTitle'):
-                                show_title = item.parentTitle
-                                show_key = item.parentRatingKey if hasattr(item, 'parentRatingKey') else show_title
-                            else:
-                                show_title = item.title
-                                show_key = item.ratingKey if hasattr(item, 'ratingKey') else show_title
-                            
-                            viewed_at = item.viewedAt if hasattr(item, 'viewedAt') else None
-                            if not viewed_at:
-                                continue
-                            
-                            show_view_counts[show_key] = show_view_counts.get(show_key, 0) + 1
-                            
-                            if show_key not in show_last_watched or viewed_at > show_last_watched[show_key]:
-                                show_last_watched[show_key] = viewed_at
-                                show_titles[show_key] = show_title
-                        except Exception:
-                            continue
-                    
-                except Exception as e:
-                    log(f"[WARNING] Could not fetch history, falling back to show scan: {e}")
-                    shows = section.all()
-                    if limit > 0:
-                        shows = shows[:limit]
-                    for show in shows:
-                        show_key = show.ratingKey
-                        show_titles[show_key] = show.title
-                        if hasattr(show, 'lastViewedAt') and show.lastViewedAt:
-                            show_last_watched[show_key] = show.lastViewedAt
-                        if hasattr(show, 'viewCount') and show.viewCount:
-                            show_view_counts[show_key] = show.viewCount
-                
-                log(f"[INFO] Fetching TVDB IDs for shows...")
+                log(f"[INFO] Scanning '{section.title}' for show details...")
                 shows = section.all()
                 if limit > 0:
                     shows = shows[:limit]
                 
                 for show in shows:
                     show_key = show.ratingKey
+                    show_titles[show_key] = show.title
+                    
+                    if show_key not in show_last_watched:
+                        if hasattr(show, 'lastViewedAt') and show.lastViewedAt:
+                            show_last_watched[show_key] = show.lastViewedAt
+                        if hasattr(show, 'viewCount') and show.viewCount:
+                            show_view_counts[show_key] = max(
+                                show_view_counts.get(show_key, 0),
+                                show.viewCount
+                            )
+                    
                     try:
-                        for guid in show.guids:
-                            extracted_id = extract_tvdb_id_from_guid(guid.id)
-                            if extracted_id:
-                                show_tvdb_ids[show_key] = extracted_id
-                                break
+                        if hasattr(show, 'guids'):
+                            for guid in show.guids:
+                                extracted_id = extract_tvdb_id_from_guid(guid.id)
+                                if extracted_id:
+                                    show_tvdb_ids[show_key] = extracted_id
+                                    break
                         if show_key not in show_tvdb_ids and hasattr(show, 'guid'):
                             tvdb_id = extract_tvdb_id_from_guid(show.guid)
                             if tvdb_id:
                                 show_tvdb_ids[show_key] = tvdb_id
                     except Exception:
                         pass
-                    show_titles[show_key] = show.title
         
         for show_key in set(list(show_last_watched.keys()) + list(show_titles.keys())):
             title = show_titles.get(show_key, "Unknown")
@@ -207,8 +201,9 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
                 watch_history[tvdb_id] = entry
             watch_history[f"title:{title.lower()}"] = entry
         
+        watched_count = sum(1 for k, v in watch_history.items() if v.get('last_watched'))
         tvdb_count = sum(1 for k in watch_history if isinstance(k, int))
-        log(f"[SUCCESS] Retrieved watch history ({tvdb_count} with TVDB ID)")
+        log(f"[SUCCESS] Retrieved watch history: {watched_count} shows watched, {tvdb_count} with TVDB ID")
         return watch_history
     except Exception as e:
         log(f"[ERROR] Failed to connect to Plex: {e}")
