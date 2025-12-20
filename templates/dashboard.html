@@ -444,7 +444,7 @@ function formatSize(bytes) {
     return size.toFixed(1) + ' ' + units[i];
 }
 
-function renderCandidates() {
+function renderCandidates(scrollToTop = true) {
     const container = document.getElementById('candidates-table');
     const section = document.getElementById('candidates-section');
     const countSpan = document.getElementById('candidate-count');
@@ -470,7 +470,9 @@ function renderCandidates() {
     }
     
     section.style.display = 'block';
-    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (scrollToTop) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
     console.log('Section displayed:', section.style.display);
     container.innerHTML = '';
     
@@ -566,13 +568,13 @@ function excludeShowImmediately(index, title) {
                 row.style.transition = 'opacity 0.3s';
                 row.style.opacity = '0';
                 setTimeout(() => {
-                    // Remove from candidates array and re-render
+                    // Remove from candidates array and re-render without scrolling
                     candidates = candidates.filter((_, i) => i !== index);
-                    renderCandidates();
+                    renderCandidates(false);
                 }, 300);
             } else {
                 candidates = candidates.filter((_, i) => i !== index);
-                renderCandidates();
+                renderCandidates(false);
             }
         } else {
             appendLog(`[ERROR] Failed to exclude: ${data.error || 'Unknown error'}`, 'error');
