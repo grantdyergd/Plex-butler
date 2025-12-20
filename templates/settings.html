@@ -13,7 +13,7 @@
         <div class="col-md-6 mb-4">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="bi bi-hdd-rack me-2"></i>Sonarr</h5>
+                    <h5 class="mb-0"><i class="bi bi-hdd-rack me-2"></i>Sonarr (TV Shows)</h5>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
@@ -25,6 +25,26 @@
                         <label for="sonarr_api_key" class="form-label">API Key</label>
                         <input type="password" class="form-control" id="sonarr_api_key" name="sonarr_api_key" 
                                value="{{ settings.sonarr_api_key }}" required>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-film me-2"></i>Radarr (Movies)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="radarr_url" class="form-label">URL</label>
+                        <input type="url" class="form-control" id="radarr_url" name="radarr_url" 
+                               value="{{ settings.radarr_url }}" placeholder="http://192.168.1.100:7878">
+                    </div>
+                    <div class="mb-0">
+                        <label for="radarr_api_key" class="form-label">API Key</label>
+                        <input type="password" class="form-control" id="radarr_api_key" name="radarr_api_key" 
+                               value="{{ settings.radarr_api_key }}" placeholder="Found in Radarr: Settings > General">
                     </div>
                 </div>
             </div>

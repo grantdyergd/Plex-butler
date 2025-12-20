@@ -58,19 +58,34 @@ class Exclusion(db.Model):
 
 class DeletionHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    media_type = db.Column(db.String(20), default='tv')  # 'tv' or 'movie'
     title = db.Column(db.String(500), nullable=False)
     sonarr_id = db.Column(db.Integer, nullable=True)
+    radarr_id = db.Column(db.Integer, nullable=True)
     tvdb_id = db.Column(db.Integer, nullable=True)
+    tmdb_id = db.Column(db.Integer, nullable=True)
+    imdb_id = db.Column(db.String(20), nullable=True)
+    year = db.Column(db.Integer, nullable=True)
     size_bytes = db.Column(db.BigInteger, nullable=True)
     season_count = db.Column(db.Integer, nullable=True)
     episode_count = db.Column(db.Integer, nullable=True)
+    runtime_minutes = db.Column(db.Integer, nullable=True)
     requester_name = db.Column(db.String(200), nullable=True)
     requester_email = db.Column(db.String(200), nullable=True)
     priority_score = db.Column(db.Integer, nullable=True)
     priority_label = db.Column(db.String(20), nullable=True)
     was_quarantined = db.Column(db.Boolean, default=False)
     deleted_from_sonarr_db = db.Column(db.Boolean, default=False)
+    deleted_from_radarr_db = db.Column(db.Boolean, default=False)
     deleted_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class MovieExclusion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(500), nullable=False)
+    year = db.Column(db.Integer, nullable=True)
+    tmdb_id = db.Column(db.Integer, nullable=True)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 @login_manager.user_loader
@@ -338,6 +353,8 @@ def settings_page():
     if request.method == 'POST':
         set_setting('SONARR_URL', request.form.get('sonarr_url', '').strip().rstrip('/'))
         set_setting('SONARR_API_KEY', request.form.get('sonarr_api_key', '').strip(), is_secret=True, preserve_if_empty=True)
+        set_setting('RADARR_URL', request.form.get('radarr_url', '').strip().rstrip('/'))
+        set_setting('RADARR_API_KEY', request.form.get('radarr_api_key', '').strip(), is_secret=True, preserve_if_empty=True)
         set_setting('PLEX_URL', request.form.get('plex_url', '').strip().rstrip('/'))
         set_setting('PLEX_TOKEN', request.form.get('plex_token', '').strip(), is_secret=True, preserve_if_empty=True)
         set_setting('OMBI_URL', request.form.get('ombi_url', '').strip().rstrip('/'))
@@ -359,6 +376,8 @@ def settings_page():
     settings = {
         'sonarr_url': get_setting('SONARR_URL'),
         'sonarr_api_key': get_setting('SONARR_API_KEY'),
+        'radarr_url': get_setting('RADARR_URL'),
+        'radarr_api_key': get_setting('RADARR_API_KEY'),
         'plex_url': get_setting('PLEX_URL'),
         'plex_token': get_setting('PLEX_TOKEN'),
         'ombi_url': get_setting('OMBI_URL'),
