@@ -210,44 +210,84 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+let scanPollCount = 0;
+const MAX_POLL_COUNT = 180;
+
 function startScan() {
     const statusDiv = document.getElementById('scan-status');
     const statusText = document.getElementById('scan-status-text');
     statusDiv.style.display = 'block';
-    statusText.textContent = 'Scanning library...';
+    statusText.textContent = 'Starting scan...';
+    scanPollCount = 0;
     
     fetch('/api/cleanup/scan', { method: 'POST' })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Server returned ' + response.status);
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.error) {
+                statusDiv.className = 'row mb-4';
+                statusDiv.querySelector('.alert').className = 'alert alert-danger';
                 statusText.textContent = 'Error: ' + data.error;
                 return;
             }
-            pollScanStatus();
+            statusText.textContent = 'Scan started. Connecting to Sonarr and Plex...';
+            setTimeout(pollScanStatus, 1500);
         })
         .catch(err => {
-            statusText.textContent = 'Error starting scan: ' + err;
+            statusDiv.querySelector('.alert').className = 'alert alert-danger';
+            statusText.textContent = 'Error starting scan: ' + err.message;
         });
 }
 
 function pollScanStatus() {
+    const statusDiv = document.getElementById('scan-status');
     const statusText = document.getElementById('scan-status-text');
     
+    scanPollCount++;
+    if (scanPollCount > MAX_POLL_COUNT) {
+        statusDiv.querySelector('.alert').className = 'alert alert-danger';
+        statusText.textContent = 'Scan timed out. Please try again or check the Dashboard for details.';
+        return;
+    }
+    
     fetch('/api/cleanup/status')
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Server returned ' + response.status);
+            }
+            return response.json();
+        })
         .then(data => {
+            const lastLog = data.log && data.log.length > 0 ? data.log[data.log.length - 1] : '';
+            
             if (data.phase === 'scanning' || data.running) {
-                statusText.textContent = 'Scanning library... Please wait.';
-                setTimeout(pollScanStatus, 1000);
+                let statusMsg = 'Scanning library...';
+                if (lastLog) {
+                    const cleanLog = lastLog.replace(/\[(INFO|SUCCESS|WARNING|ERROR)\]\s*/g, '');
+                    statusMsg = cleanLog.substring(0, 80);
+                }
+                statusText.textContent = statusMsg;
+                setTimeout(pollScanStatus, 2000);
             } else if (data.phase === 'ready') {
-                statusText.textContent = 'Scan complete! Reloading page...';
-                setTimeout(() => window.location.reload(), 500);
+                const totalShows = (data.candidates?.length || 0) + (data.skipped?.length || 0);
+                statusDiv.querySelector('.alert').className = 'alert alert-success';
+                statusText.textContent = `Scan complete! Found ${totalShows} shows. Reloading...`;
+                setTimeout(() => window.location.reload(), 1000);
             } else if (data.phase === 'error') {
-                statusText.textContent = 'Scan failed. Check the dashboard for details.';
+                statusDiv.querySelector('.alert').className = 'alert alert-danger';
+                statusText.textContent = 'Scan failed: ' + (lastLog || 'Unknown error');
+            } else {
+                statusText.textContent = 'Waiting for scan to start...';
+                setTimeout(pollScanStatus, 2000);
             }
         })
         .catch(err => {
-            statusText.textContent = 'Error checking status: ' + err;
+            statusDiv.querySelector('.alert').className = 'alert alert-danger';
+            statusText.textContent = 'Error checking status: ' + err.message;
         });
 }
 </script>
