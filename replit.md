@@ -117,13 +117,17 @@ For deployment, the following environment variables should be set:
 6. On execute: Deletes from both Plex and Sonarr, notifies requesters via email
 
 ## Recent Changes
-- Added rich data display: size, episode count, view count, monitored status (Dec 2025)
+- Added priority scoring system for deletion recommendations (Dec 2025)
+  - High priority: Ended + never watched + no requester + large size
+  - Visual badges (High/Medium/Low) with point breakdown
+  - "Why Delete?" column explains reasoning
+- Added rich data display: size, episode count, view count, monitored status
 - Added sortable columns (click headers to sort by any field)
 - Added CSV export for offline candidate review
 - Added quarantine mode (move files instead of delete)
 - Added warnings for large shows (>50GB) and continuing series
 - Added double confirmation for risky deletions
-- Optimized Plex scan performance using bulk history fetch
+- Optimized Plex scan performance using server-level history
 - Plex now checks ALL users' watch history (not just admin)
 - Added two-phase workflow with interactive approval UI
 - Added per-show action selection (delete/exclude/ignore)

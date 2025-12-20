@@ -310,6 +310,63 @@ def format_size(size_bytes: int) -> str:
     return f"{size:.1f} {units[unit_index]}"
 
 
+def calculate_priority_score(show: dict, has_requester: bool) -> dict:
+    """Calculate deletion priority score (0-100). Higher = better candidate for deletion.
+    
+    Scoring factors:
+    - Show ended: +30 points (no new episodes coming)
+    - Never watched: +25 points (no interest from anyone)
+    - Not requested: +20 points (no one specifically asked for it)
+    - Large size (>50GB): +15 points, (>100GB): +20 points
+    - Not monitored: +10 points (already disabled in Sonarr)
+    """
+    score = 0
+    reasons = []
+    
+    if show.get("status") == "Ended":
+        score += 30
+        reasons.append("Ended series")
+    
+    if show.get("view_count", 0) == 0 and not show.get("last_watched"):
+        score += 25
+        reasons.append("Never watched")
+    elif show.get("skip_reason") == "Not watched recently":
+        score += 10
+        reasons.append("Stale")
+    
+    if not has_requester:
+        score += 20
+        reasons.append("No requester")
+    
+    size_bytes = show.get("size_bytes", 0)
+    size_gb = size_bytes / (1024 ** 3)
+    if size_gb > 100:
+        score += 20
+        reasons.append(f"Very large ({size_gb:.0f}GB)")
+    elif size_gb > 50:
+        score += 15
+        reasons.append(f"Large ({size_gb:.0f}GB)")
+    elif size_gb > 20:
+        score += 5
+    
+    if not show.get("monitored", True):
+        score += 10
+        reasons.append("Unmonitored")
+    
+    if score >= 70:
+        priority_label = "High"
+    elif score >= 40:
+        priority_label = "Medium"
+    else:
+        priority_label = "Low"
+    
+    return {
+        "score": score,
+        "label": priority_label,
+        "reasons": reasons
+    }
+
+
 def analyze_show(
     series: dict,
     exclusions: set,
@@ -457,13 +514,21 @@ def scan_for_candidates(get_setting: Callable, log_callback: Optional[Callable] 
         analysis["requester_name"] = requester.get("name", "")
         
         if analysis["is_candidate"]:
+            has_requester = bool(analysis["requester_email"] or analysis["requester_name"])
+            priority = calculate_priority_score(analysis, has_requester)
+            analysis["priority_score"] = priority["score"]
+            analysis["priority_label"] = priority["label"]
+            analysis["priority_reasons"] = priority["reasons"]
             candidates.append(analysis)
         else:
             skipped.append(analysis)
     
+    candidates.sort(key=lambda x: x.get("priority_score", 0), reverse=True)
+    
+    high_priority = sum(1 for c in candidates if c.get("priority_label") == "High")
     log(f"[INFO] Total shows analyzed: {len(series_list)}")
     log(f"[SUCCESS] Protected shows: {len(skipped)}")
-    log(f"[WARNING] Deletion candidates: {len(candidates)}")
+    log(f"[WARNING] Deletion candidates: {len(candidates)} ({high_priority} high priority)")
     
     if not candidates:
         log("[SUCCESS] No shows eligible for deletion. Your library is well-maintained!")

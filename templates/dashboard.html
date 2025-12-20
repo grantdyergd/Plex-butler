@@ -110,14 +110,13 @@
                     <table class="table table-dark table-striped table-hover mb-0" id="candidates-table-wrapper">
                         <thead>
                             <tr>
+                                <th class="sortable" data-sort="priority_score" style="cursor:pointer;">Priority <i class="bi bi-arrow-down-up"></i></th>
                                 <th class="sortable" data-sort="title" style="cursor:pointer;">Title <i class="bi bi-arrow-down-up"></i></th>
                                 <th class="sortable" data-sort="status" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up"></i></th>
                                 <th class="sortable" data-sort="size_bytes" style="cursor:pointer;">Size <i class="bi bi-arrow-down-up"></i></th>
-                                <th class="sortable" data-sort="episode_count" style="cursor:pointer;">Episodes <i class="bi bi-arrow-down-up"></i></th>
                                 <th class="sortable" data-sort="view_count" style="cursor:pointer;">Views <i class="bi bi-arrow-down-up"></i></th>
-                                <th>Reason</th>
+                                <th>Why Delete?</th>
                                 <th class="sortable" data-sort="added_date" style="cursor:pointer;">Added <i class="bi bi-arrow-down-up"></i></th>
-                                <th class="sortable" data-sort="last_watched" style="cursor:pointer;">Watched <i class="bi bi-arrow-down-up"></i></th>
                                 <th>Action</th>
                             </tr>
                         </thead>
@@ -178,8 +177,8 @@
 <script>
 let pollInterval = null;
 let candidates = [];
-let sortField = 'status';
-let sortAsc = true;
+let sortField = 'priority_score';
+let sortAsc = false;
 
 const LARGE_SIZE_THRESHOLD = 50 * 1024 * 1024 * 1024; // 50GB
 
@@ -316,28 +315,27 @@ function renderCandidates() {
     
     candidates.forEach((show, index) => {
         const row = document.createElement('tr');
-        const isLarge = (show.size_bytes || 0) >= LARGE_SIZE_THRESHOLD;
-        const isContinuing = show.status === 'Continuing';
-        const isMonitored = show.monitored;
+        const priorityLabel = show.priority_label || 'Low';
+        const priorityReasons = (show.priority_reasons || []).join(', ');
         
-        let warnings = [];
-        if (isLarge) warnings.push('Large show (>50GB)');
-        if (isContinuing) warnings.push('Still airing');
-        if (isMonitored) warnings.push('Monitored in Sonarr');
+        let priorityBadgeClass = 'bg-secondary';
+        if (priorityLabel === 'High') priorityBadgeClass = 'bg-danger';
+        else if (priorityLabel === 'Medium') priorityBadgeClass = 'bg-warning text-dark';
         
         row.innerHTML = `
             <td>
+                <span class="badge ${priorityBadgeClass}">${priorityLabel}</span>
+                <br><small class="text-muted">${show.priority_score || 0} pts</small>
+            </td>
+            <td>
                 <strong>${escapeHtml(show.title)}</strong>
-                ${show.requester_email ? `<br><small class="text-muted">By: ${escapeHtml(show.requester_name || 'Unknown')}</small>` : ''}
-                ${warnings.length > 0 ? `<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> ${warnings.join(', ')}</small>` : ''}
+                ${show.requester_email ? `<br><small class="text-info">Requested by: ${escapeHtml(show.requester_name || 'User')}</small>` : '<br><small class="text-muted">No requester</small>'}
             </td>
             <td><span class="badge ${show.status === 'Ended' ? 'bg-secondary' : 'bg-info'}">${escapeHtml(show.status)}</span></td>
             <td><small>${show.size_display || formatSize(show.size_bytes || 0)}</small></td>
-            <td><small>${show.season_count || 0}S / ${show.episode_count || 0}E</small></td>
             <td><small>${show.view_count || 0}</small></td>
-            <td><small>${escapeHtml(show.skip_reason || 'Eligible')}</small></td>
+            <td><small>${escapeHtml(priorityReasons || show.skip_reason || 'Eligible')}</small></td>
             <td><small>${show.added_date || '?'}</small></td>
-            <td><small>${show.last_watched || 'Never'}</small></td>
             <td>
                 <div class="btn-group btn-group-sm" role="group">
                     <input type="radio" class="btn-check" name="action-${index}" id="delete-${index}" value="delete" autocomplete="off">
@@ -370,18 +368,17 @@ function escapeHtml(text) {
 }
 
 function exportCSV() {
-    const headers = ['Title', 'Status', 'Size', 'Seasons', 'Episodes', 'Views', 'Reason', 'Added', 'Last Watched', 'Requester', 'Monitored'];
+    const headers = ['Priority', 'Score', 'Title', 'Status', 'Size', 'Views', 'Why Delete', 'Added', 'Requester', 'Monitored'];
     const rows = candidates.map(s => [
+        s.priority_label || 'Low',
+        s.priority_score || 0,
         s.title,
         s.status,
         s.size_display || formatSize(s.size_bytes || 0),
-        s.season_count || 0,
-        s.episode_count || 0,
         s.view_count || 0,
-        s.skip_reason || '',
+        (s.priority_reasons || []).join('; ') || s.skip_reason || '',
         s.added_date || '',
-        s.last_watched || '',
-        s.requester_name || '',
+        s.requester_name || 'None',
         s.monitored ? 'Yes' : 'No'
     ]);
     
