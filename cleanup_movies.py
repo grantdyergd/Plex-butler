@@ -406,7 +406,8 @@ def scan_movies_for_cleanup(config: dict, log: Callable) -> list:
         log("[ERROR] No movies found in Radarr")
         return []
     
-    test_limit = int(config.get('TEST_MODE_LIMIT', 0))
+    test_limit_val = config.get('TEST_MODE_LIMIT', '0') or '0'
+    test_limit = int(test_limit_val) if str(test_limit_val).isdigit() else 0
     if test_limit > 0:
         movies = movies[:test_limit]
         log(f"[INFO] Test mode: limiting to {test_limit} movies")
@@ -415,8 +416,10 @@ def scan_movies_for_cleanup(config: dict, log: Callable) -> list:
     requesters = get_ombi_movie_requesters(config, log)
     exclusions = load_movie_exclusions_from_db()
     
-    skip_added_days = int(config.get('SKIP_IF_ADDED_WITHIN_DAYS', 90))
-    skip_watched_days = int(config.get('SKIP_IF_WATCHED_WITHIN_DAYS', 180))
+    skip_added_val = config.get('SKIP_IF_ADDED_WITHIN_DAYS', '90') or '90'
+    skip_watched_val = config.get('SKIP_IF_WATCHED_WITHIN_DAYS', '180') or '180'
+    skip_added_days = int(skip_added_val) if str(skip_added_val).isdigit() else 90
+    skip_watched_days = int(skip_watched_val) if str(skip_watched_val).isdigit() else 180
     
     candidates = []
     now = datetime.utcnow()
@@ -551,7 +554,8 @@ def send_movie_notification_email(
 ) -> bool:
     """Send notification email to movie requester about deletion."""
     smtp_host = config.get('SMTP_HOST')
-    smtp_port = int(config.get('SMTP_PORT', 587))
+    smtp_port_val = config.get('SMTP_PORT', '587') or '587'
+    smtp_port = int(smtp_port_val) if str(smtp_port_val).isdigit() else 587
     smtp_user = config.get('SMTP_USER')
     smtp_password = config.get('SMTP_PASSWORD')
     smtp_from = config.get('SMTP_FROM')
