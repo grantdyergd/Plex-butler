@@ -116,6 +116,63 @@
                     </button>
                 </div>
             </div>
+            <div class="card-body p-2 border-bottom">
+                <div class="row g-2 align-items-center">
+                    <div class="col-auto">
+                        <label class="form-label mb-0 small">Filters:</label>
+                    </div>
+                    <div class="col-auto">
+                        <select id="filter-priority" class="form-select form-select-sm" onchange="applyFilters()">
+                            <option value="">All Priorities</option>
+                            <option value="High">High</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Low">Low</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <select id="filter-status" class="form-select form-select-sm" onchange="applyFilters()">
+                            <option value="">All Status</option>
+                            <option value="Ended">Ended</option>
+                            <option value="Continuing">Continuing</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <select id="filter-size" class="form-select form-select-sm" onchange="applyFilters()">
+                            <option value="">Any Size</option>
+                            <option value="50">50+ GB</option>
+                            <option value="20">20+ GB</option>
+                            <option value="10">10+ GB</option>
+                            <option value="5">5+ GB</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <select id="filter-views" class="form-select form-select-sm" onchange="applyFilters()">
+                            <option value="">Any Views</option>
+                            <option value="0">Never Watched (0)</option>
+                            <option value="1-5">1-5 Views</option>
+                            <option value="5+">5+ Views</option>
+                        </select>
+                    </div>
+                    <div class="col-auto">
+                        <select id="filter-requester" class="form-select form-select-sm" onchange="applyFilters()">
+                            <option value="">Any Requester</option>
+                            <option value="none">No Requester</option>
+                            <option value="has">Has Requester</option>
+                        </select>
+                    </div>
+                    <div class="col">
+                        <input type="text" id="filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyFilters()">
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="clearFilters()">
+                            <i class="bi bi-x-circle me-1"></i>Clear
+                        </button>
+                    </div>
+                    <div class="col-auto">
+                        <span class="badge bg-info" id="filtered-count">0 shown</span>
+                    </div>
+                </div>
+            </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-dark table-striped table-hover mb-0" id="candidates-table-wrapper">
@@ -188,10 +245,68 @@
 <script>
 let pollInterval = null;
 let candidates = [];
+let filteredIndices = [];
 let sortField = 'priority_score';
 let sortAsc = false;
 
 const LARGE_SIZE_THRESHOLD = 50 * 1024 * 1024 * 1024; // 50GB
+
+function getFilteredCandidates() {
+    const priorityFilter = document.getElementById('filter-priority')?.value || '';
+    const statusFilter = document.getElementById('filter-status')?.value || '';
+    const sizeFilter = document.getElementById('filter-size')?.value || '';
+    const viewsFilter = document.getElementById('filter-views')?.value || '';
+    const requesterFilter = document.getElementById('filter-requester')?.value || '';
+    const titleFilter = (document.getElementById('filter-title')?.value || '').toLowerCase().trim();
+    
+    filteredIndices = [];
+    
+    candidates.forEach((show, index) => {
+        let match = true;
+        
+        if (priorityFilter && show.priority_label !== priorityFilter) match = false;
+        if (statusFilter && show.status !== statusFilter) match = false;
+        
+        if (sizeFilter) {
+            const sizeGB = (show.size_bytes || 0) / (1024 * 1024 * 1024);
+            if (sizeGB < parseInt(sizeFilter)) match = false;
+        }
+        
+        if (viewsFilter) {
+            const views = show.view_count || 0;
+            if (viewsFilter === '0' && views !== 0) match = false;
+            else if (viewsFilter === '1-5' && (views < 1 || views > 5)) match = false;
+            else if (viewsFilter === '5+' && views < 5) match = false;
+        }
+        
+        if (requesterFilter) {
+            const hasRequester = !!(show.requester_email || show.requester_name);
+            if (requesterFilter === 'none' && hasRequester) match = false;
+            else if (requesterFilter === 'has' && !hasRequester) match = false;
+        }
+        
+        if (titleFilter && !show.title.toLowerCase().includes(titleFilter)) match = false;
+        
+        if (match) filteredIndices.push(index);
+    });
+    
+    return filteredIndices;
+}
+
+function applyFilters() {
+    getFilteredCandidates();
+    renderCandidates();
+}
+
+function clearFilters() {
+    document.getElementById('filter-priority').value = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-size').value = '';
+    document.getElementById('filter-views').value = '';
+    document.getElementById('filter-requester').value = '';
+    document.getElementById('filter-title').value = '';
+    applyFilters();
+}
 
 function startScan() {
     const statusBadge = document.getElementById('status-badge');
@@ -334,6 +449,7 @@ function renderCandidates() {
     const section = document.getElementById('candidates-section');
     const countSpan = document.getElementById('candidate-count');
     const totalSizeSpan = document.getElementById('total-size');
+    const filteredCountSpan = document.getElementById('filtered-count');
     
     console.log('renderCandidates called, candidates:', candidates.length);
     
@@ -347,6 +463,12 @@ function renderCandidates() {
         return;
     }
     
+    getFilteredCandidates();
+    
+    if (filteredCountSpan) {
+        filteredCountSpan.textContent = `${filteredIndices.length} of ${candidates.length} shown`;
+    }
+    
     section.style.display = 'block';
     section.scrollIntoView({ behavior: 'smooth', block: 'start' });
     console.log('Section displayed:', section.style.display);
@@ -356,7 +478,8 @@ function renderCandidates() {
         th.onclick = () => handleSort(th.dataset.sort);
     });
     
-    candidates.forEach((show, index) => {
+    filteredIndices.forEach(index => {
+        const show = candidates[index];
         const row = document.createElement('tr');
         row.id = `row-${index}`;
         const priorityLabel = show.priority_label || 'Low';
@@ -400,20 +523,25 @@ function renderCandidates() {
 }
 
 function selectAllAction(action) {
-    candidates.forEach((_, index) => {
+    filteredIndices.forEach(index => {
         const radio = document.getElementById(`${action}-${index}`);
         if (radio) radio.checked = true;
     });
+    appendLog(`[INFO] Selected ${filteredIndices.length} visible shows for ${action}`, 'info');
 }
 
 function selectByPriority(priority, action) {
-    candidates.forEach((show, index) => {
+    let count = 0;
+    filteredIndices.forEach(index => {
+        const show = candidates[index];
         if (show.priority_label === priority) {
             const radio = document.getElementById(`${action}-${index}`);
-            if (radio) radio.checked = true;
+            if (radio) {
+                radio.checked = true;
+                count++;
+            }
         }
     });
-    const count = candidates.filter(s => s.priority_label === priority).length;
     appendLog(`[INFO] Selected ${count} ${priority} priority shows for ${action}`, 'info');
 }
 
