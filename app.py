@@ -401,7 +401,7 @@ def exclusions():
     if request.method == 'POST':
         action = request.form.get('action')
         
-        if action == 'add':
+        if action == 'add_show':
             show_title = request.form.get('show_title', '').strip()
             if show_title:
                 existing = Exclusion.query.filter(db.func.lower(Exclusion.title) == show_title.lower()).first()
@@ -409,9 +409,9 @@ def exclusions():
                     new_exclusion = Exclusion(title=show_title)
                     db.session.add(new_exclusion)
                     db.session.commit()
-                flash(f"Added '{show_title}' to exclusion list", 'success')
+                flash(f"Added '{show_title}' to TV show exclusions", 'success')
         
-        elif action == 'remove':
+        elif action == 'remove_show':
             show_to_remove = request.form.get('show_to_remove', '').strip().lower()
             if show_to_remove:
                 exclusion = Exclusion.query.filter(db.func.lower(Exclusion.title) == show_to_remove).first()
@@ -420,11 +420,36 @@ def exclusions():
                     db.session.commit()
                 flash(f"Removed show from exclusion list", 'success')
         
+        elif action == 'add_movie':
+            movie_title = request.form.get('movie_title', '').strip()
+            movie_year = request.form.get('movie_year', '').strip()
+            if movie_title:
+                year_val = int(movie_year) if movie_year else None
+                existing = MovieExclusion.query.filter(
+                    db.func.lower(MovieExclusion.title) == movie_title.lower(),
+                    MovieExclusion.year == year_val
+                ).first()
+                if not existing:
+                    new_exclusion = MovieExclusion(title=movie_title, year=year_val)
+                    db.session.add(new_exclusion)
+                    db.session.commit()
+                year_str = f" ({year_val})" if year_val else ""
+                flash(f"Added '{movie_title}{year_str}' to movie exclusions", 'success')
+        
+        elif action == 'remove_movie':
+            movie_id = request.form.get('movie_id')
+            if movie_id:
+                exclusion = MovieExclusion.query.get(int(movie_id))
+                if exclusion:
+                    db.session.delete(exclusion)
+                    db.session.commit()
+                flash(f"Removed movie from exclusion list", 'success')
+        
         return redirect(url_for('exclusions'))
     
     excluded_shows = [e.title for e in Exclusion.query.order_by(Exclusion.title).all()]
-    has_shows = cleanup_status.get('candidates') or cleanup_status.get('skipped')
-    return render_template('exclusions.html', excluded_shows=excluded_shows, has_shows=has_shows)
+    excluded_movies = MovieExclusion.query.order_by(MovieExclusion.title).all()
+    return render_template('exclusions.html', excluded_shows=excluded_shows, excluded_movies=excluded_movies)
 
 
 @app.route('/history')
@@ -433,7 +458,169 @@ def history():
     """Show deletion history."""
     deletions = DeletionHistory.query.order_by(DeletionHistory.deleted_at.desc()).all()
     sonarr_url = get_setting('SONARR_URL', '').rstrip('/')
-    return render_template('history.html', deletions=deletions, sonarr_url=sonarr_url)
+    radarr_url = get_setting('RADARR_URL', '').rstrip('/')
+    return render_template('history.html', deletions=deletions, sonarr_url=sonarr_url, radarr_url=radarr_url)
+
+
+movie_cleanup_status = {
+    'running': False,
+    'candidates': [],
+    'log': []
+}
+
+
+@app.route('/movies')
+@login_required
+def movies():
+    """Movies dashboard for Radarr cleanup."""
+    radarr_url = get_setting('RADARR_URL')
+    if not radarr_url:
+        flash('Please configure Radarr in Settings first.', 'warning')
+        return redirect(url_for('settings_page'))
+    
+    settings = {
+        'radarr_url': radarr_url,
+        'plex_url': get_setting('PLEX_URL'),
+        'ombi_url': get_setting('OMBI_URL'),
+        'skip_added_days': get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90'),
+        'skip_watched_days': get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180'),
+    }
+    return render_template('movies.html', settings=settings, cleanup_status=movie_cleanup_status)
+
+
+movie_cleanup_lock = threading.Lock()
+
+
+@app.route('/api/movies/scan', methods=['POST'])
+@login_required
+def scan_movies_api():
+    global movie_cleanup_status
+    
+    with movie_cleanup_lock:
+        if movie_cleanup_status['running']:
+            return jsonify({'error': 'A movie scan is already running'}), 400
+        movie_cleanup_status['running'] = True
+        movie_cleanup_status['log'] = []
+        movie_cleanup_status['candidates'] = []
+    
+    def run_scan_thread():
+        global movie_cleanup_status
+        with app.app_context():
+            try:
+                from cleanup_movies import scan_movies_for_cleanup
+                config = {
+                    'RADARR_URL': get_setting('RADARR_URL'),
+                    'RADARR_API_KEY': get_setting('RADARR_API_KEY'),
+                    'PLEX_URL': get_setting('PLEX_URL'),
+                    'PLEX_TOKEN': get_setting('PLEX_TOKEN'),
+                    'OMBI_URL': get_setting('OMBI_URL'),
+                    'OMBI_API_KEY': get_setting('OMBI_API_KEY'),
+                    'SKIP_IF_ADDED_WITHIN_DAYS': get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90'),
+                    'SKIP_IF_WATCHED_WITHIN_DAYS': get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180'),
+                    'TEST_MODE_LIMIT': get_setting('TEST_MODE_LIMIT', '0'),
+                }
+                candidates = scan_movies_for_cleanup(
+                    config,
+                    log=lambda msg: movie_cleanup_status['log'].append(msg)
+                )
+                movie_cleanup_status['candidates'] = candidates
+            except Exception as e:
+                movie_cleanup_status['log'].append(f"[ERROR] {str(e)}")
+            finally:
+                with movie_cleanup_lock:
+                    movie_cleanup_status['running'] = False
+    
+    thread = threading.Thread(target=run_scan_thread)
+    thread.start()
+    
+    return jsonify({'message': 'Movie scan started'})
+
+
+@app.route('/api/movies/execute', methods=['POST'])
+@login_required
+def execute_movies_api():
+    global movie_cleanup_status
+    
+    with movie_cleanup_lock:
+        if movie_cleanup_status['running']:
+            return jsonify({'error': 'A movie operation is already running'}), 400
+        movie_cleanup_status['running'] = True
+    
+    actions = request.json.get('actions', [])
+    
+    if not actions:
+        with movie_cleanup_lock:
+            movie_cleanup_status['running'] = False
+        return jsonify({'error': 'No actions provided'}), 400
+    
+    def run_execute_thread():
+        global movie_cleanup_status
+        with app.app_context():
+            try:
+                from cleanup_movies import execute_movie_actions
+                config = {
+                    'RADARR_URL': get_setting('RADARR_URL'),
+                    'RADARR_API_KEY': get_setting('RADARR_API_KEY'),
+                    'SMTP_HOST': get_setting('SMTP_HOST'),
+                    'SMTP_PORT': get_setting('SMTP_PORT', '587'),
+                    'SMTP_USER': get_setting('SMTP_USER'),
+                    'SMTP_PASSWORD': get_setting('SMTP_PASSWORD') or os.environ.get('SMTP_PASSWORD', ''),
+                    'SMTP_FROM': get_setting('SMTP_FROM'),
+                    'QUARANTINE_PATH': get_setting('QUARANTINE_PATH'),
+                    'DELETION_DELAY_SECONDS': get_setting('DELETION_DELAY_SECONDS', '2.0'),
+                }
+                movie_cleanup_status['log'].append("[INFO] Executing movie actions...")
+                result = execute_movie_actions(
+                    actions,
+                    config,
+                    log=lambda msg: movie_cleanup_status['log'].append(msg),
+                    quarantine=any(a.get('quarantine') for a in actions),
+                    delete_from_db=any(a.get('deleteFromRadarr') for a in actions)
+                )
+                movie_cleanup_status['candidates'] = []
+            except Exception as e:
+                movie_cleanup_status['log'].append(f"[ERROR] {str(e)}")
+            finally:
+                with movie_cleanup_lock:
+                    movie_cleanup_status['running'] = False
+    
+    thread = threading.Thread(target=run_execute_thread)
+    thread.start()
+    
+    return jsonify({'message': 'Movie execution started', 'action_count': len(actions)})
+
+
+@app.route('/api/movies/status')
+@login_required
+def movie_cleanup_status_api():
+    return jsonify(movie_cleanup_status)
+
+
+@app.route('/api/movies/exclude', methods=['POST'])
+@login_required
+def exclude_movie_api():
+    """Add a movie to the exclusion list immediately."""
+    data = request.get_json()
+    if not data or not data.get('title'):
+        return jsonify({'success': False, 'error': 'No movie title provided'}), 400
+    
+    title = data.get('title')
+    year = data.get('year')
+    tmdb_id = data.get('tmdb_id')
+    
+    existing = MovieExclusion.query.filter(
+        db.func.lower(MovieExclusion.title) == title.lower(),
+        MovieExclusion.year == year
+    ).first()
+    
+    if existing:
+        return jsonify({'success': True, 'message': 'Movie already in exclusion list'})
+    
+    new_exclusion = MovieExclusion(title=title, year=year, tmdb_id=tmdb_id)
+    db.session.add(new_exclusion)
+    db.session.commit()
+    
+    return jsonify({'success': True, 'message': f"Added '{title}' to exclusion list"})
 
 
 @app.route('/api/history', methods=['GET'])

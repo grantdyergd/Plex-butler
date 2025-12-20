@@ -1,294 +1,135 @@
 {% extends "base.html" %}
-{% block title %}Exclusions - TV Show Cleanup{% endblock %}
+{% block title %}Exclusions - Media Cleanup{% endblock %}
 
 {% block content %}
 <div class="row mb-4">
     <div class="col-12">
-        <h2><i class="bi bi-shield-check me-2"></i>Exclusion List</h2>
-        <p class="text-muted">Shows in this list will never appear as deletion candidates.</p>
+        <h2><i class="bi bi-shield-check me-2"></i>Exclusion Lists</h2>
+        <p class="text-muted">Items in these lists will never appear as deletion candidates.</p>
     </div>
 </div>
 
-{% if not has_shows %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="alert alert-info d-flex align-items-center justify-content-between">
-            <div>
-                <i class="bi bi-info-circle me-2"></i>
-                <strong>Scan Required:</strong> Run a library scan first to enable show search and autocomplete.
-            </div>
-            <button class="btn btn-primary" onclick="startScan()">
-                <i class="bi bi-search me-2"></i>Scan Library
-            </button>
-        </div>
-    </div>
-</div>
-{% else %}
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="alert alert-success d-flex align-items-center justify-content-between">
-            <div>
-                <i class="bi bi-check-circle me-2"></i>
-                Library data loaded. Start typing below to search and add shows.
-            </div>
-            <button class="btn btn-outline-primary btn-sm" onclick="startScan()">
-                <i class="bi bi-arrow-clockwise me-2"></i>Refresh Library
-            </button>
-        </div>
-    </div>
-</div>
-{% endif %}
+<ul class="nav nav-tabs mb-4" id="exclusionTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tv-tab" data-bs-toggle="tab" data-bs-target="#tv-pane" type="button" role="tab">
+            <i class="bi bi-tv me-1"></i>TV Shows <span class="badge bg-secondary">{{ excluded_shows|length }}</span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="movies-tab" data-bs-toggle="tab" data-bs-target="#movies-pane" type="button" role="tab">
+            <i class="bi bi-film me-1"></i>Movies <span class="badge bg-secondary">{{ excluded_movies|length }}</span>
+        </button>
+    </li>
+</ul>
 
-<div id="scan-status" class="row mb-4" style="display: none;">
-    <div class="col-12">
-        <div class="alert alert-warning">
-            <i class="bi bi-hourglass-split me-2"></i>
-            <span id="scan-status-text">Scanning library...</span>
-        </div>
-    </div>
-</div>
-
-<div class="row">
-    <div class="col-md-6 mb-4">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Add Show to Exclusions</h5>
-            </div>
-            <div class="card-body">
-                <div class="mb-3 position-relative">
-                    <label for="show_search" class="form-label">Search for a show</label>
-                    <input type="text" class="form-control" id="show_search" 
-                           placeholder="Start typing show name..." autocomplete="off"
-                           {% if not has_shows %}disabled{% endif %}>
-                    <div id="autocomplete-results" class="list-group position-absolute w-100" 
-                         style="z-index: 1000; max-height: 300px; overflow-y: auto; display: none;">
+<div class="tab-content" id="exclusionTabContent">
+    <div class="tab-pane fade show active" id="tv-pane" role="tabpanel">
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Add TV Show</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <input type="hidden" name="action" value="add_show">
+                            <div class="input-group">
+                                <input type="text" class="form-control" name="show_title" placeholder="e.g., Breaking Bad" required>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-plus-lg me-1"></i>Add
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
-                <form method="POST" id="add-form">
-                    <input type="hidden" name="action" value="add">
-                    <input type="hidden" name="show_title" id="selected_show_title" value="">
-                    <div id="selected-show" class="mb-3" style="display: none;">
-                        <div class="alert alert-secondary d-flex justify-content-between align-items-center mb-0">
-                            <span id="selected-show-name"></span>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">
-                                <i class="bi bi-x"></i>
-                            </button>
-                        </div>
+            </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Excluded TV Shows</h5>
+                        <span class="badge bg-secondary">{{ excluded_shows|length }}</span>
                     </div>
-                    <button type="submit" class="btn btn-primary" id="add-btn" disabled>
-                        <i class="bi bi-plus-lg me-2"></i>Add to Exclusions
-                    </button>
-                </form>
-                
-                <hr class="my-3">
-                <p class="text-muted small mb-2">Or manually enter a show title:</p>
-                <form method="POST">
-                    <input type="hidden" name="action" value="add">
-                    <div class="input-group">
-                        <input type="text" class="form-control" name="show_title" placeholder="e.g., Breaking Bad">
-                        <button type="submit" class="btn btn-outline-primary">Add</button>
+                    <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                        {% if excluded_shows %}
+                        <ul class="list-group">
+                            {% for show in excluded_shows %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span>{{ show }}</span>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Remove {{ show }} from exclusions?');">
+                                    <input type="hidden" name="action" value="remove_show">
+                                    <input type="hidden" name="show_to_remove" value="{{ show }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </form>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="text-muted mb-0">No TV shows in exclusion list yet.</p>
+                        {% endif %}
                     </div>
-                </form>
+                </div>
             </div>
         </div>
     </div>
     
-    <div class="col-md-6 mb-4">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Excluded Shows</h5>
-                <span class="badge bg-secondary">{{ excluded_shows|length }}</span>
-            </div>
-            <div class="card-body" style="max-height: 400px; overflow-y: auto;">
-                {% if excluded_shows %}
-                <ul class="list-group">
-                    {% for show in excluded_shows %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <span>{{ show }}</span>
-                        <form method="POST" class="d-inline" onsubmit="return confirm('Remove {{ show }} from exclusions?');">
-                            <input type="hidden" name="action" value="remove">
-                            <input type="hidden" name="show_to_remove" value="{{ show }}">
-                            <button type="submit" class="btn btn-sm btn-outline-danger">
-                                <i class="bi bi-x-lg"></i>
+    <div class="tab-pane fade" id="movies-pane" role="tabpanel">
+        <div class="row">
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="bi bi-plus-circle me-2"></i>Add Movie</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <input type="hidden" name="action" value="add_movie">
+                            <div class="row g-2">
+                                <div class="col-8">
+                                    <input type="text" class="form-control" name="movie_title" placeholder="e.g., The Matrix" required>
+                                </div>
+                                <div class="col-4">
+                                    <input type="number" class="form-control" name="movie_year" placeholder="Year" min="1900" max="2099">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary mt-2 w-100">
+                                <i class="bi bi-plus-lg me-1"></i>Add Movie
                             </button>
                         </form>
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <p class="text-muted mb-0">No shows in exclusion list yet.</p>
-                {% endif %}
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6 mb-4">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-list-check me-2"></i>Excluded Movies</h5>
+                        <span class="badge bg-secondary">{{ excluded_movies|length }}</span>
+                    </div>
+                    <div class="card-body" style="max-height: 400px; overflow-y: auto;">
+                        {% if excluded_movies %}
+                        <ul class="list-group">
+                            {% for movie in excluded_movies %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <span>{{ movie.title }}{% if movie.year %} ({{ movie.year }}){% endif %}</span>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Remove {{ movie.title }} from exclusions?');">
+                                    <input type="hidden" name="action" value="remove_movie">
+                                    <input type="hidden" name="movie_id" value="{{ movie.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </form>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="text-muted mb-0">No movies in exclusion list yet.</p>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-let allShows = [];
-let selectedShow = null;
-
-document.addEventListener('DOMContentLoaded', function() {
-    loadShows();
-    
-    const searchInput = document.getElementById('show_search');
-    if (searchInput) {
-        searchInput.addEventListener('input', handleSearch);
-        searchInput.addEventListener('focus', handleSearch);
-        
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('#show_search') && !e.target.closest('#autocomplete-results')) {
-                document.getElementById('autocomplete-results').style.display = 'none';
-            }
-        });
-    }
-});
-
-function loadShows() {
-    fetch('/api/shows')
-        .then(response => response.json())
-        .then(data => {
-            allShows = data;
-            if (allShows.length > 0) {
-                document.getElementById('show_search').disabled = false;
-            }
-        })
-        .catch(err => console.log('Could not load shows:', err));
-}
-
-function handleSearch() {
-    const query = document.getElementById('show_search').value.toLowerCase().trim();
-    const resultsContainer = document.getElementById('autocomplete-results');
-    
-    if (query.length < 2) {
-        resultsContainer.style.display = 'none';
-        return;
-    }
-    
-    const matches = allShows.filter(show => 
-        show.title.toLowerCase().includes(query)
-    ).slice(0, 15);
-    
-    if (matches.length === 0) {
-        resultsContainer.innerHTML = '<div class="list-group-item text-muted">No shows found</div>';
-        resultsContainer.style.display = 'block';
-        return;
-    }
-    
-    resultsContainer.innerHTML = matches.map(show => `
-        <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
-                onclick="selectShow('${escapeHtml(show.title)}')">
-            <span>${escapeHtml(show.title)}</span>
-            <span class="badge ${show.status === 'Ended' ? 'bg-secondary' : 'bg-info'}">${show.status}</span>
-        </button>
-    `).join('');
-    
-    resultsContainer.style.display = 'block';
-}
-
-function selectShow(title) {
-    selectedShow = title;
-    document.getElementById('selected_show_title').value = title;
-    document.getElementById('selected-show-name').textContent = title;
-    document.getElementById('selected-show').style.display = 'block';
-    document.getElementById('add-btn').disabled = false;
-    document.getElementById('show_search').value = '';
-    document.getElementById('autocomplete-results').style.display = 'none';
-}
-
-function clearSelection() {
-    selectedShow = null;
-    document.getElementById('selected_show_title').value = '';
-    document.getElementById('selected-show').style.display = 'none';
-    document.getElementById('add-btn').disabled = true;
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-let scanPollCount = 0;
-const MAX_POLL_COUNT = 180;
-
-function startScan() {
-    const statusDiv = document.getElementById('scan-status');
-    const statusText = document.getElementById('scan-status-text');
-    statusDiv.style.display = 'block';
-    statusText.textContent = 'Starting scan...';
-    scanPollCount = 0;
-    
-    fetch('/api/cleanup/scan', { method: 'POST' })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Server returned ' + response.status);
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.error) {
-                statusDiv.className = 'row mb-4';
-                statusDiv.querySelector('.alert').className = 'alert alert-danger';
-                statusText.textContent = 'Error: ' + data.error;
-                return;
-            }
-            statusText.textContent = 'Scan started. Connecting to Sonarr and Plex...';
-            setTimeout(pollScanStatus, 1500);
-        })
-        .catch(err => {
-            statusDiv.querySelector('.alert').className = 'alert alert-danger';
-            statusText.textContent = 'Error starting scan: ' + err.message;
-        });
-}
-
-function pollScanStatus() {
-    const statusDiv = document.getElementById('scan-status');
-    const statusText = document.getElementById('scan-status-text');
-    
-    scanPollCount++;
-    if (scanPollCount > MAX_POLL_COUNT) {
-        statusDiv.querySelector('.alert').className = 'alert alert-danger';
-        statusText.textContent = 'Scan timed out. Please try again or check the Dashboard for details.';
-        return;
-    }
-    
-    fetch('/api/cleanup/status')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Server returned ' + response.status);
-            }
-            return response.json();
-        })
-        .then(data => {
-            const lastLog = data.log && data.log.length > 0 ? data.log[data.log.length - 1] : '';
-            
-            if (data.phase === 'scanning' || data.running) {
-                let statusMsg = 'Scanning library...';
-                if (lastLog) {
-                    const cleanLog = lastLog.replace(/\[(INFO|SUCCESS|WARNING|ERROR)\]\s*/g, '');
-                    statusMsg = cleanLog.substring(0, 80);
-                }
-                statusText.textContent = statusMsg;
-                setTimeout(pollScanStatus, 2000);
-            } else if (data.phase === 'ready') {
-                const totalShows = (data.candidates?.length || 0) + (data.skipped?.length || 0);
-                statusDiv.querySelector('.alert').className = 'alert alert-success';
-                statusText.textContent = `Scan complete! Found ${totalShows} shows. Reloading...`;
-                setTimeout(() => window.location.reload(), 1000);
-            } else if (data.phase === 'error') {
-                statusDiv.querySelector('.alert').className = 'alert alert-danger';
-                statusText.textContent = 'Scan failed: ' + (lastLog || 'Unknown error');
-            } else {
-                statusText.textContent = 'Waiting for scan to start...';
-                setTimeout(pollScanStatus, 2000);
-            }
-        })
-        .catch(err => {
-            statusDiv.querySelector('.alert').className = 'alert alert-danger';
-            statusText.textContent = 'Error checking status: ' + err.message;
-        });
-}
-</script>
 {% endblock %}
