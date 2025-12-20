@@ -424,7 +424,10 @@ def exclusions():
             movie_title = request.form.get('movie_title', '').strip()
             movie_year = request.form.get('movie_year', '').strip()
             if movie_title:
-                year_val = int(movie_year) if movie_year else None
+                try:
+                    year_val = int(movie_year) if movie_year else None
+                except ValueError:
+                    year_val = None
                 existing = MovieExclusion.query.filter(
                     db.func.lower(MovieExclusion.title) == movie_title.lower(),
                     MovieExclusion.year == year_val
