@@ -15,23 +15,27 @@ import requests
 from plexapi.server import PlexServer
 
 
-def load_exclusions() -> set:
-    exclusions = set()
-    exclusion_file = "excluded_shows.txt"
-    if os.path.exists(exclusion_file):
-        with open(exclusion_file, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    exclusions.add(line.lower())
-    return exclusions
-
-
-def add_to_exclusions(title: str) -> bool:
-    exclusion_file = "excluded_shows.txt"
+def load_exclusions_from_db() -> set:
+    """Load exclusions from database. Returns set of lowercase titles."""
     try:
-        with open(exclusion_file, "a") as f:
-            f.write(f"\n{title}")
+        from app import Exclusion
+        exclusions = set()
+        for e in Exclusion.query.all():
+            exclusions.add(e.title.lower())
+        return exclusions
+    except Exception:
+        return set()
+
+
+def add_to_exclusions_db(title: str) -> bool:
+    """Add a title to the database exclusion list."""
+    try:
+        from app import Exclusion, db
+        existing = Exclusion.query.filter(db.func.lower(Exclusion.title) == title.lower()).first()
+        if not existing:
+            new_exclusion = Exclusion(title=title)
+            db.session.add(new_exclusion)
+            db.session.commit()
         return True
     except Exception:
         return False
@@ -485,7 +489,7 @@ def scan_for_candidates(get_setting: Callable, log_callback: Optional[Callable] 
     cutoff_added = datetime.now() - timedelta(days=config['SKIP_IF_ADDED_WITHIN_DAYS'])
     cutoff_watched = datetime.now() - timedelta(days=config['SKIP_IF_WATCHED_WITHIN_DAYS'])
     
-    exclusions = load_exclusions()
+    exclusions = load_exclusions_from_db()
     log(f"[INFO] Loaded {len(exclusions)} shows from exclusion list")
     
     series_list = get_sonarr_series(config, log)
@@ -581,7 +585,7 @@ def execute_actions(
     
     for action in exclude_actions:
         title = action.get('title', 'Unknown')
-        if add_to_exclusions(title):
+        if add_to_exclusions_db(title):
             log(f"[SUCCESS] Added '{title}' to exclusion list")
             excluded_count += 1
         else:

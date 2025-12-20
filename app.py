@@ -50,6 +50,12 @@ class Settings(db.Model):
     is_secret = db.Column(db.Boolean, default=False)
 
 
+class Exclusion(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(500), unique=True, nullable=False)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -356,43 +362,31 @@ def settings_page():
 @app.route('/exclusions', methods=['GET', 'POST'])
 @login_required
 def exclusions():
-    exclusion_file = 'excluded_shows.txt'
-    
     if request.method == 'POST':
         action = request.form.get('action')
         
         if action == 'add':
             show_title = request.form.get('show_title', '').strip()
             if show_title:
-                with open(exclusion_file, 'a') as f:
-                    f.write(f"{show_title}\n")
+                existing = Exclusion.query.filter(db.func.lower(Exclusion.title) == show_title.lower()).first()
+                if not existing:
+                    new_exclusion = Exclusion(title=show_title)
+                    db.session.add(new_exclusion)
+                    db.session.commit()
                 flash(f"Added '{show_title}' to exclusion list", 'success')
         
         elif action == 'remove':
             show_to_remove = request.form.get('show_to_remove', '').strip().lower()
             if show_to_remove:
-                lines = []
-                if os.path.exists(exclusion_file):
-                    with open(exclusion_file, 'r') as f:
-                        lines = f.readlines()
-                
-                new_lines = [line for line in lines if line.strip().lower() != show_to_remove]
-                
-                with open(exclusion_file, 'w') as f:
-                    f.writelines(new_lines)
-                
+                exclusion = Exclusion.query.filter(db.func.lower(Exclusion.title) == show_to_remove).first()
+                if exclusion:
+                    db.session.delete(exclusion)
+                    db.session.commit()
                 flash(f"Removed show from exclusion list", 'success')
         
         return redirect(url_for('exclusions'))
     
-    excluded_shows = []
-    if os.path.exists(exclusion_file):
-        with open(exclusion_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    excluded_shows.append(line)
-    
+    excluded_shows = [e.title for e in Exclusion.query.order_by(Exclusion.title).all()]
     has_shows = cleanup_status.get('candidates') or cleanup_status.get('skipped')
     return render_template('exclusions.html', excluded_shows=excluded_shows, has_shows=has_shows)
 
@@ -427,23 +421,18 @@ def add_exclusion_api():
     if not title:
         return jsonify({'success': False, 'error': 'No title provided'}), 400
     
-    exclusion_file = 'excluded_shows.txt'
-    
-    existing = set()
-    if os.path.exists(exclusion_file):
-        with open(exclusion_file, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    existing.add(line.lower())
-    
-    if title.lower() in existing:
+    existing = Exclusion.query.filter(db.func.lower(Exclusion.title) == title.lower()).first()
+    if existing:
         return jsonify({'success': True, 'message': 'Already excluded'})
     
-    with open(exclusion_file, 'a') as f:
-        f.write(f"{title}\n")
-    
-    return jsonify({'success': True, 'message': f'Added "{title}" to exclusion list'})
+    try:
+        new_exclusion = Exclusion(title=title)
+        db.session.add(new_exclusion)
+        db.session.commit()
+        return jsonify({'success': True, 'message': f'Added "{title}" to exclusion list'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/cleanup/scan', methods=['POST'])
