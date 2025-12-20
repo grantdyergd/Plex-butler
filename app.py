@@ -818,6 +818,52 @@ def record_deletion_api():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/email-history', methods=['GET'])
+@login_required
+def get_email_history_api():
+    """Get email history as JSON."""
+    emails = EmailHistory.query.order_by(EmailHistory.sent_at.desc()).all()
+    return jsonify([{
+        'id': e.id,
+        'media_type': e.media_type,
+        'media_title': e.media_title,
+        'action_type': e.action_type,
+        'recipient_name': e.recipient_name,
+        'recipient_email': e.recipient_email,
+        'subject': e.subject,
+        'sent_at': e.sent_at.isoformat() if e.sent_at else None,
+        'was_successful': e.was_successful,
+        'error_message': e.error_message
+    } for e in emails])
+
+
+@app.route('/api/email-history/<int:email_id>', methods=['GET'])
+@login_required
+def get_email_detail_api(email_id):
+    """Get a single email with full body content."""
+    email = EmailHistory.query.get_or_404(email_id)
+    return jsonify({
+        'id': email.id,
+        'media_type': email.media_type,
+        'media_title': email.media_title,
+        'action_type': email.action_type,
+        'recipient_name': email.recipient_name,
+        'recipient_email': email.recipient_email,
+        'subject': email.subject,
+        'body_html': email.body_html,
+        'sent_at': email.sent_at.isoformat() if email.sent_at else None,
+        'was_successful': email.was_successful,
+        'error_message': email.error_message
+    })
+
+
+@app.route('/email-history')
+@login_required
+def email_history_page():
+    """Email history page."""
+    return render_template('email_history.html')
+
+
 @app.route('/api/shows', methods=['GET'])
 @login_required
 def get_all_shows():
