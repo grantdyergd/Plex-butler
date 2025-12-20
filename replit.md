@@ -20,6 +20,7 @@ A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. Thi
 - Deletes from both Plex and Sonarr/Radarr with file cleanup
 - Email notifications to Ombi requesters when excluding items
 - Email history tracking with clickable emails to view full content
+- **Persistent scan results** - Last scan is saved and restored on login
 - Slow, deliberate deletion with delays to prevent mistakes
 - Deletion history tracking with search, filter by type, and re-add links
 

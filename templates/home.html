@@ -960,5 +960,38 @@ function executeMovieActions() {
         moviePollInterval = setInterval(pollMovieStatus, 1000);
     });
 }
+
+async function loadCachedScans() {
+    try {
+        const [tvResponse, movieResponse] = await Promise.all([
+            fetch('/api/scan-cache/tv'),
+            fetch('/api/scan-cache/movie')
+        ]);
+        const tvCache = await tvResponse.json();
+        const movieCache = await movieResponse.json();
+        
+        if (tvCache.cached && tvCache.candidates.length > 0) {
+            tvCandidates = tvCache.candidates;
+            tvFilteredIndices = tvCandidates.map((_, i) => i);
+            document.getElementById('tv-candidates-section').style.display = 'block';
+            applyTVFilters();
+            const scannedAt = tvCache.scanned_at ? new Date(tvCache.scanned_at).toLocaleString() : 'Unknown';
+            document.getElementById('tv-log-container').innerHTML = `<p class="log-line info">[CACHED] Loaded ${tvCandidates.length} TV candidates from previous scan (${scannedAt})</p>`;
+        }
+        
+        if (movieCache.cached && movieCache.candidates.length > 0) {
+            movieCandidates = movieCache.candidates;
+            movieFilteredIndices = movieCandidates.map((_, i) => i);
+            document.getElementById('movie-candidates-section').style.display = 'block';
+            applyMovieFilters();
+            const scannedAt = movieCache.scanned_at ? new Date(movieCache.scanned_at).toLocaleString() : 'Unknown';
+            document.getElementById('movie-log-container').innerHTML = `<p class="log-line info">[CACHED] Loaded ${movieCandidates.length} movie candidates from previous scan (${scannedAt})</p>`;
+        }
+    } catch (err) {
+        console.error('Error loading cached scans:', err);
+    }
+}
+
+loadCachedScans();
 </script>
 {% endblock %}

@@ -1,4 +1,5 @@
 import os
+import json
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -102,6 +103,14 @@ class EmailHistory(db.Model):
     error_message = db.Column(db.Text, nullable=True)
 
 
+class ScanCache(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    scan_type = db.Column(db.String(20), nullable=False)  # 'tv' or 'movie'
+    candidates_json = db.Column(db.Text, nullable=True)
+    skipped_json = db.Column(db.Text, nullable=True)
+    scanned_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
@@ -129,6 +138,42 @@ def set_setting(key, value, is_secret=False, preserve_if_empty=False):
         setting = Settings(key=key, value=value, is_secret=is_secret)
         db.session.add(setting)
     db.session.commit()
+
+
+def save_scan_cache(scan_type, candidates, skipped):
+    """Save scan results to database for persistence."""
+    try:
+        cache = ScanCache.query.filter_by(scan_type=scan_type).first()
+        if cache:
+            cache.candidates_json = json.dumps(candidates)
+            cache.skipped_json = json.dumps(skipped)
+            cache.scanned_at = datetime.utcnow()
+        else:
+            cache = ScanCache(
+                scan_type=scan_type,
+                candidates_json=json.dumps(candidates),
+                skipped_json=json.dumps(skipped)
+            )
+            db.session.add(cache)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error saving scan cache: {e}")
+
+
+def load_scan_cache(scan_type):
+    """Load cached scan results from database."""
+    try:
+        cache = ScanCache.query.filter_by(scan_type=scan_type).first()
+        if cache:
+            return {
+                'candidates': json.loads(cache.candidates_json or '[]'),
+                'skipped': json.loads(cache.skipped_json or '[]'),
+                'scanned_at': cache.scanned_at.isoformat() if cache.scanned_at else None
+            }
+    except Exception as e:
+        print(f"Error loading scan cache: {e}")
+    return None
 
 
 @app.route('/')
@@ -555,6 +600,7 @@ def scan_movies_api():
                     log=lambda msg: movie_cleanup_status['log'].append(msg)
                 )
                 movie_cleanup_status['candidates'] = candidates
+                save_scan_cache('movie', candidates, [])
             except Exception as e:
                 movie_cleanup_status['log'].append(f"[ERROR] {str(e)}")
             finally:
@@ -565,6 +611,24 @@ def scan_movies_api():
     thread.start()
     
     return jsonify({'message': 'Movie scan started'})
+
+
+@app.route('/api/scan-cache/<scan_type>', methods=['GET'])
+@login_required
+def get_scan_cache_api(scan_type):
+    """Get cached scan results."""
+    if scan_type not in ['tv', 'movie']:
+        return jsonify({'error': 'Invalid scan type'}), 400
+    
+    cache = load_scan_cache(scan_type)
+    if cache:
+        return jsonify({
+            'cached': True,
+            'candidates': cache['candidates'],
+            'skipped': cache.get('skipped', []),
+            'scanned_at': cache['scanned_at']
+        })
+    return jsonify({'cached': False, 'candidates': [], 'skipped': [], 'scanned_at': None})
 
 
 @app.route('/api/movies/execute', methods=['POST'])
@@ -943,6 +1007,7 @@ def scan_cleanup_api():
                 cleanup_status['skipped'] = result.get('skipped', [])
                 cleanup_status['last_result'] = result
                 cleanup_status['phase'] = 'ready'
+                save_scan_cache('tv', cleanup_status['candidates'], cleanup_status['skipped'])
             except Exception as e:
                 cleanup_status['last_result'] = {'error': str(e)}
                 cleanup_status['log'].append(f"[ERROR] {str(e)}")
