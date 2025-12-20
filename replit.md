@@ -105,7 +105,11 @@ For deployment, the following environment variables should be set:
 6. On execute: Deletes from both Plex and Sonarr, notifies requesters via email
 
 ## Recent Changes
-- Added web interface with setup wizard (Dec 2025)
+- Optimized Plex scan performance using bulk history fetch (Dec 2025)
+- Added two-phase workflow with interactive approval UI
+- Added per-show action selection (delete/exclude/ignore)
+- Added "Delete from Sonarr DB" option to prevent re-addition
+- Added web interface with setup wizard
 - Added user authentication
 - Added dashboard for running and monitoring cleanup jobs
 - Added settings page for configuration management
