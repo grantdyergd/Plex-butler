@@ -123,8 +123,15 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
                 log(f"[INFO] Fetching history from '{section.title}' (all users)...")
                 
                 try:
-                    history = section.history(maxresults=50000, includeExternal=True)
-                    log(f"[INFO] Processing {len(history)} history entries from all users...")
+                    try:
+                        history = section.history(maxresults=50000, includeExternal=True)
+                    except TypeError as te:
+                        if 'includeExternal' in str(te):
+                            log(f"[INFO] Plex server doesn't support includeExternal, using standard history...")
+                            history = section.history(maxresults=50000)
+                        else:
+                            raise
+                    log(f"[INFO] Processing {len(history)} history entries...")
                     
                     for item in history:
                         try:
