@@ -86,31 +86,39 @@
 <div id="candidates-section" class="row mb-4" style="display: none;">
     <div class="col-12">
         <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Deletion Candidates (<span id="candidate-count">0</span>)</h5>
-                <div class="btn-group">
-                    <button class="btn btn-sm btn-outline-danger" onclick="selectAllAction('delete')">
-                        <i class="bi bi-trash me-1"></i>Select All Delete
-                    </button>
-                    <button class="btn btn-sm btn-outline-warning" onclick="selectAllAction('exclude')">
-                        <i class="bi bi-shield-plus me-1"></i>Select All Exclude
-                    </button>
-                    <button class="btn btn-sm btn-outline-secondary" onclick="selectAllAction('ignore')">
-                        <i class="bi bi-x-circle me-1"></i>Clear All
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Deletion Candidates (<span id="candidate-count">0</span>) - <span id="total-size">0 GB</span></h5>
+                <div class="d-flex gap-2 flex-wrap">
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-danger" onclick="selectAllAction('delete')">
+                            <i class="bi bi-trash me-1"></i>Delete All
+                        </button>
+                        <button class="btn btn-sm btn-outline-warning" onclick="selectAllAction('exclude')">
+                            <i class="bi bi-shield-plus me-1"></i>Exclude All
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="selectAllAction('ignore')">
+                            <i class="bi bi-x-circle me-1"></i>Clear
+                        </button>
+                    </div>
+                    <button class="btn btn-sm btn-outline-info" onclick="exportCSV()">
+                        <i class="bi bi-download me-1"></i>Export CSV
                     </button>
                 </div>
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
-                    <table class="table table-dark table-striped table-hover mb-0">
+                    <table class="table table-dark table-striped table-hover mb-0" id="candidates-table-wrapper">
                         <thead>
                             <tr>
-                                <th style="width: 30%;">Show Title</th>
-                                <th style="width: 10%;">Status</th>
-                                <th style="width: 20%;">Reason</th>
-                                <th style="width: 10%;">Added</th>
-                                <th style="width: 10%;">Last Watched</th>
-                                <th style="width: 20%;">Action</th>
+                                <th class="sortable" data-sort="title" style="cursor:pointer;">Title <i class="bi bi-arrow-down-up"></i></th>
+                                <th class="sortable" data-sort="status" style="cursor:pointer;">Status <i class="bi bi-arrow-down-up"></i></th>
+                                <th class="sortable" data-sort="size_bytes" style="cursor:pointer;">Size <i class="bi bi-arrow-down-up"></i></th>
+                                <th class="sortable" data-sort="episode_count" style="cursor:pointer;">Episodes <i class="bi bi-arrow-down-up"></i></th>
+                                <th class="sortable" data-sort="view_count" style="cursor:pointer;">Views <i class="bi bi-arrow-down-up"></i></th>
+                                <th>Reason</th>
+                                <th class="sortable" data-sort="added_date" style="cursor:pointer;">Added <i class="bi bi-arrow-down-up"></i></th>
+                                <th class="sortable" data-sort="last_watched" style="cursor:pointer;">Watched <i class="bi bi-arrow-down-up"></i></th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody id="candidates-table">
@@ -120,17 +128,25 @@
             </div>
             <div class="card-footer">
                 <div class="row align-items-center">
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" id="delete-from-sonarr-db" checked>
                             <label class="form-check-label" for="delete-from-sonarr-db">
-                                Also remove from Sonarr database (prevents re-adding)
+                                Remove from Sonarr DB (prevents re-adding)
                             </label>
                         </div>
                     </div>
-                    <div class="col-md-6 text-end">
+                    <div class="col-md-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="quarantine-mode">
+                            <label class="form-check-label" for="quarantine-mode">
+                                Quarantine mode (move files to trash folder)
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
                         <button id="btn-execute" class="btn btn-danger" onclick="executeActions()">
-                            <i class="bi bi-play-fill me-2"></i>Execute Selected Actions
+                            <i class="bi bi-play-fill me-2"></i>Execute Actions
                         </button>
                     </div>
                 </div>
@@ -162,6 +178,10 @@
 <script>
 let pollInterval = null;
 let candidates = [];
+let sortField = 'status';
+let sortAsc = true;
+
+const LARGE_SIZE_THRESHOLD = 50 * 1024 * 1024 * 1024; // 50GB
 
 function startScan() {
     const statusBadge = document.getElementById('status-badge');
@@ -206,6 +226,7 @@ function checkStatus() {
             clearInterval(pollInterval);
             resetButtons();
             candidates = data.candidates || [];
+            sortCandidates();
             renderCandidates();
         } else if (data.phase === 'completed' && !data.running) {
             clearInterval(pollInterval);
@@ -222,12 +243,63 @@ function checkStatus() {
     });
 }
 
+function sortCandidates() {
+    candidates.sort((a, b) => {
+        let aVal = a[sortField];
+        let bVal = b[sortField];
+        
+        if (sortField === 'status') {
+            aVal = aVal === 'Ended' ? 0 : 1;
+            bVal = bVal === 'Ended' ? 0 : 1;
+        } else if (sortField === 'size_bytes' || sortField === 'episode_count' || sortField === 'view_count') {
+            aVal = aVal || 0;
+            bVal = bVal || 0;
+        } else if (sortField === 'added_date' || sortField === 'last_watched') {
+            aVal = aVal || '0000-00-00';
+            bVal = bVal || '0000-00-00';
+        } else {
+            aVal = (aVal || '').toLowerCase();
+            bVal = (bVal || '').toLowerCase();
+        }
+        
+        if (aVal < bVal) return sortAsc ? -1 : 1;
+        if (aVal > bVal) return sortAsc ? 1 : -1;
+        return 0;
+    });
+}
+
+function handleSort(field) {
+    if (sortField === field) {
+        sortAsc = !sortAsc;
+    } else {
+        sortField = field;
+        sortAsc = true;
+    }
+    sortCandidates();
+    renderCandidates();
+}
+
+function formatSize(bytes) {
+    if (!bytes || bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    let size = bytes;
+    while (size >= 1024 && i < units.length - 1) {
+        size /= 1024;
+        i++;
+    }
+    return size.toFixed(1) + ' ' + units[i];
+}
+
 function renderCandidates() {
     const container = document.getElementById('candidates-table');
     const section = document.getElementById('candidates-section');
     const countSpan = document.getElementById('candidate-count');
+    const totalSizeSpan = document.getElementById('total-size');
     
     countSpan.textContent = candidates.length;
+    const totalBytes = candidates.reduce((sum, s) => sum + (s.size_bytes || 0), 0);
+    totalSizeSpan.textContent = formatSize(totalBytes);
     
     if (candidates.length === 0) {
         section.style.display = 'none';
@@ -238,27 +310,44 @@ function renderCandidates() {
     section.style.display = 'block';
     container.innerHTML = '';
     
+    document.querySelectorAll('.sortable').forEach(th => {
+        th.onclick = () => handleSort(th.dataset.sort);
+    });
+    
     candidates.forEach((show, index) => {
         const row = document.createElement('tr');
+        const isLarge = (show.size_bytes || 0) >= LARGE_SIZE_THRESHOLD;
+        const isContinuing = show.status === 'Continuing';
+        const isMonitored = show.monitored;
+        
+        let warnings = [];
+        if (isLarge) warnings.push('Large show (>50GB)');
+        if (isContinuing) warnings.push('Still airing');
+        if (isMonitored) warnings.push('Monitored in Sonarr');
+        
         row.innerHTML = `
             <td>
                 <strong>${escapeHtml(show.title)}</strong>
-                ${show.requester_email ? `<br><small class="text-muted">Requested by: ${escapeHtml(show.requester_name || 'Unknown')}</small>` : ''}
+                ${show.requester_email ? `<br><small class="text-muted">By: ${escapeHtml(show.requester_name || 'Unknown')}</small>` : ''}
+                ${warnings.length > 0 ? `<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> ${warnings.join(', ')}</small>` : ''}
             </td>
             <td><span class="badge ${show.status === 'Ended' ? 'bg-secondary' : 'bg-info'}">${escapeHtml(show.status)}</span></td>
-            <td><small>${escapeHtml(show.skip_reason || 'Eligible for deletion')}</small></td>
-            <td><small>${show.added_date || 'Unknown'}</small></td>
+            <td><small>${show.size_display || formatSize(show.size_bytes || 0)}</small></td>
+            <td><small>${show.season_count || 0}S / ${show.episode_count || 0}E</small></td>
+            <td><small>${show.view_count || 0}</small></td>
+            <td><small>${escapeHtml(show.skip_reason || 'Eligible')}</small></td>
+            <td><small>${show.added_date || '?'}</small></td>
             <td><small>${show.last_watched || 'Never'}</small></td>
             <td>
                 <div class="btn-group btn-group-sm" role="group">
                     <input type="radio" class="btn-check" name="action-${index}" id="delete-${index}" value="delete" autocomplete="off">
-                    <label class="btn btn-outline-danger" for="delete-${index}"><i class="bi bi-trash"></i></label>
+                    <label class="btn btn-outline-danger" for="delete-${index}" title="Delete"><i class="bi bi-trash"></i></label>
                     
                     <input type="radio" class="btn-check" name="action-${index}" id="exclude-${index}" value="exclude" autocomplete="off">
-                    <label class="btn btn-outline-warning" for="exclude-${index}"><i class="bi bi-shield-plus"></i></label>
+                    <label class="btn btn-outline-warning" for="exclude-${index}" title="Exclude"><i class="bi bi-shield-plus"></i></label>
                     
                     <input type="radio" class="btn-check" name="action-${index}" id="ignore-${index}" value="ignore" autocomplete="off" checked>
-                    <label class="btn btn-outline-secondary" for="ignore-${index}"><i class="bi bi-dash"></i></label>
+                    <label class="btn btn-outline-secondary" for="ignore-${index}" title="Ignore"><i class="bi bi-dash"></i></label>
                 </div>
             </td>
         `;
@@ -280,20 +369,61 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function exportCSV() {
+    const headers = ['Title', 'Status', 'Size', 'Seasons', 'Episodes', 'Views', 'Reason', 'Added', 'Last Watched', 'Requester', 'Monitored'];
+    const rows = candidates.map(s => [
+        s.title,
+        s.status,
+        s.size_display || formatSize(s.size_bytes || 0),
+        s.season_count || 0,
+        s.episode_count || 0,
+        s.view_count || 0,
+        s.skip_reason || '',
+        s.added_date || '',
+        s.last_watched || '',
+        s.requester_name || '',
+        s.monitored ? 'Yes' : 'No'
+    ]);
+    
+    let csv = headers.join(',') + '\n';
+    rows.forEach(row => {
+        csv += row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',') + '\n';
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'cleanup_candidates_' + new Date().toISOString().split('T')[0] + '.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
 function executeActions() {
     const actions = [];
     const deleteFromDb = document.getElementById('delete-from-sonarr-db').checked;
+    const quarantineMode = document.getElementById('quarantine-mode').checked;
+    
+    let largeShowsCount = 0;
+    let continuingShowsCount = 0;
+    let totalDeleteSize = 0;
     
     candidates.forEach((show, index) => {
         const deleteRadio = document.getElementById(`delete-${index}`);
         const excludeRadio = document.getElementById(`exclude-${index}`);
         
         if (deleteRadio && deleteRadio.checked) {
+            if ((show.size_bytes || 0) >= LARGE_SIZE_THRESHOLD) largeShowsCount++;
+            if (show.status === 'Continuing') continuingShowsCount++;
+            totalDeleteSize += show.size_bytes || 0;
+            
             actions.push({
                 action: 'delete',
                 id: show.id,
                 title: show.title,
                 deleteFromSonarr: deleteFromDb,
+                quarantine: quarantineMode,
+                path: show.path,
                 requester_email: show.requester_email,
                 requester_name: show.requester_name
             });
@@ -314,11 +444,26 @@ function executeActions() {
     const excludeCount = actions.filter(a => a.action === 'exclude').length;
     
     let confirmMsg = `You are about to:\n`;
-    if (deleteCount > 0) confirmMsg += `- Delete ${deleteCount} show(s)\n`;
+    if (deleteCount > 0) {
+        confirmMsg += `- Delete ${deleteCount} show(s) (${formatSize(totalDeleteSize)})\n`;
+        if (quarantineMode) confirmMsg += `  (Files will be moved to quarantine folder)\n`;
+    }
     if (excludeCount > 0) confirmMsg += `- Add ${excludeCount} show(s) to exclusion list\n`;
+    
+    if (largeShowsCount > 0) {
+        confirmMsg += `\n\u26a0\ufe0f WARNING: ${largeShowsCount} show(s) are over 50GB!\n`;
+    }
+    if (continuingShowsCount > 0) {
+        confirmMsg += `\n\u26a0\ufe0f WARNING: ${continuingShowsCount} show(s) are still airing!\n`;
+    }
+    
     confirmMsg += `\nThis cannot be undone. Continue?`;
     
     if (!confirm(confirmMsg)) return;
+    
+    if (largeShowsCount > 0 || continuingShowsCount > 0) {
+        if (!confirm('Are you REALLY sure? You are deleting large or currently airing shows.')) return;
+    }
     
     const btnExecute = document.getElementById('btn-execute');
     const statusBadge = document.getElementById('status-badge');

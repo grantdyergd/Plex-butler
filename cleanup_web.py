@@ -37,6 +37,33 @@ def add_to_exclusions(title: str) -> bool:
         return False
 
 
+def quarantine_files(source_path: str, quarantine_path: str, title: str, log: Callable) -> bool:
+    """Move show files to quarantine folder instead of deleting them."""
+    import shutil
+    
+    if not os.path.exists(source_path):
+        log(f"[WARNING] Source path does not exist: {source_path}")
+        return False
+    
+    try:
+        os.makedirs(quarantine_path, exist_ok=True)
+        
+        folder_name = os.path.basename(source_path.rstrip('/\\'))
+        dest_path = os.path.join(quarantine_path, folder_name)
+        
+        counter = 1
+        while os.path.exists(dest_path):
+            dest_path = os.path.join(quarantine_path, f"{folder_name}_{counter}")
+            counter += 1
+        
+        shutil.move(source_path, dest_path)
+        log(f"[SUCCESS] Quarantined '{title}' to: {dest_path}")
+        return True
+    except Exception as e:
+        log(f"[ERROR] Failed to quarantine '{title}': {e}")
+        return False
+
+
 def get_sonarr_series(config: dict, log: Callable) -> list:
     log("[INFO] Fetching series from Sonarr...")
     try:
@@ -73,6 +100,7 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
     """Get watch history from Plex using bulk history fetch for speed.
     
     Fetches watch history for ALL users on the Plex server, not just the token owner.
+    Returns view counts in addition to last watched dates.
     """
     watch_history = {}
     
@@ -86,6 +114,7 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
         plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=60)
         
         show_last_watched = {}
+        show_view_counts = {}
         show_tvdb_ids = {}
         show_titles = {}
         
@@ -113,6 +142,8 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
                             if not viewed_at:
                                 continue
                             
+                            show_view_counts[show_key] = show_view_counts.get(show_key, 0) + 1
+                            
                             if show_key not in show_last_watched or viewed_at > show_last_watched[show_key]:
                                 show_last_watched[show_key] = viewed_at
                                 show_titles[show_key] = show_title
@@ -129,8 +160,10 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
                         show_titles[show_key] = show.title
                         if hasattr(show, 'lastViewedAt') and show.lastViewedAt:
                             show_last_watched[show_key] = show.lastViewedAt
+                        if hasattr(show, 'viewCount') and show.viewCount:
+                            show_view_counts[show_key] = show.viewCount
                 
-                log(f"[INFO] Fetching TVDB IDs for {len(show_titles)} shows...")
+                log(f"[INFO] Fetching TVDB IDs for shows...")
                 shows = section.all()
                 if limit > 0:
                     shows = shows[:limit]
@@ -151,19 +184,21 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
                         pass
                     show_titles[show_key] = show.title
         
-        for show_key, last_watched in show_last_watched.items():
+        for show_key in set(list(show_last_watched.keys()) + list(show_titles.keys())):
             title = show_titles.get(show_key, "Unknown")
             tvdb_id = show_tvdb_ids.get(show_key)
+            last_watched = show_last_watched.get(show_key)
+            view_count = show_view_counts.get(show_key, 0)
             
-            if tvdb_id:
-                watch_history[tvdb_id] = {
-                    "last_watched": last_watched,
-                    "title": title
-                }
-            watch_history[f"title:{title.lower()}"] = {
+            entry = {
                 "last_watched": last_watched,
+                "view_count": view_count,
                 "title": title
             }
+            
+            if tvdb_id:
+                watch_history[tvdb_id] = entry
+            watch_history[f"title:{title.lower()}"] = entry
         
         tvdb_count = sum(1 for k in watch_history if isinstance(k, int))
         log(f"[SUCCESS] Retrieved watch history ({tvdb_count} with TVDB ID)")
@@ -260,6 +295,19 @@ def get_show_status(series: dict) -> str:
         return status.capitalize() if status else "Unknown"
 
 
+def format_size(size_bytes: int) -> str:
+    """Format bytes to human readable string."""
+    if size_bytes == 0:
+        return "0 B"
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    unit_index = 0
+    size = float(size_bytes)
+    while size >= 1024 and unit_index < len(units) - 1:
+        size /= 1024
+        unit_index += 1
+    return f"{size:.1f} {units[unit_index]}"
+
+
 def analyze_show(
     series: dict,
     exclusions: set,
@@ -273,6 +321,11 @@ def analyze_show(
     tvdb_id = series.get("tvdbId")
     series_id = series.get("id")
     
+    statistics = series.get("statistics", {})
+    size_bytes = statistics.get("sizeOnDisk", 0)
+    episode_count = statistics.get("episodeFileCount", 0)
+    season_count = statistics.get("seasonCount", 0)
+    
     result = {
         "id": series_id,
         "title": title,
@@ -281,7 +334,15 @@ def analyze_show(
         "is_candidate": True,
         "skip_reason": None,
         "added_date": None,
-        "last_watched": None
+        "last_watched": None,
+        "view_count": 0,
+        "size_bytes": size_bytes,
+        "size_display": format_size(size_bytes),
+        "episode_count": episode_count,
+        "season_count": season_count,
+        "monitored": series.get("monitored", False),
+        "quality_profile": series.get("qualityProfileId", 0),
+        "path": series.get("path", "")
     }
     
     added_str = series.get("added", "")
@@ -299,9 +360,10 @@ def analyze_show(
         watch_entry = watch_history[f"title:{title_lower}"]
     
     if watch_entry:
-        last_watched = watch_entry["last_watched"]
+        last_watched = watch_entry.get("last_watched")
         if isinstance(last_watched, datetime):
             result["last_watched"] = last_watched.replace(tzinfo=None).strftime("%Y-%m-%d")
+        result["view_count"] = watch_entry.get("view_count", 0)
     
     if title_lower in exclusions:
         result["is_candidate"] = False
@@ -320,7 +382,7 @@ def analyze_show(
             pass
     
     if watch_entry:
-        last_watched = watch_entry["last_watched"]
+        last_watched = watch_entry.get("last_watched")
         if isinstance(last_watched, datetime):
             if last_watched.replace(tzinfo=None) > cutoff_watched:
                 days_ago = (datetime.now() - last_watched.replace(tzinfo=None)).days
@@ -433,14 +495,20 @@ def execute_actions(
         'SMTP_PASSWORD': get_setting('SMTP_PASSWORD', ''),
         'SMTP_FROM': get_setting('SMTP_FROM', ''),
         'DELETION_DELAY_SECONDS': float(get_setting('DELETION_DELAY_SECONDS', '2.0') or '2.0'),
+        'QUARANTINE_PATH': get_setting('QUARANTINE_PATH', '').strip(),
     }
     
     deleted_count = 0
     excluded_count = 0
+    quarantined_count = 0
     errors = []
     
     delete_actions = [a for a in actions if a.get('action') == 'delete']
     exclude_actions = [a for a in actions if a.get('action') == 'exclude']
+    
+    quarantine_mode = any(a.get('quarantine') for a in delete_actions)
+    if quarantine_mode:
+        log(f"[INFO] Quarantine mode enabled - files will be moved instead of deleted")
     
     log(f"[INFO] Processing {len(delete_actions)} deletions and {len(exclude_actions)} exclusions...")
     
@@ -457,6 +525,8 @@ def execute_actions(
         series_id = action.get('id')
         title = action.get('title', 'Unknown')
         delete_from_db = action.get('deleteFromSonarr', False)
+        quarantine = action.get('quarantine', False)
+        show_path = action.get('path', '')
         requester_email = action.get('requester_email', '')
         requester_name = action.get('requester_name', '')
         
@@ -465,15 +535,36 @@ def execute_actions(
             errors.append(f"Missing ID: {title}")
             continue
         
-        log(f"[INFO] Processing deletion: {title}")
+        log(f"[INFO] Processing {'quarantine' if quarantine else 'deletion'}: {title}")
         
         plex_deleted = delete_from_plex(title, config, log)
         
-        sonarr_deleted = delete_from_sonarr(
-            int(series_id), title, config, log,
-            delete_files=True,
-            delete_from_database=delete_from_db
-        )
+        if quarantine and show_path:
+            quarantine_path = config.get('QUARANTINE_PATH', '')
+            if quarantine_path:
+                if quarantine_files(show_path, quarantine_path, title, log):
+                    quarantined_count += 1
+                    sonarr_deleted = delete_from_sonarr(
+                        int(series_id), title, config, log,
+                        delete_files=False,
+                        delete_from_database=delete_from_db
+                    )
+                else:
+                    errors.append(f"Failed to quarantine: {title}")
+                    continue
+            else:
+                log(f"[WARNING] Quarantine path not configured, falling back to delete for '{title}'")
+                sonarr_deleted = delete_from_sonarr(
+                    int(series_id), title, config, log,
+                    delete_files=True,
+                    delete_from_database=delete_from_db
+                )
+        else:
+            sonarr_deleted = delete_from_sonarr(
+                int(series_id), title, config, log,
+                delete_files=True,
+                delete_from_database=delete_from_db
+            )
         
         if sonarr_deleted:
             deleted_count += 1
@@ -493,11 +584,15 @@ def execute_actions(
             log(f"[INFO] Waiting {config['DELETION_DELAY_SECONDS']}s before next deletion...")
             time.sleep(config["DELETION_DELAY_SECONDS"])
     
-    log(f"[SUCCESS] Completed: {deleted_count} deleted, {excluded_count} excluded")
+    if quarantined_count > 0:
+        log(f"[SUCCESS] Completed: {deleted_count} deleted ({quarantined_count} quarantined), {excluded_count} excluded")
+    else:
+        log(f"[SUCCESS] Completed: {deleted_count} deleted, {excluded_count} excluded")
     
     return {
         'deleted': deleted_count,
         'excluded': excluded_count,
+        'quarantined': quarantined_count,
         'errors': errors
     }
 

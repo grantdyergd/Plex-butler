@@ -136,7 +136,7 @@
                             <span class="input-group-text bg-dark text-light border-secondary">seconds</span>
                         </div>
                     </div>
-                    <div class="mb-0">
+                    <div class="mb-3">
                         <label for="test_mode_limit" class="form-label">Test Mode Limit</label>
                         <div class="input-group">
                             <input type="number" class="form-control" id="test_mode_limit" name="test_mode_limit" 
@@ -144,6 +144,12 @@
                             <span class="input-group-text bg-dark text-light border-secondary">shows</span>
                         </div>
                         <small class="text-muted">Set to 0 for full library scan, or a number to limit for testing</small>
+                    </div>
+                    <div class="mb-0">
+                        <label for="quarantine_path" class="form-label">Quarantine Path (Optional)</label>
+                        <input type="text" class="form-control" id="quarantine_path" name="quarantine_path" 
+                               value="{{ settings.quarantine_path }}" placeholder="/path/to/quarantine/folder">
+                        <small class="text-muted">If set, quarantine mode moves files here instead of deleting</small>
                     </div>
                 </div>
             </div>

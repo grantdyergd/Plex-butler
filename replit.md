@@ -8,9 +8,14 @@ A web-based TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool
 - Username/password authentication for secure access
 - Dashboard to run and monitor cleanup jobs
 - Scans Sonarr library for all TV series
+- Checks watch history across ALL Plex users (not just admin)
 - Filters shows based on configurable criteria (added date, watch history, exclusion list)
 - Interactive exclusion list management
-- Dry-run mode for safe testing before actual deletion
+- Rich data display: size, episode count, view count, monitored status
+- Sortable columns (by status, size, title, dates, etc.)
+- Warnings for large shows (>50GB) and continuing series
+- CSV export of candidates for offline review
+- Quarantine mode: move files to trash folder instead of deleting
 - Deletes from both Plex and Sonarr with file cleanup
 - Email notifications to Ombi requesters
 - Slow, deliberate deletion with delays to prevent mistakes
@@ -63,16 +68,23 @@ A web-based TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool
 1. **Scan**: Click "Scan for Candidates" to analyze your library
 2. **Review**: Candidates appear in an interactive table showing:
    - Show title and requester info
-   - Show status (Continuing/Ended)
+   - Show status (Continuing/Ended) - sortable, Ended shows first by default
+   - Size on disk, episode count, season count
+   - View count (total plays across all users)
    - Reason for inclusion (never watched, not watched recently)
    - Added date and last watched date
-3. **Choose Actions**: For each show, select:
+   - Warnings for large shows (>50GB) and continuing series
+3. **Sort & Filter**: Click any column header to sort ascending/descending
+4. **Export CSV**: Download candidates list for offline review
+5. **Choose Actions**: For each show, select:
    - **Delete** (red trash icon) - Remove from Plex and Sonarr
    - **Exclude** (yellow shield icon) - Add to exclusion list
    - **Ignore** (gray dash) - Take no action
-4. **Bulk Actions**: Use "Select All Delete", "Select All Exclude", or "Clear All"
-5. **Delete from Sonarr DB**: Check this option to prevent shows from being re-added
-6. **Execute**: Click "Execute Selected Actions" to process your selections
+6. **Bulk Actions**: Use "Select All Delete", "Select All Exclude", or "Clear All"
+7. **Options**:
+   - **Delete from Sonarr DB**: Prevents shows from being re-added
+   - **Quarantine mode**: Move files to trash folder instead of permanent deletion
+8. **Execute**: Click "Execute Selected Actions" to process your selections
 
 ### Exclusion List
 Add show titles to protect them from deletion. Managed via the web interface.
@@ -105,7 +117,14 @@ For deployment, the following environment variables should be set:
 6. On execute: Deletes from both Plex and Sonarr, notifies requesters via email
 
 ## Recent Changes
-- Optimized Plex scan performance using bulk history fetch (Dec 2025)
+- Added rich data display: size, episode count, view count, monitored status (Dec 2025)
+- Added sortable columns (click headers to sort by any field)
+- Added CSV export for offline candidate review
+- Added quarantine mode (move files instead of delete)
+- Added warnings for large shows (>50GB) and continuing series
+- Added double confirmation for risky deletions
+- Optimized Plex scan performance using bulk history fetch
+- Plex now checks ALL users' watch history (not just admin)
 - Added two-phase workflow with interactive approval UI
 - Added per-show action selection (delete/exclude/ignore)
 - Added "Delete from Sonarr DB" option to prevent re-addition
