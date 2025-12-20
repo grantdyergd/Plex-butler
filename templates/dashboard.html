@@ -219,12 +219,25 @@ function checkStatus() {
     fetch('/api/cleanup/status')
     .then(response => response.json())
     .then(data => {
+        console.log('Status check:', data.phase, 'running:', data.running, 'candidates:', data.candidates?.length);
         updateLog(data.log);
+        
+        // Update status text during scanning
+        if (data.phase === 'scanning' && data.running) {
+            const lastLog = data.log && data.log.length > 0 ? data.log[data.log.length - 1] : '';
+            if (lastLog) {
+                document.getElementById('status-text').textContent = lastLog.replace(/\[(INFO|SUCCESS|WARNING|ERROR)\]\s*/g, '').substring(0, 60) + '...';
+            }
+        }
         
         if (data.phase === 'ready' && !data.running) {
             clearInterval(pollInterval);
             resetButtons();
             candidates = data.candidates || [];
+            console.log('Ready! Candidates received:', candidates.length);
+            if (candidates.length > 0) {
+                appendLog('[SUCCESS] Scan complete. Found ' + candidates.length + ' candidates for review.', 'success');
+            }
             sortCandidates();
             renderCandidates();
         } else if (data.phase === 'completed' && !data.running) {
@@ -239,6 +252,9 @@ function checkStatus() {
                 appendLog('[ERROR] ' + data.last_result.error, 'error');
             }
         }
+    })
+    .catch(err => {
+        console.error('Status check failed:', err);
     });
 }
 
