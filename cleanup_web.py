@@ -6,135 +6,16 @@ This module provides the cleanup functionality that can be called from the Flask
 import time
 import smtplib
 import re
+import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
-from typing import Optional, Callable
+from typing import Optional, Callable, List, Dict
 import requests
 from plexapi.server import PlexServer
 
 
-def run_cleanup_with_settings(get_setting: Callable, dry_run: bool = True, log_callback: Optional[Callable] = None) -> dict:
-    def log(message: str):
-        if log_callback:
-            log_callback(message)
-        print(message)
-    
-    test_mode_limit = int(get_setting('TEST_MODE_LIMIT', '0') or '0')
-    
-    config = {
-        'SONARR_URL': get_setting('SONARR_URL', ''),
-        'SONARR_API_KEY': get_setting('SONARR_API_KEY', ''),
-        'PLEX_URL': get_setting('PLEX_URL', ''),
-        'PLEX_TOKEN': get_setting('PLEX_TOKEN', ''),
-        'OMBI_URL': get_setting('OMBI_URL', ''),
-        'OMBI_API_KEY': get_setting('OMBI_API_KEY', ''),
-        'SMTP_HOST': get_setting('SMTP_HOST', ''),
-        'SMTP_PORT': int(get_setting('SMTP_PORT', '587') or '587'),
-        'SMTP_USER': get_setting('SMTP_USER', ''),
-        'SMTP_PASSWORD': get_setting('SMTP_PASSWORD', ''),
-        'SMTP_FROM': get_setting('SMTP_FROM', ''),
-        'SKIP_IF_ADDED_WITHIN_DAYS': int(get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90') or '90'),
-        'SKIP_IF_WATCHED_WITHIN_DAYS': int(get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180') or '180'),
-        'DELETION_DELAY_SECONDS': float(get_setting('DELETION_DELAY_SECONDS', '2.0') or '2.0'),
-    }
-    
-    mode = "DRY RUN" if dry_run else "LIVE MODE"
-    if test_mode_limit > 0:
-        log(f"[INFO] Starting cleanup in {mode} (TEST MODE: limited to {test_mode_limit} shows)")
-    else:
-        log(f"[INFO] Starting cleanup in {mode}")
-    
-    cutoff_added = datetime.now() - timedelta(days=config['SKIP_IF_ADDED_WITHIN_DAYS'])
-    cutoff_watched = datetime.now() - timedelta(days=config['SKIP_IF_WATCHED_WITHIN_DAYS'])
-    
-    exclusions = load_exclusions()
-    log(f"[INFO] Loaded {len(exclusions)} shows from exclusion list")
-    
-    series_list = get_sonarr_series(config, log)
-    if not series_list:
-        log("[ERROR] No series found in Sonarr")
-        return {'error': 'No series found in Sonarr'}
-    
-    if test_mode_limit > 0:
-        series_list = series_list[:test_mode_limit]
-        log(f"[INFO] Test mode: limiting to first {test_mode_limit} shows")
-    
-    watch_history = get_plex_watch_history(config, log, test_mode_limit)
-    ombi_requesters = get_ombi_requests(config, log)
-    
-    log("[INFO] Analyzing shows...")
-    
-    candidates = []
-    skipped = []
-    
-    for series in series_list:
-        title = series.get("title", "Unknown")
-        series_id = series.get("id")
-        tvdb_id = series.get("tvdbId")
-        status = get_show_status(series)
-        
-        skip, reason = should_skip_show(
-            series, exclusions, watch_history, cutoff_added, cutoff_watched, config
-        )
-        
-        if skip:
-            skipped.append({"title": title, "reason": reason})
-        else:
-            requester = ombi_requesters.get(tvdb_id, {})
-            candidates.append({
-                "id": series_id,
-                "title": title,
-                "tvdb_id": tvdb_id,
-                "status": status,
-                "requester_email": requester.get("email", ""),
-                "requester_name": requester.get("name", "")
-            })
-    
-    log(f"[INFO] Total shows: {len(series_list)}")
-    log(f"[SUCCESS] Skipped (protected): {len(skipped)}")
-    log(f"[WARNING] Candidates for deletion: {len(candidates)}")
-    
-    if not candidates:
-        log("[SUCCESS] No shows to delete. Your library is well-maintained!")
-        return {'deleted': 0, 'candidates': 0, 'skipped': len(skipped)}
-    
-    for show in candidates:
-        log(f"[INFO] Candidate: {show['title']} ({show['status']})")
-    
-    if dry_run:
-        log("[INFO] DRY RUN complete - no changes were made")
-        return {'deleted': 0, 'candidates': len(candidates), 'skipped': len(skipped)}
-    
-    log("[WARNING] Starting deletions...")
-    
-    deleted_count = 0
-    for show in candidates:
-        log(f"[INFO] Processing: {show['title']}")
-        
-        delete_from_plex(show["title"], config, log)
-        
-        if delete_from_sonarr(show["id"], show["title"], config, log):
-            deleted_count += 1
-            
-            if show["requester_email"]:
-                send_notification_email(
-                    show["requester_email"],
-                    show["title"],
-                    show["requester_name"],
-                    config,
-                    log
-                )
-        
-        log(f"[INFO] Waiting {config['DELETION_DELAY_SECONDS']}s...")
-        time.sleep(config["DELETION_DELAY_SECONDS"])
-    
-    log(f"[SUCCESS] Deleted {deleted_count} of {len(candidates)} shows")
-    return {'deleted': deleted_count, 'candidates': len(candidates), 'skipped': len(skipped)}
-
-
 def load_exclusions() -> set:
-    import os
     exclusions = set()
     exclusion_file = "excluded_shows.txt"
     if os.path.exists(exclusion_file):
@@ -144,6 +25,16 @@ def load_exclusions() -> set:
                 if line and not line.startswith("#"):
                     exclusions.add(line.lower())
     return exclusions
+
+
+def add_to_exclusions(title: str) -> bool:
+    exclusion_file = "excluded_shows.txt"
+    try:
+        with open(exclusion_file, "a") as f:
+            f.write(f"\n{title}")
+        return True
+    except Exception:
+        return False
 
 
 def get_sonarr_series(config: dict, log: Callable) -> list:
@@ -197,7 +88,7 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
                 
                 for i, show in enumerate(shows):
                     if (i + 1) % 25 == 0:
-                        log(f"[INFO] Progress: {i + 1}/{total_shows} shows processed...")
+                        log(f"[INFO] Progress: {i + 1}/{len(shows)} shows processed...")
                     
                     last_watched = None
                     tvdb_id = None
@@ -242,38 +133,63 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
 
 
 def get_ombi_requests(config: dict, log: Callable) -> dict:
-    if not config.get("OMBI_URL") or not config.get("OMBI_API_KEY"):
-        log("[WARNING] Ombi not configured - skipping requester lookup")
+    ombi_url = config.get("OMBI_URL", "").strip().rstrip('/')
+    ombi_key = config.get("OMBI_API_KEY", "").strip()
+    
+    if not ombi_url or not ombi_key:
+        log("[INFO] Ombi not configured - skipping requester lookup")
         return {}
     
     log("[INFO] Fetching TV requests from Ombi...")
+    requesters = {}
+    
     try:
         response = requests.get(
-            f"{config['OMBI_URL']}/api/v1/Request/tv",
-            headers={"ApiKey": config["OMBI_API_KEY"]},
+            f"{ombi_url}/api/v1/Request/tv",
+            headers={"ApiKey": ombi_key},
             timeout=30
         )
+        
+        if response.status_code == 401:
+            log("[ERROR] Ombi API key is invalid (401 Unauthorized)")
+            return {}
+        elif response.status_code == 404:
+            log("[ERROR] Ombi API endpoint not found - check your URL")
+            return {}
+        
         response.raise_for_status()
         requests_data = response.json()
         
-        log(f"[INFO] Ombi returned {len(requests_data)} total TV requests")
+        log(f"[INFO] Ombi returned {len(requests_data)} TV requests")
         
-        requesters = {}
         for req in requests_data:
-            tvdb_id = req.get("tvDbId") or req.get("thetvdbid") or req.get("tvdbId")
+            tvdb_id = None
+            for field in ['tvDbId', 'tvdbId', 'thetvdbid', 'externalProviderId', 'theMovieDbId']:
+                val = req.get(field)
+                if val and isinstance(val, int) and val > 0:
+                    tvdb_id = val
+                    break
+            
             title = req.get("title", "Unknown")
             
+            requester_email = ""
+            requester_name = "Unknown"
+            
             requester_user = req.get("requestedUser") or {}
-            requester_email = requester_user.get("email", "") or requester_user.get("Email", "")
-            requester_name = requester_user.get("userName", "") or requester_user.get("username", "") or requester_user.get("alias", "Unknown")
+            if requester_user:
+                requester_email = requester_user.get("email", "") or requester_user.get("Email", "")
+                requester_name = (requester_user.get("userName") or requester_user.get("username") 
+                                  or requester_user.get("alias") or "Unknown")
             
             if not requester_email:
-                child_requests = req.get("childRequests", [])
+                child_requests = req.get("childRequests") or []
                 for child in child_requests:
                     child_user = child.get("requestedUser") or {}
-                    requester_email = child_user.get("email", "") or child_user.get("Email", "")
-                    requester_name = child_user.get("userName", "") or child_user.get("username", "") or child_user.get("alias", "Unknown")
-                    if requester_email:
+                    email = child_user.get("email", "") or child_user.get("Email", "")
+                    if email:
+                        requester_email = email
+                        requester_name = (child_user.get("userName") or child_user.get("username") 
+                                          or child_user.get("alias") or "Unknown")
                         break
             
             if tvdb_id:
@@ -282,10 +198,12 @@ def get_ombi_requests(config: dict, log: Callable) -> dict:
                     "name": requester_name,
                     "title": title
                 }
+                log(f"[DEBUG] Ombi request: {title} (TVDB: {tvdb_id}, Email: {requester_email or 'none'})")
         
         with_email = sum(1 for r in requesters.values() if r.get("email"))
         log(f"[SUCCESS] Found {len(requesters)} TV requests in Ombi ({with_email} with email addresses)")
         return requesters
+        
     except requests.RequestException as e:
         log(f"[WARNING] Failed to fetch Ombi requests: {e}")
         return {}
@@ -301,28 +219,35 @@ def get_show_status(series: dict) -> str:
         return status.capitalize() if status else "Unknown"
 
 
-def should_skip_show(
+def analyze_show(
     series: dict,
     exclusions: set,
     watch_history: dict,
     cutoff_added: datetime,
-    cutoff_watched: datetime,
-    config: dict
-) -> tuple:
+    cutoff_watched: datetime
+) -> Dict:
+    """Analyze a single show and return its status with reason."""
     title = series.get("title", "Unknown")
     title_lower = title.lower()
     tvdb_id = series.get("tvdbId")
+    series_id = series.get("id")
     
-    if title_lower in exclusions:
-        return True, "In exclusion list"
+    result = {
+        "id": series_id,
+        "title": title,
+        "tvdb_id": tvdb_id,
+        "status": get_show_status(series),
+        "is_candidate": True,
+        "skip_reason": None,
+        "added_date": None,
+        "last_watched": None
+    }
     
     added_str = series.get("added", "")
     if added_str:
         try:
             added_date = datetime.fromisoformat(added_str.replace("Z", "+00:00"))
-            if added_date.replace(tzinfo=None) > cutoff_added:
-                days_ago = (datetime.now() - added_date.replace(tzinfo=None)).days
-                return True, f"Added {days_ago} days ago"
+            result["added_date"] = added_date.replace(tzinfo=None).strftime("%Y-%m-%d")
         except ValueError:
             pass
     
@@ -335,11 +260,205 @@ def should_skip_show(
     if watch_entry:
         last_watched = watch_entry["last_watched"]
         if isinstance(last_watched, datetime):
+            result["last_watched"] = last_watched.replace(tzinfo=None).strftime("%Y-%m-%d")
+    
+    if title_lower in exclusions:
+        result["is_candidate"] = False
+        result["skip_reason"] = "In exclusion list"
+        return result
+    
+    if added_str:
+        try:
+            added_date = datetime.fromisoformat(added_str.replace("Z", "+00:00"))
+            if added_date.replace(tzinfo=None) > cutoff_added:
+                days_ago = (datetime.now() - added_date.replace(tzinfo=None)).days
+                result["is_candidate"] = False
+                result["skip_reason"] = f"Added {days_ago} days ago (protected)"
+                return result
+        except ValueError:
+            pass
+    
+    if watch_entry:
+        last_watched = watch_entry["last_watched"]
+        if isinstance(last_watched, datetime):
             if last_watched.replace(tzinfo=None) > cutoff_watched:
                 days_ago = (datetime.now() - last_watched.replace(tzinfo=None)).days
-                return True, f"Watched {days_ago} days ago"
+                result["is_candidate"] = False
+                result["skip_reason"] = f"Watched {days_ago} days ago (protected)"
+                return result
     
-    return False, ""
+    if not result["last_watched"]:
+        result["skip_reason"] = "Never watched"
+    else:
+        result["skip_reason"] = "Not watched recently"
+    
+    return result
+
+
+def scan_for_candidates(get_setting: Callable, log_callback: Optional[Callable] = None) -> dict:
+    """Scan library and return candidates for user approval."""
+    def log(message: str):
+        if log_callback:
+            log_callback(message)
+        print(message)
+    
+    test_mode_limit = int(get_setting('TEST_MODE_LIMIT', '0') or '0')
+    
+    config = {
+        'SONARR_URL': get_setting('SONARR_URL', '').strip().rstrip('/'),
+        'SONARR_API_KEY': get_setting('SONARR_API_KEY', '').strip(),
+        'PLEX_URL': get_setting('PLEX_URL', '').strip().rstrip('/'),
+        'PLEX_TOKEN': get_setting('PLEX_TOKEN', '').strip(),
+        'OMBI_URL': get_setting('OMBI_URL', '').strip().rstrip('/'),
+        'OMBI_API_KEY': get_setting('OMBI_API_KEY', '').strip(),
+        'SKIP_IF_ADDED_WITHIN_DAYS': int(get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90') or '90'),
+        'SKIP_IF_WATCHED_WITHIN_DAYS': int(get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180') or '180'),
+    }
+    
+    if test_mode_limit > 0:
+        log(f"[INFO] Starting scan (TEST MODE: limited to {test_mode_limit} shows)")
+    else:
+        log("[INFO] Starting library scan...")
+    
+    cutoff_added = datetime.now() - timedelta(days=config['SKIP_IF_ADDED_WITHIN_DAYS'])
+    cutoff_watched = datetime.now() - timedelta(days=config['SKIP_IF_WATCHED_WITHIN_DAYS'])
+    
+    exclusions = load_exclusions()
+    log(f"[INFO] Loaded {len(exclusions)} shows from exclusion list")
+    
+    series_list = get_sonarr_series(config, log)
+    if not series_list:
+        log("[ERROR] No series found in Sonarr")
+        return {'error': 'No series found in Sonarr', 'candidates': [], 'skipped': []}
+    
+    if test_mode_limit > 0:
+        series_list = series_list[:test_mode_limit]
+        log(f"[INFO] Test mode: limiting to first {test_mode_limit} shows")
+    
+    watch_history = get_plex_watch_history(config, log, test_mode_limit)
+    ombi_requesters = get_ombi_requests(config, log)
+    
+    log("[INFO] Analyzing shows...")
+    
+    candidates = []
+    skipped = []
+    
+    for series in series_list:
+        analysis = analyze_show(series, exclusions, watch_history, cutoff_added, cutoff_watched)
+        
+        tvdb_id = analysis.get("tvdb_id")
+        requester = ombi_requesters.get(tvdb_id, {})
+        analysis["requester_email"] = requester.get("email", "")
+        analysis["requester_name"] = requester.get("name", "")
+        
+        if analysis["is_candidate"]:
+            candidates.append(analysis)
+        else:
+            skipped.append(analysis)
+    
+    log(f"[INFO] Total shows analyzed: {len(series_list)}")
+    log(f"[SUCCESS] Protected shows: {len(skipped)}")
+    log(f"[WARNING] Deletion candidates: {len(candidates)}")
+    
+    if not candidates:
+        log("[SUCCESS] No shows eligible for deletion. Your library is well-maintained!")
+    
+    return {
+        'candidates': candidates,
+        'skipped': skipped,
+        'total': len(series_list)
+    }
+
+
+def execute_actions(
+    actions: List[Dict],
+    get_setting: Callable,
+    log_callback: Optional[Callable] = None
+) -> dict:
+    """Execute approved deletion/exclusion actions."""
+    def log(message: str):
+        if log_callback:
+            log_callback(message)
+        print(message)
+    
+    config = {
+        'SONARR_URL': get_setting('SONARR_URL', '').strip().rstrip('/'),
+        'SONARR_API_KEY': get_setting('SONARR_API_KEY', '').strip(),
+        'PLEX_URL': get_setting('PLEX_URL', '').strip().rstrip('/'),
+        'PLEX_TOKEN': get_setting('PLEX_TOKEN', '').strip(),
+        'SMTP_HOST': get_setting('SMTP_HOST', ''),
+        'SMTP_PORT': int(get_setting('SMTP_PORT', '587') or '587'),
+        'SMTP_USER': get_setting('SMTP_USER', ''),
+        'SMTP_PASSWORD': get_setting('SMTP_PASSWORD', ''),
+        'SMTP_FROM': get_setting('SMTP_FROM', ''),
+        'DELETION_DELAY_SECONDS': float(get_setting('DELETION_DELAY_SECONDS', '2.0') or '2.0'),
+    }
+    
+    deleted_count = 0
+    excluded_count = 0
+    errors = []
+    
+    delete_actions = [a for a in actions if a.get('action') == 'delete']
+    exclude_actions = [a for a in actions if a.get('action') == 'exclude']
+    
+    log(f"[INFO] Processing {len(delete_actions)} deletions and {len(exclude_actions)} exclusions...")
+    
+    for action in exclude_actions:
+        title = action.get('title', 'Unknown')
+        if add_to_exclusions(title):
+            log(f"[SUCCESS] Added '{title}' to exclusion list")
+            excluded_count += 1
+        else:
+            log(f"[ERROR] Failed to add '{title}' to exclusion list")
+            errors.append(f"Failed to exclude: {title}")
+    
+    for action in delete_actions:
+        series_id = action.get('id')
+        title = action.get('title', 'Unknown')
+        delete_from_db = action.get('deleteFromSonarr', False)
+        requester_email = action.get('requester_email', '')
+        requester_name = action.get('requester_name', '')
+        
+        if not series_id:
+            log(f"[ERROR] Missing series ID for '{title}'")
+            errors.append(f"Missing ID: {title}")
+            continue
+        
+        log(f"[INFO] Processing deletion: {title}")
+        
+        plex_deleted = delete_from_plex(title, config, log)
+        
+        sonarr_deleted = delete_from_sonarr(
+            int(series_id), title, config, log,
+            delete_files=True,
+            delete_from_database=delete_from_db
+        )
+        
+        if sonarr_deleted:
+            deleted_count += 1
+            
+            if requester_email:
+                send_notification_email(
+                    requester_email,
+                    title,
+                    requester_name,
+                    config,
+                    log
+                )
+        else:
+            errors.append(f"Failed to delete: {title}")
+        
+        if len(delete_actions) > 1:
+            log(f"[INFO] Waiting {config['DELETION_DELAY_SECONDS']}s before next deletion...")
+            time.sleep(config["DELETION_DELAY_SECONDS"])
+    
+    log(f"[SUCCESS] Completed: {deleted_count} deleted, {excluded_count} excluded")
+    
+    return {
+        'deleted': deleted_count,
+        'excluded': excluded_count,
+        'errors': errors
+    }
 
 
 def delete_from_plex(show_title: str, config: dict, log: Callable) -> bool:
@@ -363,12 +482,25 @@ def delete_from_plex(show_title: str, config: dict, log: Callable) -> bool:
         return False
 
 
-def delete_from_sonarr(series_id: int, show_title: str, config: dict, log: Callable, delete_files: bool = True) -> bool:
+def delete_from_sonarr(
+    series_id: int,
+    show_title: str,
+    config: dict,
+    log: Callable,
+    delete_files: bool = True,
+    delete_from_database: bool = False
+) -> bool:
+    """Delete show from Sonarr. If delete_from_database is True, removes from Sonarr DB entirely."""
     try:
+        params = {"deleteFiles": str(delete_files).lower()}
+        if delete_from_database:
+            params["addImportListExclusion"] = "true"
+            log(f"[INFO] Will also add '{show_title}' to Sonarr import exclusion list")
+        
         response = requests.delete(
             f"{config['SONARR_URL']}/api/v3/series/{series_id}",
             headers={"X-Api-Key": config["SONARR_API_KEY"]},
-            params={"deleteFiles": str(delete_files).lower()},
+            params=params,
             timeout=30
         )
         response.raise_for_status()
@@ -414,3 +546,8 @@ Media Library Cleanup Bot
     except Exception as e:
         log(f"[ERROR] Failed to send email: {e}")
         return False
+
+
+def run_cleanup_with_settings(get_setting: Callable, dry_run: bool = True, log_callback: Optional[Callable] = None) -> dict:
+    """Legacy function - redirects to new scan function."""
+    return scan_for_candidates(get_setting, log_callback)

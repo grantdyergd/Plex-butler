@@ -59,15 +59,27 @@ A web-based TV show cleanup tool for Plex, Sonarr, and Ombi libraries. This tool
 
 ## Usage
 
-### Dashboard
-- **Dry Run**: Scans library and shows what would be deleted without making changes
-- **Execute**: Actually deletes shows after confirmation
+### Dashboard (Two-Phase Workflow)
+1. **Scan**: Click "Scan for Candidates" to analyze your library
+2. **Review**: Candidates appear in an interactive table showing:
+   - Show title and requester info
+   - Show status (Continuing/Ended)
+   - Reason for inclusion (never watched, not watched recently)
+   - Added date and last watched date
+3. **Choose Actions**: For each show, select:
+   - **Delete** (red trash icon) - Remove from Plex and Sonarr
+   - **Exclude** (yellow shield icon) - Add to exclusion list
+   - **Ignore** (gray dash) - Take no action
+4. **Bulk Actions**: Use "Select All Delete", "Select All Exclude", or "Clear All"
+5. **Delete from Sonarr DB**: Check this option to prevent shows from being re-added
+6. **Execute**: Click "Execute Selected Actions" to process your selections
 
 ### Exclusion List
 Add show titles to protect them from deletion. Managed via the web interface.
 
 ### Settings
 All configuration can be updated via the Settings page after initial setup.
+- **Test Mode Limit**: Set to a number (e.g., 25) to limit scans for testing, or 0 for full library
 
 ## CLI Usage (Legacy)
 The command-line interface is still available for automated/scheduled use:

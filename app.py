@@ -21,8 +21,11 @@ login_manager.login_view = 'login'
 cleanup_lock = threading.Lock()
 cleanup_status = {
     'running': False,
+    'phase': None,
     'last_run': None,
     'last_result': None,
+    'candidates': [],
+    'skipped': [],
     'log': []
 }
 
@@ -391,48 +394,106 @@ def exclusions():
     return render_template('exclusions.html', excluded_shows=excluded_shows)
 
 
-@app.route('/api/run-cleanup', methods=['POST'])
+@app.route('/api/cleanup/scan', methods=['POST'])
 @login_required
-def run_cleanup_api():
+def scan_cleanup_api():
     global cleanup_status
     
     with cleanup_lock:
         if cleanup_status['running']:
-            return jsonify({'error': 'Cleanup is already running'}), 400
+            return jsonify({'error': 'A scan is already running'}), 400
         cleanup_status['running'] = True
+        cleanup_status['phase'] = 'scanning'
         cleanup_status['log'] = []
+        cleanup_status['candidates'] = []
+        cleanup_status['skipped'] = []
     
-    dry_run = request.json.get('dry_run', True)
-    
-    def run_cleanup_thread():
+    def run_scan_thread():
         global cleanup_status
         with app.app_context():
             try:
-                from cleanup_web import run_cleanup_with_settings
-                result = run_cleanup_with_settings(
-                    get_setting, 
-                    dry_run=dry_run,
+                from cleanup_web import scan_for_candidates
+                result = scan_for_candidates(
+                    get_setting,
                     log_callback=lambda msg: cleanup_status['log'].append(msg)
                 )
+                cleanup_status['candidates'] = result.get('candidates', [])
+                cleanup_status['skipped'] = result.get('skipped', [])
                 cleanup_status['last_result'] = result
+                cleanup_status['phase'] = 'ready'
             except Exception as e:
                 cleanup_status['last_result'] = {'error': str(e)}
                 cleanup_status['log'].append(f"[ERROR] {str(e)}")
+                cleanup_status['phase'] = 'error'
             finally:
                 with cleanup_lock:
                     cleanup_status['running'] = False
                     cleanup_status['last_run'] = datetime.now().isoformat()
     
-    thread = threading.Thread(target=run_cleanup_thread)
+    thread = threading.Thread(target=run_scan_thread)
     thread.start()
     
-    return jsonify({'message': 'Cleanup started', 'dry_run': dry_run})
+    return jsonify({'message': 'Scan started'})
 
 
-@app.route('/api/cleanup-status')
+@app.route('/api/cleanup/execute', methods=['POST'])
+@login_required
+def execute_cleanup_api():
+    global cleanup_status
+    
+    with cleanup_lock:
+        if cleanup_status['running']:
+            return jsonify({'error': 'A cleanup operation is already running'}), 400
+        cleanup_status['running'] = True
+        cleanup_status['phase'] = 'executing'
+    
+    actions = request.json.get('actions', [])
+    
+    if not actions:
+        with cleanup_lock:
+            cleanup_status['running'] = False
+            cleanup_status['phase'] = 'ready'
+        return jsonify({'error': 'No actions provided'}), 400
+    
+    def run_execute_thread():
+        global cleanup_status
+        with app.app_context():
+            try:
+                from cleanup_web import execute_actions
+                cleanup_status['log'].append("[INFO] Executing approved actions...")
+                result = execute_actions(
+                    actions,
+                    get_setting,
+                    log_callback=lambda msg: cleanup_status['log'].append(msg)
+                )
+                cleanup_status['last_result'] = result
+                cleanup_status['phase'] = 'completed'
+                cleanup_status['candidates'] = []
+            except Exception as e:
+                cleanup_status['last_result'] = {'error': str(e)}
+                cleanup_status['log'].append(f"[ERROR] {str(e)}")
+                cleanup_status['phase'] = 'error'
+            finally:
+                with cleanup_lock:
+                    cleanup_status['running'] = False
+                    cleanup_status['last_run'] = datetime.now().isoformat()
+    
+    thread = threading.Thread(target=run_execute_thread)
+    thread.start()
+    
+    return jsonify({'message': 'Execution started', 'action_count': len(actions)})
+
+
+@app.route('/api/cleanup/status')
 @login_required
 def cleanup_status_api():
     return jsonify(cleanup_status)
+
+
+@app.route('/api/run-cleanup', methods=['POST'])
+@login_required
+def run_cleanup_api():
+    return redirect(url_for('scan_cleanup_api'))
 
 
 def init_db():

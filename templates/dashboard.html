@@ -65,23 +65,74 @@
     <div class="col-md-6 mb-3">
         <div class="card h-100">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-lightning me-2"></i>Run Cleanup</h5>
+                <h5 class="mb-0"><i class="bi bi-search me-2"></i>Scan Library</h5>
             </div>
             <div class="card-body">
-                <p class="text-muted">Scan your library and identify shows that can be removed.</p>
-                <div class="d-flex gap-2">
-                    <button id="btn-dry-run" class="btn btn-primary flex-grow-1" onclick="runCleanup(true)">
-                        <i class="bi bi-search me-2"></i>Dry Run (Preview)
-                    </button>
-                    <button id="btn-execute" class="btn btn-danger" onclick="runCleanup(false)">
-                        <i class="bi bi-trash me-2"></i>Execute
-                    </button>
-                </div>
+                <p class="text-muted">Scan your library to find shows eligible for cleanup.</p>
+                <button id="btn-scan" class="btn btn-primary w-100" onclick="startScan()">
+                    <i class="bi bi-search me-2"></i>Scan for Candidates
+                </button>
                 <div id="status-badge" class="mt-3" style="display: none;">
                     <span class="badge bg-info">
                         <i class="bi bi-hourglass-split me-1"></i>
-                        <span id="status-text">Running...</span>
+                        <span id="status-text">Scanning...</span>
                     </span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="candidates-section" class="row mb-4" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Deletion Candidates (<span id="candidate-count">0</span>)</h5>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-outline-danger" onclick="selectAllAction('delete')">
+                        <i class="bi bi-trash me-1"></i>Select All Delete
+                    </button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="selectAllAction('exclude')">
+                        <i class="bi bi-shield-plus me-1"></i>Select All Exclude
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="selectAllAction('ignore')">
+                        <i class="bi bi-x-circle me-1"></i>Clear All
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 30%;">Show Title</th>
+                                <th style="width: 10%;">Status</th>
+                                <th style="width: 20%;">Reason</th>
+                                <th style="width: 10%;">Added</th>
+                                <th style="width: 10%;">Last Watched</th>
+                                <th style="width: 20%;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="candidates-table">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="delete-from-sonarr-db" checked>
+                            <label class="form-check-label" for="delete-from-sonarr-db">
+                                Also remove from Sonarr database (prevents re-adding)
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <button id="btn-execute" class="btn btn-danger" onclick="executeActions()">
+                            <i class="bi bi-play-fill me-2"></i>Execute Selected Actions
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -92,14 +143,14 @@
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-terminal me-2"></i>Cleanup Log</h5>
+                <h5 class="mb-0"><i class="bi bi-terminal me-2"></i>Activity Log</h5>
                 <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">
                     <i class="bi bi-trash me-1"></i>Clear
                 </button>
             </div>
             <div class="card-body">
                 <div id="log-container" class="log-container">
-                    <p class="text-muted mb-0">Run a cleanup to see output here...</p>
+                    <p class="text-muted mb-0">Run a scan to see output here...</p>
                 </div>
             </div>
         </div>
@@ -110,30 +161,21 @@
 {% block scripts %}
 <script>
 let pollInterval = null;
+let candidates = [];
 
-function runCleanup(dryRun) {
+function startScan() {
     const statusBadge = document.getElementById('status-badge');
     const statusText = document.getElementById('status-text');
-    const btnDryRun = document.getElementById('btn-dry-run');
-    const btnExecute = document.getElementById('btn-execute');
+    const btnScan = document.getElementById('btn-scan');
     
-    if (!dryRun) {
-        if (!confirm('Are you sure you want to execute deletions? This cannot be undone.')) {
-            return;
-        }
-    }
-    
-    btnDryRun.disabled = true;
-    btnExecute.disabled = true;
+    btnScan.disabled = true;
     statusBadge.style.display = 'block';
-    statusText.textContent = dryRun ? 'Running dry run...' : 'Executing deletions...';
+    statusText.textContent = 'Scanning library...';
+    document.getElementById('candidates-section').style.display = 'none';
     
-    fetch('/api/run-cleanup', {
+    fetch('/api/cleanup/scan', {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ dry_run: dryRun })
+        headers: { 'Content-Type': 'application/json' }
     })
     .then(response => response.json())
     .then(data => {
@@ -145,7 +187,7 @@ function runCleanup(dryRun) {
         }
     })
     .catch(error => {
-        alert('Error starting cleanup: ' + error);
+        alert('Error starting scan: ' + error);
         resetButtons();
     });
 }
@@ -155,23 +197,154 @@ function startPolling() {
 }
 
 function checkStatus() {
-    fetch('/api/cleanup-status')
+    fetch('/api/cleanup/status')
     .then(response => response.json())
     .then(data => {
         updateLog(data.log);
         
-        if (!data.running) {
+        if (data.phase === 'ready' && !data.running) {
             clearInterval(pollInterval);
             resetButtons();
-            
-            if (data.last_result) {
-                if (data.last_result.error) {
-                    appendLog('[ERROR] ' + data.last_result.error, 'error');
-                } else {
-                    appendLog('[COMPLETE] Cleanup finished', 'success');
-                }
+            candidates = data.candidates || [];
+            renderCandidates();
+        } else if (data.phase === 'completed' && !data.running) {
+            clearInterval(pollInterval);
+            resetButtons();
+            appendLog('[COMPLETE] Actions executed successfully', 'success');
+            document.getElementById('candidates-section').style.display = 'none';
+        } else if (data.phase === 'error' && !data.running) {
+            clearInterval(pollInterval);
+            resetButtons();
+            if (data.last_result && data.last_result.error) {
+                appendLog('[ERROR] ' + data.last_result.error, 'error');
             }
         }
+    });
+}
+
+function renderCandidates() {
+    const container = document.getElementById('candidates-table');
+    const section = document.getElementById('candidates-section');
+    const countSpan = document.getElementById('candidate-count');
+    
+    countSpan.textContent = candidates.length;
+    
+    if (candidates.length === 0) {
+        section.style.display = 'none';
+        appendLog('[SUCCESS] No shows eligible for deletion. Your library is well-maintained!', 'success');
+        return;
+    }
+    
+    section.style.display = 'block';
+    container.innerHTML = '';
+    
+    candidates.forEach((show, index) => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>
+                <strong>${escapeHtml(show.title)}</strong>
+                ${show.requester_email ? `<br><small class="text-muted">Requested by: ${escapeHtml(show.requester_name || 'Unknown')}</small>` : ''}
+            </td>
+            <td><span class="badge ${show.status === 'Ended' ? 'bg-secondary' : 'bg-info'}">${escapeHtml(show.status)}</span></td>
+            <td><small>${escapeHtml(show.skip_reason || 'Eligible for deletion')}</small></td>
+            <td><small>${show.added_date || 'Unknown'}</small></td>
+            <td><small>${show.last_watched || 'Never'}</small></td>
+            <td>
+                <div class="btn-group btn-group-sm" role="group">
+                    <input type="radio" class="btn-check" name="action-${index}" id="delete-${index}" value="delete" autocomplete="off">
+                    <label class="btn btn-outline-danger" for="delete-${index}"><i class="bi bi-trash"></i></label>
+                    
+                    <input type="radio" class="btn-check" name="action-${index}" id="exclude-${index}" value="exclude" autocomplete="off">
+                    <label class="btn btn-outline-warning" for="exclude-${index}"><i class="bi bi-shield-plus"></i></label>
+                    
+                    <input type="radio" class="btn-check" name="action-${index}" id="ignore-${index}" value="ignore" autocomplete="off" checked>
+                    <label class="btn btn-outline-secondary" for="ignore-${index}"><i class="bi bi-dash"></i></label>
+                </div>
+            </td>
+        `;
+        container.appendChild(row);
+    });
+}
+
+function selectAllAction(action) {
+    candidates.forEach((_, index) => {
+        const radio = document.getElementById(`${action}-${index}`);
+        if (radio) radio.checked = true;
+    });
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function executeActions() {
+    const actions = [];
+    const deleteFromDb = document.getElementById('delete-from-sonarr-db').checked;
+    
+    candidates.forEach((show, index) => {
+        const deleteRadio = document.getElementById(`delete-${index}`);
+        const excludeRadio = document.getElementById(`exclude-${index}`);
+        
+        if (deleteRadio && deleteRadio.checked) {
+            actions.push({
+                action: 'delete',
+                id: show.id,
+                title: show.title,
+                deleteFromSonarr: deleteFromDb,
+                requester_email: show.requester_email,
+                requester_name: show.requester_name
+            });
+        } else if (excludeRadio && excludeRadio.checked) {
+            actions.push({
+                action: 'exclude',
+                title: show.title
+            });
+        }
+    });
+    
+    if (actions.length === 0) {
+        alert('No actions selected. Please select at least one show to delete or exclude.');
+        return;
+    }
+    
+    const deleteCount = actions.filter(a => a.action === 'delete').length;
+    const excludeCount = actions.filter(a => a.action === 'exclude').length;
+    
+    let confirmMsg = `You are about to:\n`;
+    if (deleteCount > 0) confirmMsg += `- Delete ${deleteCount} show(s)\n`;
+    if (excludeCount > 0) confirmMsg += `- Add ${excludeCount} show(s) to exclusion list\n`;
+    confirmMsg += `\nThis cannot be undone. Continue?`;
+    
+    if (!confirm(confirmMsg)) return;
+    
+    const btnExecute = document.getElementById('btn-execute');
+    const statusBadge = document.getElementById('status-badge');
+    const statusText = document.getElementById('status-text');
+    
+    btnExecute.disabled = true;
+    statusBadge.style.display = 'block';
+    statusText.textContent = 'Executing actions...';
+    
+    fetch('/api/cleanup/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actions: actions })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+            resetButtons();
+        } else {
+            startPolling();
+        }
+    })
+    .catch(error => {
+        alert('Error executing actions: ' + error);
+        resetButtons();
     });
 }
 
@@ -179,8 +352,8 @@ function updateLog(logLines) {
     const container = document.getElementById('log-container');
     container.innerHTML = '';
     
-    if (logLines.length === 0) {
-        container.innerHTML = '<p class="text-muted mb-0">Run a cleanup to see output here...</p>';
+    if (!logLines || logLines.length === 0) {
+        container.innerHTML = '<p class="text-muted mb-0">Run a scan to see output here...</p>';
         return;
     }
     
@@ -193,6 +366,7 @@ function updateLog(logLines) {
         else if (line.includes('[SUCCESS]')) p.classList.add('success');
         else if (line.includes('[WARNING]')) p.classList.add('warning');
         else if (line.includes('[INFO]')) p.classList.add('info');
+        else if (line.includes('[DEBUG]')) p.classList.add('info');
         
         container.appendChild(p);
     });
@@ -211,12 +385,13 @@ function appendLog(message, type) {
 
 function clearLog() {
     const container = document.getElementById('log-container');
-    container.innerHTML = '<p class="text-muted mb-0">Run a cleanup to see output here...</p>';
+    container.innerHTML = '<p class="text-muted mb-0">Run a scan to see output here...</p>';
 }
 
 function resetButtons() {
-    document.getElementById('btn-dry-run').disabled = false;
-    document.getElementById('btn-execute').disabled = false;
+    document.getElementById('btn-scan').disabled = false;
+    const btnExecute = document.getElementById('btn-execute');
+    if (btnExecute) btnExecute.disabled = false;
     document.getElementById('status-badge').style.display = 'none';
 }
 </script>
