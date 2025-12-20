@@ -56,6 +56,23 @@ class Exclusion(db.Model):
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class DeletionHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(500), nullable=False)
+    sonarr_id = db.Column(db.Integer, nullable=True)
+    tvdb_id = db.Column(db.Integer, nullable=True)
+    size_bytes = db.Column(db.BigInteger, nullable=True)
+    season_count = db.Column(db.Integer, nullable=True)
+    episode_count = db.Column(db.Integer, nullable=True)
+    requester_name = db.Column(db.String(200), nullable=True)
+    requester_email = db.Column(db.String(200), nullable=True)
+    priority_score = db.Column(db.Integer, nullable=True)
+    priority_label = db.Column(db.String(20), nullable=True)
+    was_quarantined = db.Column(db.Boolean, default=False)
+    deleted_from_sonarr_db = db.Column(db.Boolean, default=False)
+    deleted_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
@@ -389,6 +406,71 @@ def exclusions():
     excluded_shows = [e.title for e in Exclusion.query.order_by(Exclusion.title).all()]
     has_shows = cleanup_status.get('candidates') or cleanup_status.get('skipped')
     return render_template('exclusions.html', excluded_shows=excluded_shows, has_shows=has_shows)
+
+
+@app.route('/history')
+@login_required
+def history():
+    """Show deletion history."""
+    deletions = DeletionHistory.query.order_by(DeletionHistory.deleted_at.desc()).all()
+    sonarr_url = get_setting('SONARR_URL', '').rstrip('/')
+    return render_template('history.html', deletions=deletions, sonarr_url=sonarr_url)
+
+
+@app.route('/api/history', methods=['GET'])
+@login_required
+def get_history_api():
+    """Get deletion history as JSON."""
+    deletions = DeletionHistory.query.order_by(DeletionHistory.deleted_at.desc()).all()
+    sonarr_url = get_setting('SONARR_URL', '').rstrip('/')
+    return jsonify([{
+        'id': d.id,
+        'title': d.title,
+        'sonarr_id': d.sonarr_id,
+        'tvdb_id': d.tvdb_id,
+        'size_bytes': d.size_bytes,
+        'season_count': d.season_count,
+        'episode_count': d.episode_count,
+        'requester_name': d.requester_name,
+        'requester_email': d.requester_email,
+        'priority_score': d.priority_score,
+        'priority_label': d.priority_label,
+        'was_quarantined': d.was_quarantined,
+        'deleted_from_sonarr_db': d.deleted_from_sonarr_db,
+        'deleted_at': d.deleted_at.isoformat() if d.deleted_at else None,
+        'sonarr_url': sonarr_url
+    } for d in deletions])
+
+
+@app.route('/api/history/record', methods=['POST'])
+@login_required
+def record_deletion_api():
+    """Record a deletion in history."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+    
+    try:
+        record = DeletionHistory(
+            title=data.get('title', 'Unknown'),
+            sonarr_id=data.get('sonarr_id'),
+            tvdb_id=data.get('tvdb_id'),
+            size_bytes=data.get('size_bytes'),
+            season_count=data.get('season_count'),
+            episode_count=data.get('episode_count'),
+            requester_name=data.get('requester_name'),
+            requester_email=data.get('requester_email'),
+            priority_score=data.get('priority_score'),
+            priority_label=data.get('priority_label'),
+            was_quarantined=data.get('was_quarantined', False),
+            deleted_from_sonarr_db=data.get('deleted_from_sonarr_db', False)
+        )
+        db.session.add(record)
+        db.session.commit()
+        return jsonify({'success': True, 'id': record.id})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/shows', methods=['GET'])
