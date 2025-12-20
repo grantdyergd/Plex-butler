@@ -477,6 +477,25 @@ def scan_cleanup_api():
     return jsonify({'message': 'Scan started'})
 
 
+@app.route('/api/email/test', methods=['POST'])
+@login_required
+def test_email_api():
+    """Send a test email to verify SMTP configuration."""
+    from cleanup_web import send_test_email
+    import os
+    
+    config = {
+        'SMTP_HOST': get_setting('SMTP_HOST', ''),
+        'SMTP_PORT': int(get_setting('SMTP_PORT', '587') or '587'),
+        'SMTP_USER': get_setting('SMTP_USER', ''),
+        'SMTP_PASSWORD': os.environ.get('SMTP_PASSWORD', ''),
+        'SMTP_FROM': get_setting('SMTP_FROM', ''),
+    }
+    
+    success, message = send_test_email(config)
+    return jsonify({'success': success, 'message': message})
+
+
 @app.route('/api/cleanup/execute', methods=['POST'])
 @login_required
 def execute_cleanup_api():

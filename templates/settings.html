@@ -97,10 +97,16 @@
                         <label for="smtp_password" class="form-label">Password</label>
                         <input type="password" class="form-control" id="smtp_password" name="smtp_password">
                     </div>
-                    <div class="mb-0">
+                    <div class="mb-3">
                         <label for="smtp_from" class="form-label">From Address</label>
                         <input type="email" class="form-control" id="smtp_from" name="smtp_from" 
                                value="{{ settings.smtp_from }}">
+                    </div>
+                    <div class="mb-0">
+                        <button type="button" class="btn btn-outline-info w-100" onclick="sendTestEmail()">
+                            <i class="bi bi-envelope-check me-2"></i>Send Test Email
+                        </button>
+                        <div id="test-email-result" class="mt-2"></div>
                     </div>
                 </div>
             </div>
@@ -164,4 +170,35 @@
         </div>
     </div>
 </form>
+
+<script>
+function sendTestEmail() {
+    const btn = event.target.closest('button');
+    const resultDiv = document.getElementById('test-email-result');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Sending...';
+    resultDiv.innerHTML = '';
+    
+    fetch('/api/email/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            resultDiv.innerHTML = '<div class="alert alert-success py-2 mb-0"><i class="bi bi-check-circle me-2"></i>' + data.message + '</div>';
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-x-circle me-2"></i>' + data.message + '</div>';
+        }
+    })
+    .catch(err => {
+        resultDiv.innerHTML = '<div class="alert alert-danger py-2 mb-0"><i class="bi bi-x-circle me-2"></i>Error: ' + err.message + '</div>';
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-envelope-check me-2"></i>Send Test Email';
+    });
+}
+</script>
 {% endblock %}

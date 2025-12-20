@@ -719,33 +719,113 @@ def delete_from_sonarr(
 
 
 def send_notification_email(email: str, show_title: str, requester_name: str, config: dict, log: Callable) -> bool:
+    smtp_password = config.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD", "")
+    
     if not all([config.get("SMTP_HOST"), config.get("SMTP_USER"), 
-                config.get("SMTP_PASSWORD"), config.get("SMTP_FROM")]):
+                smtp_password, config.get("SMTP_FROM")]):
         log(f"[WARNING] SMTP not configured, skipping email")
         return False
     
     try:
-        msg = MIMEMultipart()
-        msg["From"] = config["SMTP_FROM"]
+        msg = MIMEMultipart("alternative")
+        msg["From"] = f"Grant's Plex Library <{config['SMTP_FROM']}>"
         msg["To"] = email
         msg["Subject"] = f"TV Show Removed: {show_title}"
         
-        body = f"""Hi {requester_name},
+        plain_body = f"""Hi {requester_name},
 
-This is an automated notification to let you know that the TV show you requested, "{show_title}", has been removed from our media library.
+The TV show "{show_title}" has been removed from Grant's Plex library as part of regular maintenance.
 
-This removal was done as part of our regular library maintenance to free up storage space for new content.
+You can request it again anytime through Ombi if you'd like it back!
 
-If you would like this show to be added again in the future, please feel free to submit a new request through Ombi.
+If you want this show protected from future cleanup, just let Grant know and he'll add it to the exclusion list.
 
-Best regards,
-Media Library Cleanup Bot
-"""
-        msg.attach(MIMEText(body, "plain"))
+- Grant's Media Library"""
+
+        html_body = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #1a1a2e;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #1a1a2e; padding: 40px 20px;">
+        <tr>
+            <td align="center">
+                <table width="600" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+                    <!-- Header -->
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #e94560 0%, #ff6b6b 100%); padding: 30px; text-align: center;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600;">
+                                📺 Show Removed
+                            </h1>
+                        </td>
+                    </tr>
+                    
+                    <!-- Content -->
+                    <tr>
+                        <td style="padding: 40px 30px;">
+                            <p style="color: #a0a0a0; font-size: 16px; margin: 0 0 20px 0;">
+                                Hi <strong style="color: #ffffff;">{requester_name}</strong>,
+                            </p>
+                            
+                            <div style="background: rgba(233, 69, 96, 0.1); border-left: 4px solid #e94560; padding: 20px; border-radius: 8px; margin: 25px 0;">
+                                <p style="color: #ffffff; font-size: 18px; margin: 0; font-weight: 500;">
+                                    "{show_title}"
+                                </p>
+                                <p style="color: #a0a0a0; font-size: 14px; margin: 8px 0 0 0;">
+                                    has been removed from the library
+                                </p>
+                            </div>
+                            
+                            <p style="color: #c0c0c0; font-size: 15px; line-height: 1.6; margin: 25px 0;">
+                                This was part of our regular library maintenance to free up space for new content. Don't worry though - you have options!
+                            </p>
+                            
+                            <!-- Options Box -->
+                            <table width="100%" cellpadding="0" cellspacing="0" style="margin: 30px 0;">
+                                <tr>
+                                    <td style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 25px;">
+                                        <p style="color: #4ecca3; font-size: 14px; font-weight: 600; margin: 0 0 15px 0; text-transform: uppercase; letter-spacing: 1px;">
+                                            🎬 Want it back?
+                                        </p>
+                                        <p style="color: #c0c0c0; font-size: 14px; line-height: 1.6; margin: 0 0 20px 0;">
+                                            Simply request it again through Ombi and it'll be re-added to the library.
+                                        </p>
+                                        
+                                        <p style="color: #f9d423; font-size: 14px; font-weight: 600; margin: 20px 0 15px 0; text-transform: uppercase; letter-spacing: 1px;">
+                                            🛡️ Protect from future removal?
+                                        </p>
+                                        <p style="color: #c0c0c0; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            Let Grant know and he'll add it to the exclusion list so it won't be removed in future cleanups.
+                                        </p>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background: rgba(0,0,0,0.2); padding: 25px 30px; text-align: center;">
+                            <p style="color: #666; font-size: 13px; margin: 0;">
+                                Grant's Plex Library • Automated Notification
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+        
+        msg.attach(MIMEText(plain_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
         
         with smtplib.SMTP(config["SMTP_HOST"], config["SMTP_PORT"]) as server:
             server.starttls()
-            server.login(config["SMTP_USER"], config["SMTP_PASSWORD"])
+            server.login(config["SMTP_USER"], smtp_password)
             server.send_message(msg)
         
         log(f"[SUCCESS] Sent notification to {email}")
@@ -753,6 +833,66 @@ Media Library Cleanup Bot
     except Exception as e:
         log(f"[ERROR] Failed to send email: {e}")
         return False
+
+
+def send_test_email(config: dict) -> tuple:
+    """Send a test email to verify SMTP configuration."""
+    smtp_password = config.get("SMTP_PASSWORD") or os.environ.get("SMTP_PASSWORD", "")
+    
+    if not all([config.get("SMTP_HOST"), config.get("SMTP_USER"), 
+                smtp_password, config.get("SMTP_FROM")]):
+        return False, "SMTP not fully configured"
+    
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = f"Grant's Plex Library <{config['SMTP_FROM']}>"
+        msg["To"] = config["SMTP_FROM"]
+        msg["Subject"] = "Test Email - Plex Cleanup Tool"
+        
+        plain_body = "This is a test email from your Plex cleanup tool. If you received this, email notifications are working!"
+        
+        html_body = """<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #1a1a2e;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #1a1a2e; padding: 40px 20px;">
+        <tr>
+            <td align="center">
+                <table width="500" cellpadding="0" cellspacing="0" style="background: linear-gradient(135deg, #16213e 0%, #1a1a2e 100%); border-radius: 16px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #4ecca3 0%, #45b7aa 100%); padding: 30px; text-align: center;">
+                            <h1 style="margin: 0; color: #ffffff; font-size: 24px;">✅ Test Successful!</h1>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 40px 30px; text-align: center;">
+                            <p style="color: #c0c0c0; font-size: 16px; line-height: 1.6; margin: 0;">
+                                Email notifications are working correctly. When shows are removed, requesters will receive beautiful notifications like this.
+                            </p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="background: rgba(0,0,0,0.2); padding: 20px; text-align: center;">
+                            <p style="color: #666; font-size: 13px; margin: 0;">Grant's Plex Library</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+        
+        msg.attach(MIMEText(plain_body, "plain"))
+        msg.attach(MIMEText(html_body, "html"))
+        
+        with smtplib.SMTP(config["SMTP_HOST"], config["SMTP_PORT"]) as server:
+            server.starttls()
+            server.login(config["SMTP_USER"], smtp_password)
+            server.send_message(msg)
+        
+        return True, f"Test email sent to {config['SMTP_FROM']}"
+    except Exception as e:
+        return False, str(e)
 
 
 def run_cleanup_with_settings(get_setting: Callable, dry_run: bool = True, log_callback: Optional[Callable] = None) -> dict:
