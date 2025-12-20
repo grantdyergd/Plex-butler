@@ -88,6 +88,20 @@ class MovieExclusion(db.Model):
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class EmailHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    media_type = db.Column(db.String(20), default='tv')
+    media_title = db.Column(db.String(500), nullable=False)
+    action_type = db.Column(db.String(50), default='exclusion')
+    recipient_name = db.Column(db.String(200), nullable=True)
+    recipient_email = db.Column(db.String(200), nullable=False)
+    subject = db.Column(db.String(500), nullable=False)
+    body_html = db.Column(db.Text, nullable=True)
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+    was_successful = db.Column(db.Boolean, default=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
