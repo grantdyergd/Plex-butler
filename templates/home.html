@@ -103,7 +103,7 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>TV Deletion Candidates (<span id="tv-candidate-count">0</span>) - <span id="tv-total-size">0 GB</span></h5>
+                        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>TV Candidates (<span id="tv-candidate-count">0</span>) - <span id="tv-total-size">0 GB</span></h5>
                         <div class="d-flex gap-2 flex-wrap">
                             <div class="btn-group">
                                 <button class="btn btn-sm btn-outline-danger" onclick="selectAllTVAction('delete')">
@@ -116,9 +116,65 @@
                                     <i class="bi bi-x-circle me-1"></i>Clear
                                 </button>
                             </div>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-danger" onclick="selectTVByPriority('High')">High</button>
+                                <button class="btn btn-sm btn-warning text-dark" onclick="selectTVByPriority('Medium')">Med</button>
+                                <button class="btn btn-sm btn-secondary" onclick="selectTVByPriority('Low')">Low</button>
+                            </div>
                             <button class="btn btn-sm btn-outline-info" onclick="exportTVCSV()">
                                 <i class="bi bi-download me-1"></i>Export CSV
                             </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-2 border-bottom">
+                        <div class="row g-2 align-items-center">
+                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Filters:</label></div>
+                            <div class="col-auto">
+                                <select id="tv-filter-priority" class="form-select form-select-sm" onchange="applyTVFilters()">
+                                    <option value="">All Priorities</option>
+                                    <option value="High">High</option>
+                                    <option value="Medium">Medium</option>
+                                    <option value="Low">Low</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <select id="tv-filter-status" class="form-select form-select-sm" onchange="applyTVFilters()">
+                                    <option value="">All Status</option>
+                                    <option value="Ended">Ended</option>
+                                    <option value="Continuing">Continuing</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <select id="tv-filter-size" class="form-select form-select-sm" onchange="applyTVFilters()">
+                                    <option value="">Any Size</option>
+                                    <option value="50">50+ GB</option>
+                                    <option value="20">20+ GB</option>
+                                    <option value="10">10+ GB</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <select id="tv-filter-views" class="form-select form-select-sm" onchange="applyTVFilters()">
+                                    <option value="">Any Views</option>
+                                    <option value="0">Never Watched</option>
+                                    <option value="1+">1+ Views</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <select id="tv-filter-requester" class="form-select form-select-sm" onchange="applyTVFilters()">
+                                    <option value="">Any Requester</option>
+                                    <option value="none">No Requester</option>
+                                    <option value="has">Has Requester</option>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <input type="text" id="tv-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyTVFilters()">
+                            </div>
+                            <div class="col-auto">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="clearTVFilters()"><i class="bi bi-x-circle"></i></button>
+                            </div>
+                            <div class="col-auto">
+                                <span class="badge bg-info" id="tv-filtered-count">0 shown</span>
+                            </div>
                         </div>
                     </div>
                     <div class="card-body p-0">
@@ -126,13 +182,14 @@
                             <table class="table table-dark table-striped table-hover mb-0">
                                 <thead>
                                     <tr>
-                                        <th>Priority</th>
-                                        <th>Title</th>
-                                        <th>Status</th>
-                                        <th>Size</th>
-                                        <th>Views</th>
+                                        <th style="cursor:pointer" onclick="sortTV('priority_score')">Priority <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortTV('title')">Title <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortTV('status')">Status <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortTV('size_bytes')">Size <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortTV('view_count')">Views <i class="bi bi-arrow-down-up"></i></th>
+                                        <th>Requester</th>
                                         <th>Why Delete?</th>
-                                        <th>Added</th>
+                                        <th style="cursor:pointer" onclick="sortTV('added_date')">Added <i class="bi bi-arrow-down-up"></i></th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
@@ -147,7 +204,7 @@
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="delete-from-sonarr-db" checked>
                                     <label class="form-check-label" for="delete-from-sonarr-db">
-                                        Remove from Sonarr DB
+                                        Remove from Sonarr DB (prevents re-adding)
                                     </label>
                                 </div>
                             </div>
@@ -269,7 +326,7 @@
             <div class="col-12">
                 <div class="card">
                     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-                        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Movie Deletion Candidates (<span id="movie-candidate-count">0</span>) - <span id="movie-total-size">0 GB</span></h5>
+                        <h5 class="mb-0"><i class="bi bi-list-task me-2"></i>Movie Candidates (<span id="movie-candidate-count">0</span>) - <span id="movie-total-size">0 GB</span></h5>
                         <div class="d-flex gap-2 flex-wrap">
                             <div class="btn-group">
                                 <button class="btn btn-sm btn-outline-danger" onclick="selectAllMovieAction('delete')">
@@ -282,9 +339,58 @@
                                     <i class="bi bi-x-circle me-1"></i>Clear
                                 </button>
                             </div>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-danger" onclick="selectMoviesByPriority('High')">High</button>
+                                <button class="btn btn-sm btn-warning text-dark" onclick="selectMoviesByPriority('Medium')">Med</button>
+                                <button class="btn btn-sm btn-secondary" onclick="selectMoviesByPriority('Low')">Low</button>
+                            </div>
                             <button class="btn btn-sm btn-outline-info" onclick="exportMovieCSV()">
                                 <i class="bi bi-download me-1"></i>Export CSV
                             </button>
+                        </div>
+                    </div>
+                    <div class="card-body p-2 border-bottom">
+                        <div class="row g-2 align-items-center">
+                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Filters:</label></div>
+                            <div class="col-auto">
+                                <select id="movie-filter-priority" class="form-select form-select-sm" onchange="applyMovieFilters()">
+                                    <option value="">All Priorities</option>
+                                    <option value="High">High</option>
+                                    <option value="Medium">Medium</option>
+                                    <option value="Low">Low</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <select id="movie-filter-size" class="form-select form-select-sm" onchange="applyMovieFilters()">
+                                    <option value="">Any Size</option>
+                                    <option value="50">50+ GB</option>
+                                    <option value="20">20+ GB</option>
+                                    <option value="10">10+ GB</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <select id="movie-filter-views" class="form-select form-select-sm" onchange="applyMovieFilters()">
+                                    <option value="">Any Views</option>
+                                    <option value="0">Never Watched</option>
+                                    <option value="1+">1+ Views</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <select id="movie-filter-requester" class="form-select form-select-sm" onchange="applyMovieFilters()">
+                                    <option value="">Any Requester</option>
+                                    <option value="none">No Requester</option>
+                                    <option value="has">Has Requester</option>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <input type="text" id="movie-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyMovieFilters()">
+                            </div>
+                            <div class="col-auto">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="clearMovieFilters()"><i class="bi bi-x-circle"></i></button>
+                            </div>
+                            <div class="col-auto">
+                                <span class="badge bg-info" id="movie-filtered-count">0 shown</span>
+                            </div>
                         </div>
                     </div>
                     <div class="card-body p-0">
@@ -292,13 +398,14 @@
                             <table class="table table-dark table-striped table-hover mb-0">
                                 <thead>
                                     <tr>
-                                        <th>Priority</th>
-                                        <th>Title</th>
-                                        <th>Year</th>
-                                        <th>Size</th>
-                                        <th>Views</th>
+                                        <th style="cursor:pointer" onclick="sortMovies('priority_score')">Priority <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortMovies('title')">Title <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortMovies('year')">Year <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortMovies('size_bytes')">Size <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortMovies('view_count')">Views <i class="bi bi-arrow-down-up"></i></th>
+                                        <th>Requester</th>
                                         <th>Why Delete?</th>
-                                        <th>Added</th>
+                                        <th style="cursor:pointer" onclick="sortMovies('added')">Added <i class="bi bi-arrow-down-up"></i></th>
                                         <th>Action</th>
                                     </tr>
                                 </thead>
@@ -313,7 +420,7 @@
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="delete-from-radarr-db" checked>
                                     <label class="form-check-label" for="delete-from-radarr-db">
-                                        Remove from Radarr DB
+                                        Remove from Radarr DB (prevents re-adding)
                                     </label>
                                 </div>
                             </div>
@@ -321,7 +428,7 @@
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="movie-quarantine-mode">
                                     <label class="form-check-label" for="movie-quarantine-mode">
-                                        Quarantine mode
+                                        Quarantine mode (move to trash)
                                     </label>
                                 </div>
                             </div>
@@ -430,24 +537,109 @@ function clearTVLog() {
     document.getElementById('tv-log-container').innerHTML = '<p class="text-muted mb-0">Run a scan to see output here...</p>';
 }
 
+let tvFilteredIndices = [];
+let tvSortField = 'priority_score';
+let tvSortAsc = false;
+
+function getFilteredTV() {
+    const priorityFilter = document.getElementById('tv-filter-priority')?.value || '';
+    const statusFilter = document.getElementById('tv-filter-status')?.value || '';
+    const sizeFilter = document.getElementById('tv-filter-size')?.value || '';
+    const viewsFilter = document.getElementById('tv-filter-views')?.value || '';
+    const requesterFilter = document.getElementById('tv-filter-requester')?.value || '';
+    const titleFilter = (document.getElementById('tv-filter-title')?.value || '').toLowerCase().trim();
+    
+    tvFilteredIndices = [];
+    tvCandidates.forEach((show, index) => {
+        let match = true;
+        if (priorityFilter && show.priority_label !== priorityFilter) match = false;
+        if (statusFilter && show.status !== statusFilter) match = false;
+        if (sizeFilter) {
+            const sizeGB = (show.size_bytes || 0) / (1024 * 1024 * 1024);
+            if (sizeGB < parseInt(sizeFilter)) match = false;
+        }
+        if (viewsFilter) {
+            const views = show.view_count || 0;
+            if (viewsFilter === '0' && views !== 0) match = false;
+            else if (viewsFilter === '1+' && views < 1) match = false;
+        }
+        if (requesterFilter) {
+            const hasRequester = !!(show.requester_email || show.requester_name);
+            if (requesterFilter === 'none' && hasRequester) match = false;
+            else if (requesterFilter === 'has' && !hasRequester) match = false;
+        }
+        if (titleFilter && !show.title.toLowerCase().includes(titleFilter)) match = false;
+        if (match) tvFilteredIndices.push(index);
+    });
+    return tvFilteredIndices;
+}
+
+function applyTVFilters() {
+    getFilteredTV();
+    sortTVIndices();
+    renderTVCandidates();
+}
+
+function clearTVFilters() {
+    document.getElementById('tv-filter-priority').value = '';
+    document.getElementById('tv-filter-status').value = '';
+    document.getElementById('tv-filter-size').value = '';
+    document.getElementById('tv-filter-views').value = '';
+    document.getElementById('tv-filter-requester').value = '';
+    document.getElementById('tv-filter-title').value = '';
+    applyTVFilters();
+}
+
+function sortTV(field) {
+    if (tvSortField === field) tvSortAsc = !tvSortAsc;
+    else { tvSortField = field; tvSortAsc = true; }
+    sortTVIndices();
+    renderTVCandidates();
+}
+
+function sortTVIndices() {
+    tvFilteredIndices.sort((a, b) => {
+        let valA = tvCandidates[a][tvSortField];
+        let valB = tvCandidates[b][tvSortField];
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+        if (valA < valB) return tvSortAsc ? -1 : 1;
+        if (valA > valB) return tvSortAsc ? 1 : -1;
+        return 0;
+    });
+}
+
 function renderTVCandidates() {
+    if (tvFilteredIndices.length === 0) {
+        tvFilteredIndices = tvCandidates.map((_, i) => i);
+        sortTVIndices();
+    }
+    
     const tbody = document.getElementById('tv-candidates-table');
     let totalSize = 0;
     tvCandidates.forEach(s => totalSize += s.size_bytes || 0);
     document.getElementById('tv-candidate-count').textContent = tvCandidates.length;
     document.getElementById('tv-total-size').textContent = formatSize(totalSize);
+    document.getElementById('tv-filtered-count').textContent = tvFilteredIndices.length + ' shown';
     
-    tbody.innerHTML = tvCandidates.map((show, i) => {
+    tbody.innerHTML = tvFilteredIndices.map(i => {
+        const show = tvCandidates[i];
         const priorityClass = show.priority_label === 'High' ? 'bg-danger' : show.priority_label === 'Medium' ? 'bg-warning text-dark' : 'bg-secondary';
         const reasons = (show.priority_reasons || []).slice(0, 3).join(', ');
+        const requester = show.requester_name || show.requester_email || '';
+        const isLarge = (show.size_bytes || 0) >= 50 * 1024 * 1024 * 1024;
+        const warnings = isLarge ? '<span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>' : '';
+        const statusClass = show.status === 'Ended' ? 'text-muted' : 'text-success';
+        
         return `<tr data-index="${i}">
-            <td><span class="badge ${priorityClass}">${show.priority_score}</span><small class="d-block text-muted">${show.priority_label}</small></td>
-            <td><strong>${escapeHtml(show.title)}</strong></td>
-            <td>${show.status || 'N/A'}</td>
-            <td>${formatSize(show.size_bytes)}</td>
-            <td>${show.view_count || 0}</td>
-            <td><small>${escapeHtml(reasons)}</small></td>
-            <td>${formatDate(show.added_date)}</td>
+            <td><span class="badge ${priorityClass}">${show.priority_score}</span><br><small class="text-light">${show.priority_label}</small></td>
+            <td><strong class="text-white">${escapeHtml(show.title)}</strong>${warnings}</td>
+            <td class="${statusClass}">${show.status || 'N/A'}</td>
+            <td class="text-light">${formatSize(show.size_bytes)}</td>
+            <td class="text-light">${show.view_count || 0}</td>
+            <td>${requester ? '<span class="text-info">' + escapeHtml(requester) + '</span>' : '<span class="text-muted">None</span>'}</td>
+            <td><small class="text-light">${escapeHtml(reasons)}</small></td>
+            <td class="text-light">${formatDate(show.added_date)}</td>
             <td>
                 <div class="btn-group btn-group-sm">
                     <input type="radio" class="btn-check" name="tv-action-${i}" id="tv-delete-${i}" value="delete">
@@ -463,7 +655,16 @@ function renderTVCandidates() {
 }
 
 function selectAllTVAction(action) {
-    tvCandidates.forEach((_, i) => { const r = document.getElementById(`tv-${action}-${i}`); if (r) r.checked = true; });
+    tvFilteredIndices.forEach(i => { const r = document.getElementById(`tv-${action}-${i}`); if (r) r.checked = true; });
+}
+
+function selectTVByPriority(priority) {
+    tvFilteredIndices.forEach(i => {
+        if (tvCandidates[i].priority_label === priority) {
+            const r = document.getElementById(`tv-delete-${i}`);
+            if (r) r.checked = true;
+        }
+    });
 }
 
 function exportTVCSV() {
@@ -543,24 +744,105 @@ function clearMovieLog() {
     document.getElementById('movie-log-container').innerHTML = '<p class="text-muted mb-0">Run a scan to see output here...</p>';
 }
 
+let movieFilteredIndices = [];
+let movieSortField = 'priority_score';
+let movieSortAsc = false;
+
+function getFilteredMovies() {
+    const priorityFilter = document.getElementById('movie-filter-priority')?.value || '';
+    const sizeFilter = document.getElementById('movie-filter-size')?.value || '';
+    const viewsFilter = document.getElementById('movie-filter-views')?.value || '';
+    const requesterFilter = document.getElementById('movie-filter-requester')?.value || '';
+    const titleFilter = (document.getElementById('movie-filter-title')?.value || '').toLowerCase().trim();
+    
+    movieFilteredIndices = [];
+    movieCandidates.forEach((movie, index) => {
+        let match = true;
+        if (priorityFilter && movie.priority_label !== priorityFilter) match = false;
+        if (sizeFilter) {
+            const sizeGB = (movie.size_bytes || 0) / (1024 * 1024 * 1024);
+            if (sizeGB < parseInt(sizeFilter)) match = false;
+        }
+        if (viewsFilter) {
+            const views = movie.view_count || 0;
+            if (viewsFilter === '0' && views !== 0) match = false;
+            else if (viewsFilter === '1+' && views < 1) match = false;
+        }
+        if (requesterFilter) {
+            const hasRequester = !!(movie.requester_email || movie.requester_name);
+            if (requesterFilter === 'none' && hasRequester) match = false;
+            else if (requesterFilter === 'has' && !hasRequester) match = false;
+        }
+        if (titleFilter && !movie.title.toLowerCase().includes(titleFilter)) match = false;
+        if (match) movieFilteredIndices.push(index);
+    });
+    return movieFilteredIndices;
+}
+
+function applyMovieFilters() {
+    getFilteredMovies();
+    sortMovieIndices();
+    renderMovieCandidates();
+}
+
+function clearMovieFilters() {
+    document.getElementById('movie-filter-priority').value = '';
+    document.getElementById('movie-filter-size').value = '';
+    document.getElementById('movie-filter-views').value = '';
+    document.getElementById('movie-filter-requester').value = '';
+    document.getElementById('movie-filter-title').value = '';
+    applyMovieFilters();
+}
+
+function sortMovies(field) {
+    if (movieSortField === field) movieSortAsc = !movieSortAsc;
+    else { movieSortField = field; movieSortAsc = true; }
+    sortMovieIndices();
+    renderMovieCandidates();
+}
+
+function sortMovieIndices() {
+    movieFilteredIndices.sort((a, b) => {
+        let valA = movieCandidates[a][movieSortField];
+        let valB = movieCandidates[b][movieSortField];
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+        if (valA < valB) return movieSortAsc ? -1 : 1;
+        if (valA > valB) return movieSortAsc ? 1 : -1;
+        return 0;
+    });
+}
+
 function renderMovieCandidates() {
+    if (movieFilteredIndices.length === 0) {
+        movieFilteredIndices = movieCandidates.map((_, i) => i);
+        sortMovieIndices();
+    }
+    
     const tbody = document.getElementById('movie-candidates-table');
     let totalSize = 0;
     movieCandidates.forEach(m => totalSize += m.size_bytes || 0);
     document.getElementById('movie-candidate-count').textContent = movieCandidates.length;
     document.getElementById('movie-total-size').textContent = formatSize(totalSize);
+    document.getElementById('movie-filtered-count').textContent = movieFilteredIndices.length + ' shown';
     
-    tbody.innerHTML = movieCandidates.map((movie, i) => {
+    tbody.innerHTML = movieFilteredIndices.map(i => {
+        const movie = movieCandidates[i];
         const priorityClass = movie.priority_label === 'High' ? 'bg-danger' : movie.priority_label === 'Medium' ? 'bg-warning text-dark' : 'bg-secondary';
         const reasons = (movie.priority_reasons || []).slice(0, 3).join(', ');
+        const requester = movie.requester_name || movie.requester_email || '';
+        const isLarge = (movie.size_bytes || 0) >= 50 * 1024 * 1024 * 1024;
+        const warnings = isLarge ? '<span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>' : '';
+        
         return `<tr data-index="${i}">
-            <td><span class="badge ${priorityClass}">${movie.priority_score}</span><small class="d-block text-muted">${movie.priority_label}</small></td>
-            <td><strong>${escapeHtml(movie.title)}</strong></td>
-            <td>${movie.year || 'N/A'}</td>
-            <td>${formatSize(movie.size_bytes)}</td>
-            <td>${movie.view_count || 0}</td>
-            <td><small>${escapeHtml(reasons)}</small></td>
-            <td>${formatDate(movie.added)}</td>
+            <td><span class="badge ${priorityClass}">${movie.priority_score}</span><br><small class="text-light">${movie.priority_label}</small></td>
+            <td><strong class="text-white">${escapeHtml(movie.title)}</strong>${warnings}</td>
+            <td class="text-light">${movie.year || 'N/A'}</td>
+            <td class="text-light">${formatSize(movie.size_bytes)}</td>
+            <td class="text-light">${movie.view_count || 0}</td>
+            <td>${requester ? '<span class="text-info">' + escapeHtml(requester) + '</span>' : '<span class="text-muted">None</span>'}</td>
+            <td><small class="text-light">${escapeHtml(reasons)}</small></td>
+            <td class="text-light">${formatDate(movie.added)}</td>
             <td>
                 <div class="btn-group btn-group-sm">
                     <input type="radio" class="btn-check" name="movie-action-${i}" id="movie-delete-${i}" value="delete">
@@ -576,7 +858,16 @@ function renderMovieCandidates() {
 }
 
 function selectAllMovieAction(action) {
-    movieCandidates.forEach((_, i) => { const r = document.getElementById(`movie-${action}-${i}`); if (r) r.checked = true; });
+    movieFilteredIndices.forEach(i => { const r = document.getElementById(`movie-${action}-${i}`); if (r) r.checked = true; });
+}
+
+function selectMoviesByPriority(priority) {
+    movieFilteredIndices.forEach(i => {
+        if (movieCandidates[i].priority_label === priority) {
+            const r = document.getElementById(`movie-delete-${i}`);
+            if (r) r.checked = true;
+        }
+    });
 }
 
 function exportMovieCSV() {
