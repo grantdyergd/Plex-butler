@@ -21,6 +21,7 @@ A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. Thi
 - Email notifications to Ombi requesters when excluding items
 - Email history tracking with clickable emails to view full content
 - **Persistent scan results** - Last scan is saved and restored on login
+- **AI Chat page** - Built-in AI assistant for quick questions and help
 - Slow, deliberate deletion with delays to prevent mistakes
 - Deletion history tracking with search, filter by type, and re-add links
 
@@ -35,6 +36,7 @@ A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. Thi
 │   ├── base.html
 │   ├── login.html
 │   ├── home.html       # Unified home with TV/Movies tabs
+│   ├── chat.html       # AI chatbot interface
 │   ├── dashboard.html  # TV Shows dashboard (legacy)
 │   ├── movies.html     # Movies dashboard (legacy)
 │   ├── settings.html
