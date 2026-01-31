@@ -688,11 +688,6 @@ function sortTVIndices() {
 }
 
 function renderTVCandidates() {
-    if (tvFilteredIndices.length === 0) {
-        tvFilteredIndices = tvCandidates.map((_, i) => i);
-        sortTVIndices();
-    }
-    
     const tbody = document.getElementById('tv-candidates-table');
     let totalSize = 0;
     tvCandidates.forEach(s => totalSize += s.size_bytes || 0);
@@ -1002,11 +997,6 @@ function sortMovieIndices() {
 }
 
 function renderMovieCandidates() {
-    if (movieFilteredIndices.length === 0) {
-        movieFilteredIndices = movieCandidates.map((_, i) => i);
-        sortMovieIndices();
-    }
-    
     const tbody = document.getElementById('movie-candidates-table');
     let totalSize = 0;
     movieCandidates.forEach(m => totalSize += m.size_bytes || 0);
