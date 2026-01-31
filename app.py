@@ -935,47 +935,6 @@ def email_history_page():
     return render_template('email_history.html')
 
 
-@app.route('/chat')
-@login_required
-def ai_chat():
-    """AI Chat page."""
-    return render_template('chat.html')
-
-
-@app.route('/api/chat', methods=['POST'])
-@login_required
-def chat_api():
-    """Handle chat messages with AI."""
-    data = request.get_json()
-    message = data.get('message', '').strip() if data else ''
-    history = data.get('history', []) if data else []
-    
-    if not message:
-        return jsonify({'error': 'No message provided'}), 400
-    
-    try:
-        messages = [
-            {"role": "system", "content": "You are a friendly, helpful AI assistant. Be conversational, warm, and concise. Help with any questions - tech, travel, general knowledge, or just chat. Use simple language and be encouraging."}
-        ]
-        
-        for msg in history[-10:]:
-            messages.append({"role": msg['role'], "content": msg['content']})
-        
-        messages.append({"role": "user", "content": message})
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            max_tokens=1000,
-            temperature=0.7
-        )
-        
-        reply = response.choices[0].message.content
-        return jsonify({'response': reply})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/ai-analyze', methods=['POST'])
 @login_required
 def ai_analyze_api():

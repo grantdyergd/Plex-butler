@@ -107,10 +107,7 @@
                         <div class="d-flex gap-2 flex-wrap">
                             <div class="btn-group">
                                 <button class="btn btn-sm btn-outline-danger" onclick="selectAllTVAction('delete')">
-                                    <i class="bi bi-trash me-1"></i>Delete All
-                                </button>
-                                <button class="btn btn-sm btn-outline-warning" onclick="selectAllTVAction('exclude')">
-                                    <i class="bi bi-shield-plus me-1"></i>Exclude All
+                                    <i class="bi bi-trash me-1"></i>Select Filtered
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary" onclick="selectAllTVAction('ignore')">
                                     <i class="bi bi-x-circle me-1"></i>Clear
@@ -342,10 +339,7 @@
                         <div class="d-flex gap-2 flex-wrap">
                             <div class="btn-group">
                                 <button class="btn btn-sm btn-outline-danger" onclick="selectAllMovieAction('delete')">
-                                    <i class="bi bi-trash me-1"></i>Delete All
-                                </button>
-                                <button class="btn btn-sm btn-outline-warning" onclick="selectAllMovieAction('exclude')">
-                                    <i class="bi bi-shield-plus me-1"></i>Exclude All
+                                    <i class="bi bi-trash me-1"></i>Select Filtered
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary" onclick="selectAllMovieAction('ignore')">
                                     <i class="bi bi-x-circle me-1"></i>Clear
@@ -679,6 +673,12 @@ function excludeTVNow(index) {
     const show = tvCandidates[index];
     if (!show) return;
     
+    const savedChecks = {};
+    tvCandidates.forEach((_, i) => {
+        const checkbox = document.getElementById(`tv-delete-${i}`);
+        if (checkbox && checkbox.checked) savedChecks[tvCandidates[i].id] = true;
+    });
+    
     fetch('/api/exclusions/add', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -694,6 +694,14 @@ function excludeTVNow(index) {
             tvCandidates.splice(index, 1);
             tvFilteredIndices = [];
             applyTVFilters();
+            
+            tvCandidates.forEach((c, i) => {
+                if (savedChecks[c.id]) {
+                    const checkbox = document.getElementById(`tv-delete-${i}`);
+                    if (checkbox) checkbox.checked = true;
+                }
+            });
+            
             const logContainer = document.getElementById('tv-log-container');
             const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
             logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${show.title}" - moved to exclusion list${emailMsg}</p>`;
@@ -910,6 +918,12 @@ function excludeMovieNow(index) {
     const movie = movieCandidates[index];
     if (!movie) return;
     
+    const savedChecks = {};
+    movieCandidates.forEach((_, i) => {
+        const checkbox = document.getElementById(`movie-delete-${i}`);
+        if (checkbox && checkbox.checked) savedChecks[movieCandidates[i].id] = true;
+    });
+    
     fetch('/api/movies/exclude', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -927,6 +941,14 @@ function excludeMovieNow(index) {
             movieCandidates.splice(index, 1);
             movieFilteredIndices = [];
             applyMovieFilters();
+            
+            movieCandidates.forEach((c, i) => {
+                if (savedChecks[c.id]) {
+                    const checkbox = document.getElementById(`movie-delete-${i}`);
+                    if (checkbox) checkbox.checked = true;
+                }
+            });
+            
             const logContainer = document.getElementById('movie-log-container');
             const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
             logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${movie.title}" - moved to exclusion list${emailMsg}</p>`;
