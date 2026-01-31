@@ -613,7 +613,7 @@ def exclusions():
         
         return redirect(url_for('exclusions'))
     
-    excluded_shows = [e.title for e in Exclusion.query.order_by(Exclusion.title).all()]
+    excluded_shows = Exclusion.query.order_by(Exclusion.title).all()
     excluded_movies = MovieExclusion.query.order_by(MovieExclusion.title).all()
     return render_template('exclusions.html', excluded_shows=excluded_shows, excluded_movies=excluded_movies)
 
