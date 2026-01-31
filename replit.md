@@ -22,6 +22,7 @@ A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. Thi
 - Email history tracking with clickable emails to view full content
 - **Persistent scan results** - Last scan is saved and restored on login
 - **AI Chat page** - Built-in AI assistant for quick questions and help
+- **AI Recommend** - Smart deletion recommendations with one click
 - Slow, deliberate deletion with delays to prevent mistakes
 - Deletion history tracking with search, filter by type, and re-add links
 

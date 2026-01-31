@@ -124,7 +124,19 @@
                             <button class="btn btn-sm btn-outline-info" onclick="exportTVCSV()">
                                 <i class="bi bi-download me-1"></i>Export CSV
                             </button>
+                            <button class="btn btn-sm btn-success" onclick="analyzeTV()" id="btn-analyze-tv">
+                                <i class="bi bi-robot me-1"></i>AI Recommend
+                            </button>
                         </div>
+                    </div>
+                    <div id="tv-ai-panel" class="card-body border-bottom" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="mb-0"><i class="bi bi-robot me-2"></i>AI Recommendations</h6>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('tv-ai-panel').style.display='none'">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                        <div id="tv-ai-content" class="small"></div>
                     </div>
                     <div class="card-body p-2 border-bottom">
                         <div class="row g-2 align-items-center">
@@ -347,7 +359,19 @@
                             <button class="btn btn-sm btn-outline-info" onclick="exportMovieCSV()">
                                 <i class="bi bi-download me-1"></i>Export CSV
                             </button>
+                            <button class="btn btn-sm btn-success" onclick="analyzeMovies()" id="btn-analyze-movies">
+                                <i class="bi bi-robot me-1"></i>AI Recommend
+                            </button>
                         </div>
+                    </div>
+                    <div id="movie-ai-panel" class="card-body border-bottom" style="display: none;">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="mb-0"><i class="bi bi-robot me-2"></i>AI Recommendations</h6>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('movie-ai-panel').style.display='none'">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                        <div id="movie-ai-content" class="small"></div>
                     </div>
                     <div class="card-body p-2 border-bottom">
                         <div class="row g-2 align-items-center">
@@ -993,5 +1017,86 @@ async function loadCachedScans() {
 }
 
 loadCachedScans();
+
+async function analyzeTV() {
+    if (tvCandidates.length === 0) {
+        alert('No TV candidates to analyze. Run a scan first.');
+        return;
+    }
+    
+    const btn = document.getElementById('btn-analyze-tv');
+    const panel = document.getElementById('tv-ai-panel');
+    const content = document.getElementById('tv-ai-content');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyzing...';
+    panel.style.display = 'block';
+    content.innerHTML = '<p class="text-muted"><i class="bi bi-robot me-2"></i>AI is analyzing your library...</p>';
+    
+    try {
+        const response = await fetch('/api/ai-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'tv', candidates: tvCandidates.slice(0, 50) })
+        });
+        const data = await response.json();
+        
+        if (data.error) {
+            content.innerHTML = `<p class="text-danger">Error: ${data.error}</p>`;
+        } else {
+            content.innerHTML = formatAIResponse(data.analysis);
+        }
+    } catch (err) {
+        content.innerHTML = '<p class="text-danger">Failed to get AI analysis.</p>';
+    }
+    
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-robot me-1"></i>AI Recommend';
+}
+
+async function analyzeMovies() {
+    if (movieCandidates.length === 0) {
+        alert('No movie candidates to analyze. Run a scan first.');
+        return;
+    }
+    
+    const btn = document.getElementById('btn-analyze-movies');
+    const panel = document.getElementById('movie-ai-panel');
+    const content = document.getElementById('movie-ai-content');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Analyzing...';
+    panel.style.display = 'block';
+    content.innerHTML = '<p class="text-muted"><i class="bi bi-robot me-2"></i>AI is analyzing your library...</p>';
+    
+    try {
+        const response = await fetch('/api/ai-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'movie', candidates: movieCandidates.slice(0, 50) })
+        });
+        const data = await response.json();
+        
+        if (data.error) {
+            content.innerHTML = `<p class="text-danger">Error: ${data.error}</p>`;
+        } else {
+            content.innerHTML = formatAIResponse(data.analysis);
+        }
+    } catch (err) {
+        content.innerHTML = '<p class="text-danger">Failed to get AI analysis.</p>';
+    }
+    
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-robot me-1"></i>AI Recommend';
+}
+
+function formatAIResponse(text) {
+    return text
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>')
+        .replace(/^/, '<p>')
+        .replace(/$/, '</p>');
+}
 </script>
 {% endblock %}

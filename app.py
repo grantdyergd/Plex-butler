@@ -976,6 +976,69 @@ def chat_api():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/ai-analyze', methods=['POST'])
+@login_required
+def ai_analyze_api():
+    """AI-powered analysis of media candidates for smart deletion recommendations."""
+    data = request.get_json()
+    media_type = data.get('type', 'tv') if data else 'tv'
+    candidates = data.get('candidates', []) if data else []
+    
+    if not candidates:
+        return jsonify({'error': 'No candidates to analyze'}), 400
+    
+    try:
+        summary_data = []
+        total_size = 0
+        for c in candidates[:50]:
+            size_gb = round(c.get('size_bytes', 0) / (1024**3), 1)
+            total_size += size_gb
+            summary_data.append({
+                'title': c.get('title', 'Unknown'),
+                'size_gb': size_gb,
+                'priority': c.get('priority_label', 'Unknown'),
+                'priority_score': c.get('priority_score', 0),
+                'views': c.get('view_count', 0),
+                'reason': c.get('reason', ''),
+                'status': c.get('status', ''),
+                'has_requester': bool(c.get('requester_name') or c.get('requester_email')),
+                'year': c.get('year', ''),
+                'episode_count': c.get('episode_count', 0) if media_type == 'tv' else None
+            })
+        
+        type_label = 'TV shows' if media_type == 'tv' else 'movies'
+        
+        prompt = f"""You are a media library cleanup advisor. Analyze these {len(summary_data)} {type_label} candidates for deletion and give practical, actionable recommendations.
+
+Total potential space savings: {round(total_size, 1)} GB
+
+Here are the candidates (sorted by priority score, highest first):
+{json.dumps(sorted(summary_data, key=lambda x: -x['priority_score']), indent=2)}
+
+Provide a brief, helpful analysis:
+1. **Quick Wins** - Name 3-5 specific titles that are the safest and most beneficial to delete (high priority, large size, no requester, never watched)
+2. **Space Savers** - Name any particularly large items (10+ GB) that would free significant space
+3. **Think Twice** - Name any items you'd recommend keeping or investigating before deleting (had views, has requester, etc.)
+4. **Bottom Line** - One sentence summary of your recommendation
+
+Keep it concise and actionable. Use the actual titles from the data. Focus on helping the user make quick decisions."""
+
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a helpful media library cleanup advisor. Be concise, practical, and use the actual titles provided."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=800,
+            temperature=0.5
+        )
+        
+        analysis = response.choices[0].message.content
+        return jsonify({'analysis': analysis})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/shows', methods=['GET'])
 @login_required
 def get_all_shows():
