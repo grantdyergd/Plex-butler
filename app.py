@@ -1620,6 +1620,56 @@ def submit_requester_exclusions(token):
     })
 
 
+@app.route('/api/review/<token>/remove', methods=['POST'])
+def remove_requester_exclusion(token):
+    """Allow requester to remove protection from their content."""
+    db.session.rollback()
+    review = RequesterReviewToken.query.filter_by(token=token).first()
+    
+    if not review:
+        return jsonify({'success': False, 'error': 'Invalid token'}), 404
+    
+    if review.expires_at and datetime.utcnow() > review.expires_at:
+        return jsonify({'success': False, 'error': 'Link expired'}), 410
+    
+    data = request.get_json()
+    item_type = data.get('type')  # 'tv' or 'movie'
+    title = data.get('title')
+    exclusion_id = data.get('id')
+    
+    if not item_type or not exclusion_id:
+        return jsonify({'success': False, 'error': 'Missing required fields'}), 400
+    
+    if item_type not in ('tv', 'movie'):
+        return jsonify({'success': False, 'error': 'Invalid type. Must be "tv" or "movie"'}), 400
+    
+    try:
+        if item_type == 'tv':
+            exclusion = Exclusion.query.get(exclusion_id)
+            if exclusion:
+                # Verify requester has permission (either excluded_by_email or original_requester_email matches)
+                if exclusion.excluded_by_email == review.requester_email or exclusion.original_requester_email == review.requester_email:
+                    db.session.delete(exclusion)
+                    db.session.commit()
+                    return jsonify({'success': True, 'message': f'Removed protection from "{title}"'})
+                else:
+                    return jsonify({'success': False, 'error': 'Not authorized to remove this exclusion'}), 403
+        else:
+            exclusion = MovieExclusion.query.get(exclusion_id)
+            if exclusion:
+                if exclusion.excluded_by_email == review.requester_email or exclusion.original_requester_email == review.requester_email:
+                    db.session.delete(exclusion)
+                    db.session.commit()
+                    return jsonify({'success': True, 'message': f'Removed protection from "{title}"'})
+                else:
+                    return jsonify({'success': False, 'error': 'Not authorized to remove this exclusion'}), 403
+        
+        return jsonify({'success': False, 'error': 'Exclusion not found'}), 404
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/run-cleanup', methods=['POST'])
 @login_required
 def run_cleanup_api():

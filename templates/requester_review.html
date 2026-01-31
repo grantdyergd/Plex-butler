@@ -154,18 +154,28 @@
         {% if existing_tv_exclusions or existing_movie_exclusions %}
         <div class="card mt-4">
             <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Your Already Protected Content</h5>
+                <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Your Protected Content</h5>
             </div>
             <div class="card-body">
-                <p class="text-muted mb-3">These items you've previously selected to keep are already protected from deletion.</p>
+                <p class="text-muted mb-3">These items are protected from deletion. You can remove protection if you no longer need them.</p>
                 
                 {% if existing_tv_exclusions %}
                 <h6 class="fw-bold"><i class="bi bi-tv me-2"></i>TV Shows ({{ existing_tv_exclusions|length }})</h6>
-                <ul class="list-group mb-3">
+                <ul class="list-group mb-3" id="tv-exclusions-list">
                     {% for show in existing_tv_exclusions %}
-                    <li class="list-group-item d-flex align-items-center">
-                        <i class="bi bi-check-circle-fill text-success me-2"></i>
-                        {{ show.title }}
+                    <li class="list-group-item d-flex justify-content-between align-items-center" id="tv-exclusion-{{ show.id }}">
+                        <div>
+                            <i class="bi bi-check-circle-fill text-success me-2"></i>
+                            <strong>{{ show.title }}</strong>
+                            {% if show.excluded_by == 'admin' %}
+                            <span class="badge bg-secondary ms-2">Admin protected</span>
+                            {% else %}
+                            <span class="badge bg-info ms-2">You protected</span>
+                            {% endif %}
+                        </div>
+                        <button class="btn btn-outline-danger btn-sm" onclick="removeExclusion('tv', {{ show.id }}, '{{ show.title|e }}')">
+                            <i class="bi bi-shield-x me-1"></i>Remove Protection
+                        </button>
                     </li>
                     {% endfor %}
                 </ul>
@@ -173,11 +183,21 @@
                 
                 {% if existing_movie_exclusions %}
                 <h6 class="fw-bold"><i class="bi bi-film me-2"></i>Movies ({{ existing_movie_exclusions|length }})</h6>
-                <ul class="list-group">
+                <ul class="list-group" id="movie-exclusions-list">
                     {% for movie in existing_movie_exclusions %}
-                    <li class="list-group-item d-flex align-items-center">
-                        <i class="bi bi-check-circle-fill text-success me-2"></i>
-                        {{ movie.title }}{% if movie.year %} ({{ movie.year }}){% endif %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center" id="movie-exclusion-{{ movie.id }}">
+                        <div>
+                            <i class="bi bi-check-circle-fill text-success me-2"></i>
+                            <strong>{{ movie.title }}{% if movie.year %} ({{ movie.year }}){% endif %}</strong>
+                            {% if movie.excluded_by == 'admin' %}
+                            <span class="badge bg-secondary ms-2">Admin protected</span>
+                            {% else %}
+                            <span class="badge bg-info ms-2">You protected</span>
+                            {% endif %}
+                        </div>
+                        <button class="btn btn-outline-danger btn-sm" onclick="removeExclusion('movie', {{ movie.id }}, '{{ movie.title|e }}')">
+                            <i class="bi bi-shield-x me-1"></i>Remove Protection
+                        </button>
                     </li>
                     {% endfor %}
                 </ul>
@@ -198,6 +218,35 @@
             const checkboxes = document.querySelectorAll('.movie-checkbox');
             const allChecked = Array.from(checkboxes).every(cb => cb.checked);
             checkboxes.forEach(cb => cb.checked = !allChecked);
+        }
+
+        async function removeExclusion(type, id, title) {
+            if (!confirm(`Are you sure you want to remove protection from "${title}"? This item may be deleted in a future cleanup.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/review/{{ token }}/remove', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ type, id, title })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    const element = document.getElementById(`${type}-exclusion-${id}`);
+                    if (element) {
+                        element.style.transition = 'opacity 0.3s';
+                        element.style.opacity = '0';
+                        setTimeout(() => element.remove(), 300);
+                    }
+                } else {
+                    alert('Error: ' + (result.error || 'Failed to remove protection'));
+                }
+            } catch (err) {
+                alert('Error removing protection. Please try again.');
+            }
         }
 
         document.getElementById('review-form')?.addEventListener('submit', async function(e) {
