@@ -735,26 +735,35 @@ function excludeTVNow(index) {
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) {
-            tvCandidates.splice(index, 1);
-            tvFilteredIndices = [];
-            applyTVFilters();
-            
-            tvCandidates.forEach((c, i) => {
-                if (savedChecks[c.id]) {
-                    const checkbox = document.getElementById(`tv-delete-${i}`);
-                    if (checkbox) checkbox.checked = true;
-                }
-            });
-            
+        try {
+            if (data.success) {
+                tvCandidates.splice(index, 1);
+                tvFilteredIndices = [];
+                applyTVFilters();
+                
+                tvCandidates.forEach((c, i) => {
+                    if (savedChecks[c.id]) {
+                        const checkbox = document.getElementById(`tv-delete-${i}`);
+                        if (checkbox) checkbox.checked = true;
+                    }
+                });
+                
+                const logContainer = document.getElementById('tv-log-container');
+                const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
+                logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${show.title}" - moved to exclusion list${emailMsg}</p>`;
+            } else {
+                alert('Failed to exclude: ' + (data.error || 'Unknown error'));
+            }
+        } catch(e) {
+            console.error('Exclude error:', e);
             const logContainer = document.getElementById('tv-log-container');
-            const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
-            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${show.title}" - moved to exclusion list${emailMsg}</p>`;
-        } else {
-            alert('Failed to exclude: ' + (data.error || 'Unknown error'));
+            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${show.title}" (UI refresh had minor issue)</p>`;
         }
     })
-    .catch(err => alert('Error: ' + err));
+    .catch(err => {
+        console.error('Fetch error:', err);
+        alert('Error: ' + err);
+    });
 }
 
 function selectAllTVAction(action) {
@@ -1017,26 +1026,35 @@ function excludeMovieNow(index) {
     })
     .then(r => r.json())
     .then(data => {
-        if (data.success) {
-            movieCandidates.splice(index, 1);
-            movieFilteredIndices = [];
-            applyMovieFilters();
-            
-            movieCandidates.forEach((c, i) => {
-                if (savedChecks[c.id]) {
-                    const checkbox = document.getElementById(`movie-delete-${i}`);
-                    if (checkbox) checkbox.checked = true;
-                }
-            });
-            
+        try {
+            if (data.success) {
+                movieCandidates.splice(index, 1);
+                movieFilteredIndices = [];
+                applyMovieFilters();
+                
+                movieCandidates.forEach((c, i) => {
+                    if (savedChecks[c.id]) {
+                        const checkbox = document.getElementById(`movie-delete-${i}`);
+                        if (checkbox) checkbox.checked = true;
+                    }
+                });
+                
+                const logContainer = document.getElementById('movie-log-container');
+                const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
+                logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${movie.title}" - moved to exclusion list${emailMsg}</p>`;
+            } else {
+                alert('Failed to exclude: ' + (data.error || 'Unknown error'));
+            }
+        } catch(e) {
+            console.error('Movie exclude error:', e);
             const logContainer = document.getElementById('movie-log-container');
-            const emailMsg = data.email_sent ? ' (email sent to requester)' : '';
-            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${movie.title}" - moved to exclusion list${emailMsg}</p>`;
-        } else {
-            alert('Failed to exclude: ' + (data.error || 'Unknown error'));
+            logContainer.innerHTML += `<p class="log-line success">[SUCCESS] Excluded "${movie.title}" (UI refresh had minor issue)</p>`;
         }
     })
-    .catch(err => alert('Error: ' + err));
+    .catch(err => {
+        console.error('Fetch error:', err);
+        alert('Error: ' + err);
+    });
 }
 
 function selectAllMovieAction(action) {
