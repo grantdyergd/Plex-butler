@@ -533,12 +533,21 @@ function pollTVStatus() {
             document.getElementById('btn-scan-tv').disabled = false;
             document.getElementById('btn-execute-tv').disabled = false;
             document.getElementById('tv-status-badge').style.display = 'none';
+            if (data.phase === 'completed' || data.phase === 'error') {
+                applyTVFilters();
+            }
             if (data.candidates && data.candidates.length > 0) {
                 tvCandidates = data.candidates;
                 document.getElementById('tv-candidates-section').style.display = 'block';
                 renderTVCandidates();
             }
         }
+    }).catch(err => {
+        console.error('Poll error:', err);
+        clearInterval(tvPollInterval);
+        document.getElementById('btn-scan-tv').disabled = false;
+        document.getElementById('btn-execute-tv').disabled = false;
+        document.getElementById('tv-status-badge').style.display = 'none';
     });
 }
 
@@ -758,6 +767,9 @@ function executeTVActions() {
     .then(r => r.json()).then(data => {
         if (data.error) { alert(data.error); document.getElementById('btn-execute-tv').disabled = false; return; }
         tvPollInterval = setInterval(pollTVStatus, 1000);
+    }).catch(err => {
+        alert('Network error: ' + err.message);
+        document.getElementById('btn-execute-tv').disabled = false;
     });
 }
 
@@ -783,12 +795,21 @@ function pollMovieStatus() {
             document.getElementById('btn-scan-movies').disabled = false;
             document.getElementById('btn-execute-movies').disabled = false;
             document.getElementById('movie-status-badge').style.display = 'none';
+            if (data.phase === 'completed' || data.phase === 'error') {
+                applyMovieFilters();
+            }
             if (data.candidates && data.candidates.length > 0) {
                 movieCandidates = data.candidates;
                 document.getElementById('movie-candidates-section').style.display = 'block';
                 renderMovieCandidates();
             }
         }
+    }).catch(err => {
+        console.error('Poll error:', err);
+        clearInterval(moviePollInterval);
+        document.getElementById('btn-scan-movies').disabled = false;
+        document.getElementById('btn-execute-movies').disabled = false;
+        document.getElementById('movie-status-badge').style.display = 'none';
     });
 }
 
@@ -1006,6 +1027,9 @@ function executeMovieActions() {
     .then(r => r.json()).then(data => {
         if (data.error) { alert(data.error); document.getElementById('btn-execute-movies').disabled = false; return; }
         moviePollInterval = setInterval(pollMovieStatus, 1000);
+    }).catch(err => {
+        alert('Network error: ' + err.message);
+        document.getElementById('btn-execute-movies').disabled = false;
     });
 }
 
