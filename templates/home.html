@@ -634,8 +634,13 @@ function clearTVFilters() {
     document.getElementById('tv-filter-views').value = '';
     document.getElementById('tv-filter-requester').value = '';
     document.getElementById('tv-filter-title').value = '';
-    document.getElementById('tv-filter-added-from').value = '';
-    document.getElementById('tv-filter-added-to').value = '';
+    try {
+        document.getElementById('tv-filter-added-from').valueAsDate = null;
+        document.getElementById('tv-filter-added-to').valueAsDate = null;
+    } catch(e) {
+        document.getElementById('tv-filter-added-from').value = '';
+        document.getElementById('tv-filter-added-to').value = '';
+    }
     applyTVFilters();
 }
 
@@ -910,8 +915,13 @@ function clearMovieFilters() {
     document.getElementById('movie-filter-views').value = '';
     document.getElementById('movie-filter-requester').value = '';
     document.getElementById('movie-filter-title').value = '';
-    document.getElementById('movie-filter-added-from').value = '';
-    document.getElementById('movie-filter-added-to').value = '';
+    try {
+        document.getElementById('movie-filter-added-from').valueAsDate = null;
+        document.getElementById('movie-filter-added-to').valueAsDate = null;
+    } catch(e) {
+        document.getElementById('movie-filter-added-from').value = '';
+        document.getElementById('movie-filter-added-to').value = '';
+    }
     applyMovieFilters();
 }
 
