@@ -143,6 +143,41 @@
             <p class="text-muted">You can close this page now.</p>
         </div>
         {% endif %}
+
+        {% if existing_tv_exclusions or existing_movie_exclusions %}
+        <div class="card mt-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-shield-check me-2"></i>Your Already Protected Content</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">These items you've previously selected to keep are already protected from deletion.</p>
+                
+                {% if existing_tv_exclusions %}
+                <h6 class="fw-bold"><i class="bi bi-tv me-2"></i>TV Shows ({{ existing_tv_exclusions|length }})</h6>
+                <ul class="list-group mb-3">
+                    {% for show in existing_tv_exclusions %}
+                    <li class="list-group-item d-flex align-items-center">
+                        <i class="bi bi-check-circle-fill text-success me-2"></i>
+                        {{ show.title }}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                
+                {% if existing_movie_exclusions %}
+                <h6 class="fw-bold"><i class="bi bi-film me-2"></i>Movies ({{ existing_movie_exclusions|length }})</h6>
+                <ul class="list-group">
+                    {% for movie in existing_movie_exclusions %}
+                    <li class="list-group-item d-flex align-items-center">
+                        <i class="bi bi-check-circle-fill text-success me-2"></i>
+                        {{ movie.title }}{% if movie.year %} ({{ movie.year }}){% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <script>

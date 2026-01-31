@@ -1472,11 +1472,16 @@ def requester_review_page(token):
     
     items = json.loads(review.items_json or '{}')
     
+    existing_tv_exclusions = Exclusion.query.filter_by(excluded_by_email=review.requester_email).all()
+    existing_movie_exclusions = MovieExclusion.query.filter_by(excluded_by_email=review.requester_email).all()
+    
     return render_template('requester_review.html',
         token=token,
         requester_name=review.requester_name,
         tv_items=items.get('tv', []),
         movie_items=items.get('movies', []),
+        existing_tv_exclusions=existing_tv_exclusions,
+        existing_movie_exclusions=existing_movie_exclusions,
         is_completed=review.is_used
     )
 
