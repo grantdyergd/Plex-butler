@@ -777,7 +777,11 @@ function excludeTVNow(index) {
     })
     .catch(err => {
         console.error('Fetch error:', err);
-        alert('Error: ' + err);
+        // Don't show alert for non-critical errors - log to activity instead
+        const logContainer = document.getElementById('tv-log-container');
+        if (logContainer) {
+            logContainer.innerHTML += `<p class="log-line warning">[WARNING] Network issue - please try again</p>`;
+        }
     });
 }
 
@@ -1074,7 +1078,11 @@ function excludeMovieNow(index) {
     })
     .catch(err => {
         console.error('Fetch error:', err);
-        alert('Error: ' + err);
+        // Don't show alert for non-critical errors - log to activity instead
+        const logContainer = document.getElementById('movie-log-container');
+        if (logContainer) {
+            logContainer.innerHTML += `<p class="log-line warning">[WARNING] Network issue - please try again</p>`;
+        }
     });
 }
 
