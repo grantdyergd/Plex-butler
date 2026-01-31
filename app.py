@@ -120,6 +120,16 @@ class ScanCache(db.Model):
     scanned_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class WatchHistoryCache(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    media_type = db.Column(db.String(20), nullable=False)  # 'tv' or 'movie'
+    history_json = db.Column(db.Text, nullable=True)
+    scanned_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+WATCH_HISTORY_CACHE_DAYS = 7
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
@@ -183,6 +193,55 @@ def load_scan_cache(scan_type):
     except Exception as e:
         print(f"Error loading scan cache: {e}")
     return None
+
+
+def save_watch_history_cache(media_type: str, history_data: dict):
+    """Save watch history to database for 7-day caching."""
+    try:
+        cache = WatchHistoryCache.query.filter_by(media_type=media_type).first()
+        if cache:
+            cache.history_json = json.dumps(history_data)
+            cache.scanned_at = datetime.utcnow()
+        else:
+            cache = WatchHistoryCache(
+                media_type=media_type,
+                history_json=json.dumps(history_data)
+            )
+            db.session.add(cache)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error saving watch history cache: {e}")
+
+
+def load_watch_history_cache(media_type: str):
+    """Load cached watch history if less than 7 days old."""
+    try:
+        cache = WatchHistoryCache.query.filter_by(media_type=media_type).first()
+        if cache and cache.scanned_at:
+            age = datetime.utcnow() - cache.scanned_at
+            if age.days < WATCH_HISTORY_CACHE_DAYS:
+                return {
+                    'history': json.loads(cache.history_json or '{}'),
+                    'scanned_at': cache.scanned_at.isoformat(),
+                    'age_days': age.days
+                }
+    except Exception as e:
+        print(f"Error loading watch history cache: {e}")
+    return None
+
+
+def clear_watch_history_cache(media_type: str = None):
+    """Clear watch history cache (optionally for specific type)."""
+    try:
+        if media_type:
+            WatchHistoryCache.query.filter_by(media_type=media_type).delete()
+        else:
+            WatchHistoryCache.query.delete()
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error clearing watch history cache: {e}")
 
 
 @app.route('/')
@@ -1244,6 +1303,16 @@ def reset_movies_api():
         movie_cleanup_status['started_at'] = None
         movie_cleanup_status['log'].append("[INFO] Movie cleanup state manually reset")
     return jsonify({'success': True, 'message': 'Movie cleanup state reset'})
+
+
+@app.route('/api/watch-history-cache/clear', methods=['POST'])
+@login_required
+def clear_watch_history_cache_api():
+    """Clear the watch history cache to force a fresh scan."""
+    media_type = request.json.get('media_type') if request.json else None
+    clear_watch_history_cache(media_type)
+    msg = f"Cleared {media_type or 'all'} watch history cache"
+    return jsonify({'success': True, 'message': msg})
 
 
 @app.route('/api/run-cleanup', methods=['POST'])

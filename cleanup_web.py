@@ -138,11 +138,12 @@ def extract_tvdb_id_from_guid(guid: str) -> Optional[int]:
     return None
 
 
-def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
+def get_plex_watch_history(config: dict, log: Callable, limit: int = 0, force_refresh: bool = False) -> dict:
     """Get watch history from Plex using server-level history for ALL users.
     
     Uses plex.history() at server level which properly includes all users' watch history.
     Returns view counts in addition to last watched dates.
+    Caches results for 7 days to avoid re-scanning.
     """
     watch_history = {}
     
@@ -150,7 +151,17 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
         log("[WARNING] Plex not configured - using title matching only")
         return {}
     
-    log("[INFO] Fetching watch history from Plex (all users)...")
+    if not force_refresh:
+        try:
+            from app import load_watch_history_cache
+            cached = load_watch_history_cache('tv')
+            if cached:
+                log(f"[INFO] Using cached TV watch history ({cached['age_days']} days old)")
+                return cached['history']
+        except Exception as e:
+            log(f"[WARNING] Could not check cache: {e}")
+    
+    log("[INFO] Fetching fresh watch history from Plex (all users)...")
     
     try:
         plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=120)
@@ -233,19 +244,28 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
             last_watched = show_last_watched.get(show_key)
             view_count = show_view_counts.get(show_key, 0)
             
+            last_watched_str = last_watched.isoformat() if last_watched else None
             entry = {
-                "last_watched": last_watched,
+                "last_watched": last_watched_str,
                 "view_count": view_count,
                 "title": title
             }
             
             if tvdb_id:
-                watch_history[tvdb_id] = entry
+                watch_history[str(tvdb_id)] = entry
             watch_history[f"title:{title.lower()}"] = entry
         
         watched_count = sum(1 for k, v in watch_history.items() if v.get('last_watched'))
-        tvdb_count = sum(1 for k in watch_history if isinstance(k, int))
+        tvdb_count = sum(1 for k in watch_history if k.isdigit())
         log(f"[SUCCESS] Retrieved watch history: {watched_count} shows watched, {tvdb_count} with TVDB ID")
+        
+        try:
+            from app import save_watch_history_cache
+            save_watch_history_cache('tv', watch_history)
+            log("[INFO] Saved TV watch history to cache (valid for 7 days)")
+        except Exception as e:
+            log(f"[WARNING] Could not save cache: {e}")
+        
         return watch_history
     except Exception as e:
         log(f"[ERROR] Failed to connect to Plex: {e}")

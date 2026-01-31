@@ -161,10 +161,11 @@ def extract_imdb_id_from_guid(guid: str) -> Optional[str]:
     return None
 
 
-def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0) -> dict:
+def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0, force_refresh: bool = False) -> dict:
     """Get movie watch history from Plex using server-level history for ALL users.
     
     Returns view counts in addition to last watched dates.
+    Caches results for 7 days to avoid re-scanning.
     """
     watch_history = {}
     
@@ -172,7 +173,17 @@ def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0) ->
         log("[WARNING] Plex not configured - using title matching only")
         return {}
     
-    log("[INFO] Fetching movie watch history from Plex (all users)...")
+    if not force_refresh:
+        try:
+            from app import load_watch_history_cache
+            cached = load_watch_history_cache('movie')
+            if cached:
+                log(f"[INFO] Using cached movie watch history ({cached['age_days']} days old)")
+                return cached['history']
+        except Exception as e:
+            log(f"[WARNING] Could not check cache: {e}")
+    
+    log("[INFO] Fetching fresh movie watch history from Plex (all users)...")
     
     try:
         plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=120)
@@ -228,20 +239,29 @@ def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0) ->
             last_watched = movie_last_watched.get(movie_key)
             view_count = movie_view_counts.get(movie_key, 0)
             
+            last_watched_str = last_watched.isoformat() if last_watched else None
             if tmdb_id:
                 watch_history[f"tmdb:{tmdb_id}"] = {
-                    'last_watched': last_watched,
+                    'last_watched': last_watched_str,
                     'view_count': view_count,
                     'title': title
                 }
             
             watch_history[f"title:{title.lower()}"] = {
-                'last_watched': last_watched,
+                'last_watched': last_watched_str,
                 'view_count': view_count,
                 'title': title
             }
         
         log(f"[SUCCESS] Loaded watch history for {len(movie_view_counts)} movies")
+        
+        try:
+            from app import save_watch_history_cache
+            save_watch_history_cache('movie', watch_history)
+            log("[INFO] Saved movie watch history to cache (valid for 7 days)")
+        except Exception as e:
+            log(f"[WARNING] Could not save cache: {e}")
+        
         return watch_history
         
     except Exception as e:
