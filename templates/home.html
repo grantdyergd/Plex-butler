@@ -1254,6 +1254,16 @@ async function analyzeTV() {
             content.innerHTML = `<p class="text-danger">Error: ${data.error}</p>`;
         } else {
             content.innerHTML = formatAIResponse(data.analysis);
+            
+            if (data.recommended_titles && data.recommended_titles.length > 0) {
+                const recommendedSet = new Set(data.recommended_titles.map(t => t.toLowerCase()));
+                tvFilteredIndices = tvCandidates.map((c, i) => ({ index: i, title: c.title }))
+                    .filter(item => recommendedSet.has(item.title.toLowerCase()))
+                    .map(item => item.index);
+                sortTVIndices();
+                renderTVCandidates();
+                content.innerHTML += `<p class="mt-2 text-success"><i class="bi bi-funnel me-1"></i>Filtered to ${tvFilteredIndices.length} AI-recommended shows</p>`;
+            }
         }
     } catch (err) {
         content.innerHTML = '<p class="text-danger">Failed to get AI analysis.</p>';
@@ -1290,6 +1300,16 @@ async function analyzeMovies() {
             content.innerHTML = `<p class="text-danger">Error: ${data.error}</p>`;
         } else {
             content.innerHTML = formatAIResponse(data.analysis);
+            
+            if (data.recommended_titles && data.recommended_titles.length > 0) {
+                const recommendedSet = new Set(data.recommended_titles.map(t => t.toLowerCase()));
+                movieFilteredIndices = movieCandidates.map((c, i) => ({ index: i, title: c.title }))
+                    .filter(item => recommendedSet.has(item.title.toLowerCase()))
+                    .map(item => item.index);
+                sortMovieIndices();
+                renderMovieCandidates();
+                content.innerHTML += `<p class="mt-2 text-success"><i class="bi bi-funnel me-1"></i>Filtered to ${movieFilteredIndices.length} AI-recommended movies</p>`;
+            }
         }
     } catch (err) {
         content.innerHTML = '<p class="text-danger">Failed to get AI analysis.</p>';
