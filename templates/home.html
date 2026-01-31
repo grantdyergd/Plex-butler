@@ -733,6 +733,9 @@ function excludeTVNow(index) {
     const show = tvCandidates[index];
     if (!show) return;
     
+    const logContainer = document.getElementById('tv-log-container');
+    logContainer.innerHTML += `<p class="log-line info">[INFO] Excluding "${show.title}"...</p>`;
+    
     const savedChecks = {};
     tvCandidates.forEach((_, i) => {
         const checkbox = document.getElementById(`tv-delete-${i}`);
