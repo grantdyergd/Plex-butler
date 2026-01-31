@@ -178,12 +178,15 @@ def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0, fo
             from app import load_watch_history_cache
             cached = load_watch_history_cache('movie')
             if cached:
-                log(f"[INFO] Using cached movie watch history ({cached['age_days']} days old)")
+                log(f"[CACHE HIT] Using cached movie watch history - {cached['age_days']} day(s) old (cached on {cached['scanned_at'][:10]})")
+                log(f"[CACHE HIT] Skipping Plex scan - cache valid for {7 - cached['age_days']} more day(s)")
                 return cached['history']
+            else:
+                log("[CACHE MISS] No valid movie cache found - will fetch fresh data from Plex")
         except Exception as e:
             log(f"[WARNING] Could not check cache: {e}")
     
-    log("[INFO] Fetching fresh movie watch history from Plex (all users)...")
+    log("[FRESH SCAN] Fetching movie watch history from Plex (all users) - this may take a minute...")
     
     try:
         plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"], timeout=120)
@@ -258,7 +261,7 @@ def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0, fo
         try:
             from app import save_watch_history_cache
             save_watch_history_cache('movie', watch_history)
-            log("[INFO] Saved movie watch history to cache (valid for 7 days)")
+            log("[CACHE SAVED] Movie watch history cached - next scan within 7 days will use this cache")
         except Exception as e:
             log(f"[WARNING] Could not save cache: {e}")
         
