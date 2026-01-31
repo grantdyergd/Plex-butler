@@ -161,8 +161,18 @@
                             <div class="col">
                                 <input type="text" id="tv-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyTVFilters()">
                             </div>
+                        </div>
+                        <div class="row g-2 align-items-center mt-1">
+                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Added:</label></div>
                             <div class="col-auto">
-                                <button class="btn btn-sm btn-outline-secondary" onclick="clearTVFilters()"><i class="bi bi-x-circle"></i></button>
+                                <input type="date" id="tv-filter-added-from" class="form-control form-control-sm" onchange="applyTVFilters()" title="Added from">
+                            </div>
+                            <div class="col-auto"><span class="text-muted small">to</span></div>
+                            <div class="col-auto">
+                                <input type="date" id="tv-filter-added-to" class="form-control form-control-sm" onchange="applyTVFilters()" title="Added to">
+                            </div>
+                            <div class="col-auto">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="clearTVFilters()"><i class="bi bi-x-circle me-1"></i>Clear</button>
                             </div>
                             <div class="col-auto">
                                 <span class="badge bg-info" id="tv-filtered-count">0 shown</span>
@@ -356,8 +366,18 @@
                             <div class="col">
                                 <input type="text" id="movie-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyMovieFilters()">
                             </div>
+                        </div>
+                        <div class="row g-2 align-items-center mt-1">
+                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Added:</label></div>
                             <div class="col-auto">
-                                <button class="btn btn-sm btn-outline-secondary" onclick="clearMovieFilters()"><i class="bi bi-x-circle"></i></button>
+                                <input type="date" id="movie-filter-added-from" class="form-control form-control-sm" onchange="applyMovieFilters()" title="Added from">
+                            </div>
+                            <div class="col-auto"><span class="text-muted small">to</span></div>
+                            <div class="col-auto">
+                                <input type="date" id="movie-filter-added-to" class="form-control form-control-sm" onchange="applyMovieFilters()" title="Added to">
+                            </div>
+                            <div class="col-auto">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="clearMovieFilters()"><i class="bi bi-x-circle me-1"></i>Clear</button>
                             </div>
                             <div class="col-auto">
                                 <span class="badge bg-info" id="movie-filtered-count">0 shown</span>
@@ -565,6 +585,8 @@ function getFilteredTV() {
     const viewsFilter = document.getElementById('tv-filter-views')?.value || '';
     const requesterFilter = document.getElementById('tv-filter-requester')?.value || '';
     const titleFilter = (document.getElementById('tv-filter-title')?.value || '').toLowerCase().trim();
+    const addedFromFilter = document.getElementById('tv-filter-added-from')?.value || '';
+    const addedToFilter = document.getElementById('tv-filter-added-to')?.value || '';
     
     tvFilteredIndices = [];
     tvCandidates.forEach((show, index) => {
@@ -586,6 +608,14 @@ function getFilteredTV() {
             else if (requesterFilter === 'has' && !hasRequester) match = false;
         }
         if (titleFilter && !show.title.toLowerCase().includes(titleFilter)) match = false;
+        if (addedFromFilter && show.added_date) {
+            const addedDate = show.added_date.substring(0, 10);
+            if (addedDate < addedFromFilter) match = false;
+        }
+        if (addedToFilter && show.added_date) {
+            const addedDate = show.added_date.substring(0, 10);
+            if (addedDate > addedToFilter) match = false;
+        }
         if (match) tvFilteredIndices.push(index);
     });
     return tvFilteredIndices;
@@ -604,6 +634,8 @@ function clearTVFilters() {
     document.getElementById('tv-filter-views').value = '';
     document.getElementById('tv-filter-requester').value = '';
     document.getElementById('tv-filter-title').value = '';
+    document.getElementById('tv-filter-added-from').value = '';
+    document.getElementById('tv-filter-added-to').value = '';
     applyTVFilters();
 }
 
@@ -831,6 +863,8 @@ function getFilteredMovies() {
     const viewsFilter = document.getElementById('movie-filter-views')?.value || '';
     const requesterFilter = document.getElementById('movie-filter-requester')?.value || '';
     const titleFilter = (document.getElementById('movie-filter-title')?.value || '').toLowerCase().trim();
+    const addedFromFilter = document.getElementById('movie-filter-added-from')?.value || '';
+    const addedToFilter = document.getElementById('movie-filter-added-to')?.value || '';
     
     movieFilteredIndices = [];
     movieCandidates.forEach((movie, index) => {
@@ -851,6 +885,14 @@ function getFilteredMovies() {
             else if (requesterFilter === 'has' && !hasRequester) match = false;
         }
         if (titleFilter && !movie.title.toLowerCase().includes(titleFilter)) match = false;
+        if (addedFromFilter && movie.added_date) {
+            const addedDate = movie.added_date.substring(0, 10);
+            if (addedDate < addedFromFilter) match = false;
+        }
+        if (addedToFilter && movie.added_date) {
+            const addedDate = movie.added_date.substring(0, 10);
+            if (addedDate > addedToFilter) match = false;
+        }
         if (match) movieFilteredIndices.push(index);
     });
     return movieFilteredIndices;
@@ -868,6 +910,8 @@ function clearMovieFilters() {
     document.getElementById('movie-filter-views').value = '';
     document.getElementById('movie-filter-requester').value = '';
     document.getElementById('movie-filter-title').value = '';
+    document.getElementById('movie-filter-added-from').value = '';
+    document.getElementById('movie-filter-added-to').value = '';
     applyMovieFilters();
 }
 
