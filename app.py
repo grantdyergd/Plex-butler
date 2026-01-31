@@ -1647,22 +1647,22 @@ def remove_requester_exclusion(token):
         if item_type == 'tv':
             exclusion = Exclusion.query.get(exclusion_id)
             if exclusion:
-                # Verify requester has permission (either excluded_by_email or original_requester_email matches)
-                if exclusion.excluded_by_email == review.requester_email or exclusion.original_requester_email == review.requester_email:
+                # Only allow removal of exclusions the requester created themselves (not admin-excluded)
+                if exclusion.excluded_by_email == review.requester_email and exclusion.excluded_by == 'requester':
                     db.session.delete(exclusion)
                     db.session.commit()
                     return jsonify({'success': True, 'message': f'Removed protection from "{title}"'})
                 else:
-                    return jsonify({'success': False, 'error': 'Not authorized to remove this exclusion'}), 403
+                    return jsonify({'success': False, 'error': 'Only items you protected can be removed'}), 403
         else:
             exclusion = MovieExclusion.query.get(exclusion_id)
             if exclusion:
-                if exclusion.excluded_by_email == review.requester_email or exclusion.original_requester_email == review.requester_email:
+                if exclusion.excluded_by_email == review.requester_email and exclusion.excluded_by == 'requester':
                     db.session.delete(exclusion)
                     db.session.commit()
                     return jsonify({'success': True, 'message': f'Removed protection from "{title}"'})
                 else:
-                    return jsonify({'success': False, 'error': 'Not authorized to remove this exclusion'}), 403
+                    return jsonify({'success': False, 'error': 'Only items you protected can be removed'}), 403
         
         return jsonify({'success': False, 'error': 'Exclusion not found'}), 404
     except Exception as e:

@@ -173,9 +173,11 @@
                             <span class="badge bg-info ms-2">You protected</span>
                             {% endif %}
                         </div>
+                        {% if show.excluded_by != 'admin' %}
                         <button class="btn btn-outline-danger btn-sm" onclick="removeExclusion('tv', {{ show.id }}, '{{ show.title|e }}')">
                             <i class="bi bi-shield-x me-1"></i>Remove Protection
                         </button>
+                        {% endif %}
                     </li>
                     {% endfor %}
                 </ul>
@@ -195,9 +197,11 @@
                             <span class="badge bg-info ms-2">You protected</span>
                             {% endif %}
                         </div>
+                        {% if movie.excluded_by != 'admin' %}
                         <button class="btn btn-outline-danger btn-sm" onclick="removeExclusion('movie', {{ movie.id }}, '{{ movie.title|e }}')">
                             <i class="bi bi-shield-x me-1"></i>Remove Protection
                         </button>
+                        {% endif %}
                     </li>
                     {% endfor %}
                 </ul>

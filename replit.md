@@ -132,7 +132,8 @@ For deployment, the following environment variables should be set:
 - Extended requester review system to show ALL exclusions for requester's content (Jan 2026)
   - Shows admin-excluded items in addition to self-excluded items
   - Tracks original requester info when admin excludes content
-  - "Remove Protection" button allows requesters to unprotect items
+  - "Remove Protection" button only for items the requester protected themselves
+  - Admin-protected items are shown but cannot be removed by requesters
   - Badges show "Admin protected" vs "You protected" status
 - Added priority scoring system for deletion recommendations (Dec 2025)
   - High priority: Ended + never watched + no requester + large size
