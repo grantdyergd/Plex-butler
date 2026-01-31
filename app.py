@@ -1597,32 +1597,57 @@ def requester_review_page(token):
         items = json.loads(review.items_json or '{}')
         requester_email_lower = review.requester_email.lower() if review.requester_email else ''
         
+        print(f"[DEBUG] Review page for: {requester_email_lower}")
+        
         # Get Ombi requester data to find admin-excluded items that this requester originally requested
         ombi_tv_requesters = get_ombi_tv_requesters()
         ombi_movie_requesters = get_ombi_movie_requesters()
+        
+        print(f"[DEBUG] Ombi TV requesters found: {len(ombi_tv_requesters)}")
+        print(f"[DEBUG] Ombi Movie requesters found: {len(ombi_movie_requesters)}")
         
         # Get all exclusions and filter to find ones relevant to this requester
         all_tv_exclusions = Exclusion.query.all()
         all_movie_exclusions = MovieExclusion.query.all()
         
+        print(f"[DEBUG] Total TV exclusions: {len(all_tv_exclusions)}")
+        print(f"[DEBUG] Total Movie exclusions: {len(all_movie_exclusions)}")
+        
         existing_tv_exclusions = []
         for exc in all_tv_exclusions:
             # Include if: requester excluded it themselves, OR original_requester matches, OR Ombi says they requested it
             if exc.excluded_by_email and exc.excluded_by_email.lower() == requester_email_lower:
+                print(f"[DEBUG] TV match (excluded_by_email): {exc.title}")
                 existing_tv_exclusions.append(exc)
             elif exc.original_requester_email and exc.original_requester_email.lower() == requester_email_lower:
+                print(f"[DEBUG] TV match (original_requester): {exc.title}")
                 existing_tv_exclusions.append(exc)
-            elif exc.excluded_by == 'admin' and ombi_tv_requesters.get(exc.title.lower()) == requester_email_lower:
-                existing_tv_exclusions.append(exc)
+            elif exc.excluded_by == 'admin' or exc.excluded_by is None or exc.excluded_by == '':
+                # Admin exclusions (including legacy ones with NULL excluded_by)
+                ombi_email = ombi_tv_requesters.get(exc.title.lower(), '')
+                if ombi_email == requester_email_lower:
+                    print(f"[DEBUG] TV match (ombi lookup): {exc.title}")
+                    existing_tv_exclusions.append(exc)
+                else:
+                    print(f"[DEBUG] TV admin exclusion '{exc.title}' - Ombi email: '{ombi_email}' vs requester: '{requester_email_lower}'")
         
         existing_movie_exclusions = []
         for exc in all_movie_exclusions:
             if exc.excluded_by_email and exc.excluded_by_email.lower() == requester_email_lower:
+                print(f"[DEBUG] Movie match (excluded_by_email): {exc.title}")
                 existing_movie_exclusions.append(exc)
             elif exc.original_requester_email and exc.original_requester_email.lower() == requester_email_lower:
+                print(f"[DEBUG] Movie match (original_requester): {exc.title}")
                 existing_movie_exclusions.append(exc)
-            elif exc.excluded_by == 'admin' and ombi_movie_requesters.get(exc.title.lower()) == requester_email_lower:
-                existing_movie_exclusions.append(exc)
+            elif exc.excluded_by == 'admin' or exc.excluded_by is None or exc.excluded_by == '':
+                # Admin exclusions (including legacy ones with NULL excluded_by)
+                ombi_email = ombi_movie_requesters.get(exc.title.lower(), '')
+                if ombi_email == requester_email_lower:
+                    print(f"[DEBUG] Movie match (ombi lookup): {exc.title}")
+                    existing_movie_exclusions.append(exc)
+        
+        print(f"[DEBUG] Final TV exclusions for requester: {len(existing_tv_exclusions)}")
+        print(f"[DEBUG] Final Movie exclusions for requester: {len(existing_movie_exclusions)}")
         
         ombi_url = get_setting('OMBI_URL', '')
         
