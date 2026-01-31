@@ -505,8 +505,17 @@ function formatSize(bytes) {
 function formatDate(dateStr) {
     if (!dateStr) return 'N/A';
     try {
-        return new Date(dateStr).toLocaleDateString();
-    } catch { return dateStr; }
+        // Safari requires ISO format - ensure date string is valid
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr.substring(0, 10) || 'N/A';
+        return d.toLocaleDateString();
+    } catch(e) { 
+        // Fallback: try to extract YYYY-MM-DD portion
+        if (typeof dateStr === 'string' && dateStr.length >= 10) {
+            return dateStr.substring(0, 10);
+        }
+        return 'N/A'; 
+    }
 }
 
 function escapeHtml(text) {
