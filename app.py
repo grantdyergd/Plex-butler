@@ -836,7 +836,7 @@ def send_exclusion_email(media_type, title, recipient_name, recipient_email, yea
     greeting = f"Hi {recipient_name}," if recipient_name else "Hi,"
     media_type_display = "TV show" if media_type == "tv" else "movie"
     
-    subject = f"Media Update: {media_label}"
+    subject = f"ACTION REQUIRED: {media_label} Has Been Protected From Deletion"
     body_html = f"""
     <!DOCTYPE html>
     <html>
@@ -1444,7 +1444,7 @@ def send_requester_review_emails():
             tv_count = len(data['tv'])
             movie_count = len(data['movies'])
             
-            subject = "Media Library Cleanup - Please Review Your Requested Content"
+            subject = "ACTION REQUIRED: Your Media May Be Deleted - Review Now"
             html_body = f"""
             <html><body style="font-family: Inter, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <h2 style="color: #333;">Media Library Review Request</h2>
