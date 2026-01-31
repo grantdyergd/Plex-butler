@@ -129,6 +129,11 @@ For deployment, the following environment variables should be set:
 6. On execute: Deletes from both Plex and Sonarr, notifies requesters via email
 
 ## Recent Changes
+- Extended requester review system to show ALL exclusions for requester's content (Jan 2026)
+  - Shows admin-excluded items in addition to self-excluded items
+  - Tracks original requester info when admin excludes content
+  - "Remove Protection" button allows requesters to unprotect items
+  - Badges show "Admin protected" vs "You protected" status
 - Added priority scoring system for deletion recommendations (Dec 2025)
   - High priority: Ended + never watched + no requester + large size
   - Visual badges (High/Medium/Low) with point breakdown
