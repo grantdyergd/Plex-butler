@@ -1510,11 +1510,80 @@ def send_requester_review_emails():
     })
 
 
+def get_ombi_tv_requesters():
+    """Fetch TV request data from Ombi and return dict mapping titles to requester emails."""
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+    
+    if not ombi_url or not ombi_key:
+        return {}
+    
+    try:
+        response = requests.get(
+            f"{ombi_url}/api/v1/Request/tv",
+            headers={"ApiKey": ombi_key},
+            timeout=30
+        )
+        response.raise_for_status()
+        requests_data = response.json()
+        
+        requesters = {}
+        for req in requests_data:
+            title = req.get("title", "").strip()
+            requester_user = req.get("requestedUser") or {}
+            email = requester_user.get("email", "") or requester_user.get("Email", "")
+            
+            if not email:
+                child_requests = req.get("childRequests") or []
+                for child in child_requests:
+                    child_user = child.get("requestedUser") or {}
+                    email = child_user.get("email", "") or child_user.get("Email", "")
+                    if email:
+                        break
+            
+            if title and email:
+                requesters[title.lower()] = email.lower()
+        
+        return requesters
+    except:
+        return {}
+
+
+def get_ombi_movie_requesters():
+    """Fetch movie request data from Ombi and return dict mapping titles to requester emails."""
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+    
+    if not ombi_url or not ombi_key:
+        return {}
+    
+    try:
+        response = requests.get(
+            f"{ombi_url}/api/v1/Request/movie",
+            headers={"ApiKey": ombi_key},
+            timeout=30
+        )
+        response.raise_for_status()
+        requests_data = response.json()
+        
+        requesters = {}
+        for req in requests_data:
+            title = req.get("title", "").strip()
+            requester_user = req.get("requestedUser") or {}
+            email = requester_user.get("email", "") or requester_user.get("Email", "")
+            
+            if title and email:
+                requesters[title.lower()] = email.lower()
+        
+        return requesters
+    except:
+        return {}
+
+
 @app.route('/review/<token>')
 def requester_review_page(token):
     """Public page for requesters to review and exclude their content."""
     try:
-        # Reset any failed transaction state before querying
         db.session.rollback()
         
         review = RequesterReviewToken.query.filter_by(token=token).first()
@@ -1526,20 +1595,34 @@ def requester_review_page(token):
             return render_template('review_error.html', error="This review link has expired."), 410
         
         items = json.loads(review.items_json or '{}')
+        requester_email_lower = review.requester_email.lower() if review.requester_email else ''
         
-        # Find all exclusions for content this requester originally requested OR excluded themselves
-        existing_tv_exclusions = Exclusion.query.filter(
-            db.or_(
-                Exclusion.excluded_by_email == review.requester_email,
-                Exclusion.original_requester_email == review.requester_email
-            )
-        ).all()
-        existing_movie_exclusions = MovieExclusion.query.filter(
-            db.or_(
-                MovieExclusion.excluded_by_email == review.requester_email,
-                MovieExclusion.original_requester_email == review.requester_email
-            )
-        ).all()
+        # Get Ombi requester data to find admin-excluded items that this requester originally requested
+        ombi_tv_requesters = get_ombi_tv_requesters()
+        ombi_movie_requesters = get_ombi_movie_requesters()
+        
+        # Get all exclusions and filter to find ones relevant to this requester
+        all_tv_exclusions = Exclusion.query.all()
+        all_movie_exclusions = MovieExclusion.query.all()
+        
+        existing_tv_exclusions = []
+        for exc in all_tv_exclusions:
+            # Include if: requester excluded it themselves, OR original_requester matches, OR Ombi says they requested it
+            if exc.excluded_by_email and exc.excluded_by_email.lower() == requester_email_lower:
+                existing_tv_exclusions.append(exc)
+            elif exc.original_requester_email and exc.original_requester_email.lower() == requester_email_lower:
+                existing_tv_exclusions.append(exc)
+            elif exc.excluded_by == 'admin' and ombi_tv_requesters.get(exc.title.lower()) == requester_email_lower:
+                existing_tv_exclusions.append(exc)
+        
+        existing_movie_exclusions = []
+        for exc in all_movie_exclusions:
+            if exc.excluded_by_email and exc.excluded_by_email.lower() == requester_email_lower:
+                existing_movie_exclusions.append(exc)
+            elif exc.original_requester_email and exc.original_requester_email.lower() == requester_email_lower:
+                existing_movie_exclusions.append(exc)
+            elif exc.excluded_by == 'admin' and ombi_movie_requesters.get(exc.title.lower()) == requester_email_lower:
+                existing_movie_exclusions.append(exc)
         
         ombi_url = get_setting('OMBI_URL', '')
         
