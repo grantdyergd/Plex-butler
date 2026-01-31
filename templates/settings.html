@@ -122,6 +122,12 @@
                         <input type="email" class="form-control" id="smtp_from" name="smtp_from" 
                                value="{{ settings.smtp_from }}">
                     </div>
+                    <div class="mb-3">
+                        <label for="custom_domain" class="form-label">Custom Domain (for email links)</label>
+                        <input type="text" class="form-control" id="custom_domain" name="custom_domain" 
+                               value="{{ settings.custom_domain }}" placeholder="e.g., grantsplex.com">
+                        <small class="text-muted">Email links will use this domain instead of the development URL</small>
+                    </div>
                     <div class="mb-0">
                         <button type="button" class="btn btn-outline-info w-100" onclick="sendTestEmail()">
                             <i class="bi bi-envelope-check me-2"></i>Send Test Email

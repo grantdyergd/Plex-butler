@@ -527,6 +527,7 @@ def settings_page():
         set_setting('SMTP_USER', request.form.get('smtp_user', '').strip())
         set_setting('SMTP_PASSWORD', request.form.get('smtp_password', '').strip(), is_secret=True, preserve_if_empty=True)
         set_setting('SMTP_FROM', request.form.get('smtp_from', '').strip())
+        set_setting('CUSTOM_DOMAIN', request.form.get('custom_domain', '').strip())
         set_setting('SKIP_IF_ADDED_WITHIN_DAYS', request.form.get('skip_added_days', '90').strip())
         set_setting('SKIP_IF_WATCHED_WITHIN_DAYS', request.form.get('skip_watched_days', '180').strip())
         set_setting('DELETION_DELAY_SECONDS', request.form.get('deletion_delay', '2.0').strip())
@@ -549,6 +550,7 @@ def settings_page():
         'smtp_port': get_setting('SMTP_PORT', '587'),
         'smtp_user': get_setting('SMTP_USER'),
         'smtp_from': get_setting('SMTP_FROM'),
+        'custom_domain': get_setting('CUSTOM_DOMAIN'),
         'skip_added_days': get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90'),
         'skip_watched_days': get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180'),
         'deletion_delay': get_setting('DELETION_DELAY_SECONDS', '2.0'),
@@ -1401,7 +1403,12 @@ def send_requester_review_emails():
     
     sent_count = 0
     errors = []
-    base_url = request.host_url.rstrip('/')
+    
+    custom_domain = get_setting('CUSTOM_DOMAIN', '')
+    if custom_domain:
+        base_url = f"https://{custom_domain.lstrip('https://').lstrip('http://').rstrip('/')}"
+    else:
+        base_url = request.host_url.rstrip('/')
     
     for email, data in requester_items.items():
         try:
