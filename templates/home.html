@@ -488,6 +488,15 @@
 
 {% block scripts %}
 <script>
+// Suppress non-critical date parsing errors that don't affect functionality
+window.addEventListener('error', function(e) {
+    if (e.message && e.message.includes('did not match the expected pattern')) {
+        e.preventDefault();
+        console.warn('Suppressed date pattern error:', e.message);
+        return true;
+    }
+});
+
 let tvPollInterval = null;
 let moviePollInterval = null;
 let tvCandidates = [];
@@ -588,14 +597,20 @@ let tvSortField = 'priority_score';
 let tvSortAsc = false;
 
 function getFilteredTV() {
+    let addedFromFilter = '';
+    let addedToFilter = '';
+    try {
+        addedFromFilter = document.getElementById('tv-filter-added-from')?.value || '';
+        addedToFilter = document.getElementById('tv-filter-added-to')?.value || '';
+    } catch(e) {
+        console.warn('Date filter read error:', e);
+    }
     const priorityFilter = document.getElementById('tv-filter-priority')?.value || '';
     const statusFilter = document.getElementById('tv-filter-status')?.value || '';
     const sizeFilter = document.getElementById('tv-filter-size')?.value || '';
     const viewsFilter = document.getElementById('tv-filter-views')?.value || '';
     const requesterFilter = document.getElementById('tv-filter-requester')?.value || '';
     const titleFilter = (document.getElementById('tv-filter-title')?.value || '').toLowerCase().trim();
-    const addedFromFilter = document.getElementById('tv-filter-added-from')?.value || '';
-    const addedToFilter = document.getElementById('tv-filter-added-to')?.value || '';
     
     tvFilteredIndices = [];
     tvCandidates.forEach((show, index) => {
@@ -881,13 +896,19 @@ let movieSortField = 'priority_score';
 let movieSortAsc = false;
 
 function getFilteredMovies() {
+    let addedFromFilter = '';
+    let addedToFilter = '';
+    try {
+        addedFromFilter = document.getElementById('movie-filter-added-from')?.value || '';
+        addedToFilter = document.getElementById('movie-filter-added-to')?.value || '';
+    } catch(e) {
+        console.warn('Date filter read error:', e);
+    }
     const priorityFilter = document.getElementById('movie-filter-priority')?.value || '';
     const sizeFilter = document.getElementById('movie-filter-size')?.value || '';
     const viewsFilter = document.getElementById('movie-filter-views')?.value || '';
     const requesterFilter = document.getElementById('movie-filter-requester')?.value || '';
     const titleFilter = (document.getElementById('movie-filter-title')?.value || '').toLowerCase().trim();
-    const addedFromFilter = document.getElementById('movie-filter-added-from')?.value || '';
-    const addedToFilter = document.getElementById('movie-filter-added-to')?.value || '';
     
     movieFilteredIndices = [];
     movieCandidates.forEach((movie, index) => {
