@@ -253,7 +253,7 @@ def load_watch_history_cache(media_type: str):
     return None
 
 
-def clear_watch_history_cache(media_type: str = None):
+def clear_watch_history_cache(media_type=None):
     """Clear watch history cache (optionally for specific type)."""
     try:
         if media_type:
@@ -1105,10 +1105,10 @@ IMPORTANT: At the very end, include a line starting with "RECOMMENDED_TITLES:" f
             temperature=0.5
         )
         
-        analysis = response.choices[0].message.content
+        analysis = response.choices[0].message.content or ''
         
         recommended_titles = []
-        if 'RECOMMENDED_TITLES:' in analysis:
+        if analysis and 'RECOMMENDED_TITLES:' in analysis:
             parts = analysis.split('RECOMMENDED_TITLES:')
             titles_part = parts[1].strip()
             recommended_titles = [t.strip() for t in titles_part.split(',') if t.strip()]
