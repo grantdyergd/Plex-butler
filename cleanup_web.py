@@ -153,15 +153,12 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0, force_re
     
     if not force_refresh:
         try:
-            from app import load_watch_history_cache, db, WatchHistoryCache
-            log("[DEBUG] Checking for cached TV watch history...")
-            # Debug: check if cache exists in DB
-            with db.session.begin_nested():
-                cache_record = WatchHistoryCache.query.filter_by(media_type='tv').first()
-                if cache_record:
-                    log(f"[DEBUG] Found cache record in DB - scanned_at: {cache_record.scanned_at}, json_size: {len(cache_record.history_json or '')} bytes")
-                else:
-                    log("[DEBUG] No cache record found in database for 'tv'")
+            from app import load_watch_history_cache, db
+            # Ensure clean session state before querying cache
+            try:
+                db.session.rollback()
+            except:
+                pass
             cached = load_watch_history_cache('tv')
             if cached:
                 log(f"[CACHE HIT] Using cached TV watch history - {cached['age_days']} day(s) old (cached on {cached['scanned_at'][:10]})")

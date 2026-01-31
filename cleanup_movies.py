@@ -175,7 +175,12 @@ def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0, fo
     
     if not force_refresh:
         try:
-            from app import load_watch_history_cache
+            from app import load_watch_history_cache, db
+            # Ensure clean session state before querying cache
+            try:
+                db.session.rollback()
+            except:
+                pass
             cached = load_watch_history_cache('movie')
             if cached:
                 log(f"[CACHE HIT] Using cached movie watch history - {cached['age_days']} day(s) old (cached on {cached['scanned_at'][:10]})")
