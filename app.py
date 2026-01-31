@@ -1606,11 +1606,25 @@ def requester_review_page(token):
         print(f"[DEBUG] Ombi TV requesters found: {len(ombi_tv_requesters)}")
         print(f"[DEBUG] Ombi Movie requesters found: {len(ombi_movie_requesters)}")
         
+        # Log which titles this requester has in Ombi
+        requester_ombi_tv = [title for title, email in ombi_tv_requesters.items() if email == requester_email_lower]
+        requester_ombi_movies = [title for title, email in ombi_movie_requesters.items() if email == requester_email_lower]
+        print(f"[DEBUG] Requester's Ombi TV titles: {requester_ombi_tv}")
+        print(f"[DEBUG] Requester's Ombi Movie titles: {requester_ombi_movies}")
+        
         # Get all exclusions and filter to find ones relevant to this requester
         all_tv_exclusions = Exclusion.query.all()
         all_movie_exclusions = MovieExclusion.query.all()
         
         print(f"[DEBUG] Total TV exclusions: {len(all_tv_exclusions)}")
+        
+        # Log exclusion titles (lowercase) for matching comparison
+        exclusion_titles_lower = [exc.title.lower() for exc in all_tv_exclusions]
+        print(f"[DEBUG] First 20 exclusion titles: {exclusion_titles_lower[:20]}")
+        
+        # Check for matches between requester's Ombi titles and exclusion titles
+        matching_titles = set(requester_ombi_tv) & set(exclusion_titles_lower)
+        print(f"[DEBUG] Matching titles (Ombi & Exclusions): {matching_titles}")
         print(f"[DEBUG] Total Movie exclusions: {len(all_movie_exclusions)}")
         
         existing_tv_exclusions = []
