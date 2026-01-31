@@ -466,7 +466,7 @@ def setup_step6():
         set_setting('DELETION_DELAY_SECONDS', deletion_delay)
         
         flash('Setup complete! You can now use the cleanup tool.', 'success')
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('home'))
     
     return render_template('setup/step6.html',
                            skip_added_days=get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90'),
@@ -480,7 +480,7 @@ def login():
         return redirect(url_for('setup_step1'))
     
     if current_user.is_authenticated:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('home'))
     
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -491,7 +491,7 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             next_page = request.args.get('next')
-            return redirect(next_page or url_for('dashboard'))
+            return redirect(next_page or url_for('home'))
         
         flash('Invalid username or password', 'error')
     
@@ -509,14 +509,8 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    settings = {
-        'sonarr_url': get_setting('SONARR_URL'),
-        'plex_url': get_setting('PLEX_URL'),
-        'ombi_url': get_setting('OMBI_URL'),
-        'skip_added_days': get_setting('SKIP_IF_ADDED_WITHIN_DAYS', '90'),
-        'skip_watched_days': get_setting('SKIP_IF_WATCHED_WITHIN_DAYS', '180'),
-    }
-    return render_template('dashboard.html', settings=settings, cleanup_status=cleanup_status)
+    # Redirect old dashboard to new home page
+    return redirect(url_for('home'))
 
 
 @app.route('/settings', methods=['GET', 'POST'])
