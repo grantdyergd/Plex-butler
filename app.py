@@ -1089,7 +1089,9 @@ Provide a brief, helpful analysis:
 3. **Think Twice** - Name any items you'd recommend keeping or investigating before deleting (had views, has requester, etc.)
 4. **Bottom Line** - One sentence summary of your recommendation
 
-Keep it concise and actionable. Use the actual titles from the data. Focus on helping the user make quick decisions."""
+Keep it concise and actionable. Use the actual titles from the data. Focus on helping the user make quick decisions.
+
+IMPORTANT: At the very end, include a line starting with "RECOMMENDED_TITLES:" followed by a comma-separated list of the exact titles you recommend deleting (from Quick Wins and Space Savers sections). Use exact titles as they appear in the data."""
 
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
@@ -1097,12 +1099,20 @@ Keep it concise and actionable. Use the actual titles from the data. Focus on he
                 {"role": "system", "content": "You are a helpful media library cleanup advisor. Be concise, practical, and use the actual titles provided."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=800,
+            max_tokens=1000,
             temperature=0.5
         )
         
         analysis = response.choices[0].message.content
-        return jsonify({'analysis': analysis})
+        
+        recommended_titles = []
+        if 'RECOMMENDED_TITLES:' in analysis:
+            parts = analysis.split('RECOMMENDED_TITLES:')
+            titles_part = parts[1].strip()
+            recommended_titles = [t.strip() for t in titles_part.split(',') if t.strip()]
+            analysis = parts[0].strip()
+        
+        return jsonify({'analysis': analysis, 'recommended_titles': recommended_titles})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
