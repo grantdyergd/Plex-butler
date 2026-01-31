@@ -944,6 +944,7 @@ def exclude_movie_api():
         title=title, 
         year=year, 
         tmdb_id=tmdb_id,
+        excluded_by='admin',
         original_requester_name=requester_name,
         original_requester_email=requester_email
     )
@@ -1171,6 +1172,7 @@ def add_exclusion_api():
     try:
         new_exclusion = Exclusion(
             title=title,
+            excluded_by='admin',
             original_requester_name=requester_name,
             original_requester_email=requester_email
         )
