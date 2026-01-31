@@ -629,7 +629,7 @@ def scan_movies_api():
 @app.route('/api/scan-cache/<scan_type>', methods=['GET'])
 @login_required
 def get_scan_cache_api(scan_type):
-    """Get cached scan results, filtering out any newly excluded items."""
+    """Get cached scan results, filtering out excluded and deleted items."""
     if scan_type not in ['tv', 'movie']:
         return jsonify({'error': 'Invalid scan type'}), 400
     
@@ -639,11 +639,20 @@ def get_scan_cache_api(scan_type):
         
         if scan_type == 'tv':
             exclusions = {e.title.lower() for e in Exclusion.query.all()}
-            candidates = [c for c in candidates if c.get('title', '').lower() not in exclusions]
+            deleted_titles = {d.title.lower() for d in DeletionHistory.query.filter_by(media_type='tv').all()}
+            deleted_tvdb_ids = {d.tvdb_id for d in DeletionHistory.query.filter_by(media_type='tv').all() if d.tvdb_id}
+            candidates = [c for c in candidates 
+                         if c.get('title', '').lower() not in exclusions
+                         and c.get('title', '').lower() not in deleted_titles
+                         and c.get('tvdb_id') not in deleted_tvdb_ids]
         elif scan_type == 'movie':
             movie_exclusions = {(e.title.lower(), e.year) for e in MovieExclusion.query.all()}
+            deleted_movies = {(d.title.lower(), d.year) for d in DeletionHistory.query.filter_by(media_type='movie').all()}
+            deleted_tmdb_ids = {d.tmdb_id for d in DeletionHistory.query.filter_by(media_type='movie').all() if d.tmdb_id}
             candidates = [c for c in candidates 
-                         if (c.get('title', '').lower(), c.get('year')) not in movie_exclusions]
+                         if (c.get('title', '').lower(), c.get('year')) not in movie_exclusions
+                         and (c.get('title', '').lower(), c.get('year')) not in deleted_movies
+                         and c.get('tmdb_id') not in deleted_tmdb_ids]
         
         return jsonify({
             'cached': True,
