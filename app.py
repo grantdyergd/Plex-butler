@@ -940,7 +940,13 @@ def exclude_movie_api():
     if existing:
         return jsonify({'success': True, 'message': 'Movie already in exclusion list'})
     
-    new_exclusion = MovieExclusion(title=title, year=year, tmdb_id=tmdb_id)
+    new_exclusion = MovieExclusion(
+        title=title, 
+        year=year, 
+        tmdb_id=tmdb_id,
+        original_requester_name=requester_name,
+        original_requester_email=requester_email
+    )
     db.session.add(new_exclusion)
     db.session.commit()
     
@@ -1163,7 +1169,11 @@ def add_exclusion_api():
         return jsonify({'success': True, 'message': 'Already excluded'})
     
     try:
-        new_exclusion = Exclusion(title=title)
+        new_exclusion = Exclusion(
+            title=title,
+            original_requester_name=requester_name,
+            original_requester_email=requester_email
+        )
         db.session.add(new_exclusion)
         db.session.commit()
         
