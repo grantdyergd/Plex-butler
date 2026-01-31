@@ -1504,6 +1504,9 @@ def send_requester_review_emails():
 def requester_review_page(token):
     """Public page for requesters to review and exclude their content."""
     try:
+        # Reset any failed transaction state before querying
+        db.session.rollback()
+        
         review = RequesterReviewToken.query.filter_by(token=token).first()
         
         if not review:
@@ -1537,6 +1540,7 @@ def requester_review_page(token):
 @app.route('/api/review/<token>/submit', methods=['POST'])
 def submit_requester_exclusions(token):
     """Process requester's exclusion selections."""
+    db.session.rollback()
     review = RequesterReviewToken.query.filter_by(token=token).first()
     
     if not review:
