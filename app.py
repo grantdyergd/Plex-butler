@@ -28,8 +28,11 @@ cleanup_status = {
     'last_result': None,
     'candidates': [],
     'skipped': [],
-    'log': []
+    'log': [],
+    'started_at': None
 }
+
+CLEANUP_TIMEOUT_SECONDS = 600  # 10 minute timeout for stale operations
 
 openai_client = OpenAI(
     api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"),
@@ -547,8 +550,10 @@ def history():
 movie_cleanup_status = {
     'running': False,
     'candidates': [],
-    'log': []
+    'log': [],
+    'started_at': None
 }
+movie_cleanup_lock = threading.Lock()
 
 
 @app.route('/movies')
@@ -579,11 +584,13 @@ def scan_movies_api():
     global movie_cleanup_status
     
     with movie_cleanup_lock:
+        check_stale_movie_cleanup()
         if movie_cleanup_status['running']:
             return jsonify({'error': 'A movie scan is already running'}), 400
         movie_cleanup_status['running'] = True
         movie_cleanup_status['log'] = []
         movie_cleanup_status['candidates'] = []
+        movie_cleanup_status['started_at'] = datetime.now()
     
     def run_scan_thread():
         global movie_cleanup_status
@@ -622,15 +629,25 @@ def scan_movies_api():
 @app.route('/api/scan-cache/<scan_type>', methods=['GET'])
 @login_required
 def get_scan_cache_api(scan_type):
-    """Get cached scan results."""
+    """Get cached scan results, filtering out any newly excluded items."""
     if scan_type not in ['tv', 'movie']:
         return jsonify({'error': 'Invalid scan type'}), 400
     
     cache = load_scan_cache(scan_type)
     if cache:
+        candidates = cache['candidates']
+        
+        if scan_type == 'tv':
+            exclusions = {e.title.lower() for e in Exclusion.query.all()}
+            candidates = [c for c in candidates if c.get('title', '').lower() not in exclusions]
+        elif scan_type == 'movie':
+            movie_exclusions = {(e.title.lower(), e.year) for e in MovieExclusion.query.all()}
+            candidates = [c for c in candidates 
+                         if (c.get('title', '').lower(), c.get('year')) not in movie_exclusions]
+        
         return jsonify({
             'cached': True,
-            'candidates': cache['candidates'],
+            'candidates': candidates,
             'skipped': cache.get('skipped', []),
             'scanned_at': cache['scanned_at']
         })
@@ -643,9 +660,11 @@ def execute_movies_api():
     global movie_cleanup_status
     
     with movie_cleanup_lock:
+        check_stale_movie_cleanup()
         if movie_cleanup_status['running']:
             return jsonify({'error': 'A movie operation is already running'}), 400
         movie_cleanup_status['running'] = True
+        movie_cleanup_status['started_at'] = datetime.now()
     
     actions = request.json.get('actions', [])
     
@@ -1049,12 +1068,37 @@ def add_exclusion_api():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def check_stale_cleanup():
+    """Check and reset stale cleanup operations that exceed timeout."""
+    global cleanup_status
+    if cleanup_status['running'] and cleanup_status.get('started_at'):
+        elapsed = (datetime.now() - cleanup_status['started_at']).total_seconds()
+        if elapsed > CLEANUP_TIMEOUT_SECONDS:
+            cleanup_status['running'] = False
+            cleanup_status['phase'] = 'timeout'
+            cleanup_status['log'].append(f"[WARNING] Operation timed out after {int(elapsed)}s - state reset")
+            return True
+    return False
+
+def check_stale_movie_cleanup():
+    """Check and reset stale movie cleanup operations that exceed timeout."""
+    global movie_cleanup_status
+    if movie_cleanup_status['running'] and movie_cleanup_status.get('started_at'):
+        elapsed = (datetime.now() - movie_cleanup_status['started_at']).total_seconds()
+        if elapsed > CLEANUP_TIMEOUT_SECONDS:
+            movie_cleanup_status['running'] = False
+            movie_cleanup_status['log'].append(f"[WARNING] Operation timed out after {int(elapsed)}s - state reset")
+            return True
+    return False
+
+
 @app.route('/api/cleanup/scan', methods=['POST'])
 @login_required
 def scan_cleanup_api():
     global cleanup_status
     
     with cleanup_lock:
+        check_stale_cleanup()
         if cleanup_status['running']:
             return jsonify({'error': 'A scan is already running'}), 400
         cleanup_status['running'] = True
@@ -1062,6 +1106,7 @@ def scan_cleanup_api():
         cleanup_status['log'] = []
         cleanup_status['candidates'] = []
         cleanup_status['skipped'] = []
+        cleanup_status['started_at'] = datetime.now()
     
     def run_scan_thread():
         global cleanup_status
@@ -1117,10 +1162,12 @@ def execute_cleanup_api():
     global cleanup_status
     
     with cleanup_lock:
+        check_stale_cleanup()
         if cleanup_status['running']:
             return jsonify({'error': 'A cleanup operation is already running'}), 400
         cleanup_status['running'] = True
         cleanup_status['phase'] = 'executing'
+        cleanup_status['started_at'] = datetime.now()
     
     actions = request.json.get('actions', [])
     
@@ -1163,6 +1210,31 @@ def execute_cleanup_api():
 @login_required
 def cleanup_status_api():
     return jsonify(cleanup_status)
+
+
+@app.route('/api/cleanup/reset', methods=['POST'])
+@login_required
+def reset_cleanup_api():
+    """Force reset cleanup state if stuck."""
+    global cleanup_status
+    with cleanup_lock:
+        cleanup_status['running'] = False
+        cleanup_status['phase'] = 'reset'
+        cleanup_status['started_at'] = None
+        cleanup_status['log'].append("[INFO] Cleanup state manually reset")
+    return jsonify({'success': True, 'message': 'Cleanup state reset'})
+
+
+@app.route('/api/movies/reset', methods=['POST'])
+@login_required
+def reset_movies_api():
+    """Force reset movie cleanup state if stuck."""
+    global movie_cleanup_status
+    with movie_cleanup_lock:
+        movie_cleanup_status['running'] = False
+        movie_cleanup_status['started_at'] = None
+        movie_cleanup_status['log'].append("[INFO] Movie cleanup state manually reset")
+    return jsonify({'success': True, 'message': 'Movie cleanup state reset'})
 
 
 @app.route('/api/run-cleanup', methods=['POST'])
