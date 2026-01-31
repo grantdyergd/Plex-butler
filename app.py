@@ -1,12 +1,16 @@
 import os
 import json
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from openai import OpenAI
 
 load_dotenv()
@@ -1331,6 +1335,213 @@ def clear_watch_history_cache_api():
     clear_watch_history_cache(media_type)
     msg = f"Cleared {media_type or 'all'} watch history cache"
     return jsonify({'success': True, 'message': msg})
+
+
+@app.route('/api/requester-review/send', methods=['POST'])
+@login_required
+def send_requester_review_emails():
+    """Generate and send review emails to all requesters with candidates."""
+    tv_candidates = cleanup_status.get('candidates', [])
+    movie_candidates = movie_cleanup_status.get('candidates', [])
+    
+    requester_items = {}
+    
+    for c in tv_candidates:
+        email = c.get('requester_email')
+        if email:
+            if email not in requester_items:
+                requester_items[email] = {'name': c.get('requester_name', ''), 'tv': [], 'movies': []}
+            requester_items[email]['tv'].append({
+                'title': c.get('title'),
+                'tvdb_id': c.get('tvdb_id'),
+                'size_gb': round(c.get('size_bytes', 0) / (1024**3), 2),
+                'last_watched': c.get('last_watched'),
+                'view_count': c.get('view_count', 0),
+                'status': c.get('status')
+            })
+    
+    for c in movie_candidates:
+        email = c.get('requester_email')
+        if email:
+            if email not in requester_items:
+                requester_items[email] = {'name': c.get('requester_name', ''), 'tv': [], 'movies': []}
+            requester_items[email]['movies'].append({
+                'title': c.get('title'),
+                'year': c.get('year'),
+                'tmdb_id': c.get('tmdb_id'),
+                'size_gb': round(c.get('size_bytes', 0) / (1024**3), 2),
+                'last_watched': c.get('last_watched'),
+                'view_count': c.get('view_count', 0)
+            })
+    
+    if not requester_items:
+        return jsonify({'success': False, 'error': 'No requesters with candidates found. Run a scan first.'}), 400
+    
+    sent_count = 0
+    errors = []
+    base_url = request.host_url.rstrip('/')
+    
+    for email, data in requester_items.items():
+        try:
+            token = secrets.token_urlsafe(32)
+            review_token = RequesterReviewToken(
+                token=token,
+                requester_email=email,
+                requester_name=data['name'],
+                items_json=json.dumps({'tv': data['tv'], 'movies': data['movies']}),
+                expires_at=datetime.utcnow() + timedelta(days=14)
+            )
+            db.session.add(review_token)
+            db.session.commit()
+            
+            review_url = f"{base_url}/review/{token}"
+            tv_count = len(data['tv'])
+            movie_count = len(data['movies'])
+            
+            subject = "Media Library Cleanup - Please Review Your Requested Content"
+            html_body = f"""
+            <html><body style="font-family: Inter, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #333;">Media Library Review Request</h2>
+            <p>Hi{' ' + data['name'] if data['name'] else ''},</p>
+            <p>To help keep our media library clean and save storage space, we're reviewing content that hasn't been watched recently.</p>
+            <p>You have <strong>{tv_count} TV show{'s' if tv_count != 1 else ''}</strong> and <strong>{movie_count} movie{'s' if movie_count != 1 else ''}</strong> that you requested which are being considered for removal.</p>
+            <p style="margin: 25px 0;">
+                <a href="{review_url}" style="background: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">Review Your Content</a>
+            </p>
+            <p style="color: #666; font-size: 14px;">Click the button above to see your content and select any items you'd like to keep. Items you don't select may be removed in a future cleanup.</p>
+            <p style="color: #999; font-size: 12px;">This link expires in 14 days.</p>
+            </body></html>
+            """
+            
+            smtp_host = get_setting('SMTP_HOST')
+            smtp_port = int(get_setting('SMTP_PORT', '587'))
+            smtp_user = get_setting('SMTP_USER')
+            smtp_password = get_setting('SMTP_PASSWORD') or os.environ.get('SMTP_PASSWORD', '')
+            smtp_from = get_setting('SMTP_FROM')
+            
+            if smtp_host and smtp_user and smtp_password:
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = subject
+                msg['From'] = smtp_from or smtp_user
+                msg['To'] = email
+                msg.attach(MIMEText(html_body, 'html'))
+                
+                with smtplib.SMTP(smtp_host, smtp_port) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_password)
+                    server.send_message(msg)
+                
+                email_record = EmailHistory(
+                    media_type='review',
+                    media_title=f"{tv_count} shows, {movie_count} movies",
+                    action_type='requester_review',
+                    recipient_name=data['name'],
+                    recipient_email=email,
+                    subject=subject,
+                    body_html=html_body,
+                    was_successful=True
+                )
+                db.session.add(email_record)
+                db.session.commit()
+                sent_count += 1
+            else:
+                errors.append(f"SMTP not configured")
+                break
+                
+        except Exception as e:
+            errors.append(f"{email}: {str(e)}")
+    
+    return jsonify({
+        'success': True,
+        'sent_count': sent_count,
+        'total_requesters': len(requester_items),
+        'errors': errors
+    })
+
+
+@app.route('/review/<token>')
+def requester_review_page(token):
+    """Public page for requesters to review and exclude their content."""
+    review = RequesterReviewToken.query.filter_by(token=token).first()
+    
+    if not review:
+        return render_template('review_error.html', error="Invalid or expired review link."), 404
+    
+    if review.expires_at and datetime.utcnow() > review.expires_at:
+        return render_template('review_error.html', error="This review link has expired."), 410
+    
+    items = json.loads(review.items_json or '{}')
+    
+    return render_template('requester_review.html',
+        token=token,
+        requester_name=review.requester_name,
+        tv_items=items.get('tv', []),
+        movie_items=items.get('movies', []),
+        is_completed=review.is_used
+    )
+
+
+@app.route('/api/review/<token>/submit', methods=['POST'])
+def submit_requester_exclusions(token):
+    """Process requester's exclusion selections."""
+    review = RequesterReviewToken.query.filter_by(token=token).first()
+    
+    if not review:
+        return jsonify({'success': False, 'error': 'Invalid token'}), 404
+    
+    if review.expires_at and datetime.utcnow() > review.expires_at:
+        return jsonify({'success': False, 'error': 'Link expired'}), 410
+    
+    data = request.get_json()
+    tv_exclusions = data.get('tv_exclusions', [])
+    movie_exclusions = data.get('movie_exclusions', [])
+    
+    added_tv = 0
+    added_movies = 0
+    
+    for title in tv_exclusions:
+        existing = Exclusion.query.filter(db.func.lower(Exclusion.title) == title.lower()).first()
+        if not existing:
+            exclusion = Exclusion(
+                title=title,
+                excluded_by='requester',
+                excluded_by_name=review.requester_name,
+                excluded_by_email=review.requester_email
+            )
+            db.session.add(exclusion)
+            added_tv += 1
+    
+    for movie in movie_exclusions:
+        title = movie.get('title')
+        year = movie.get('year')
+        tmdb_id = movie.get('tmdb_id')
+        
+        existing = MovieExclusion.query.filter(
+            db.func.lower(MovieExclusion.title) == title.lower(),
+            MovieExclusion.year == year
+        ).first()
+        if not existing:
+            exclusion = MovieExclusion(
+                title=title,
+                year=year,
+                tmdb_id=tmdb_id,
+                excluded_by='requester',
+                excluded_by_name=review.requester_name,
+                excluded_by_email=review.requester_email
+            )
+            db.session.add(exclusion)
+            added_movies += 1
+    
+    review.is_used = True
+    review.completed_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'added_tv': added_tv,
+        'added_movies': added_movies,
+        'message': f"Added {added_tv} TV shows and {added_movies} movies to exclusion list."
+    })
 
 
 @app.route('/api/run-cleanup', methods=['POST'])

@@ -94,6 +94,9 @@
                             <button class="btn btn-sm btn-success" onclick="analyzeTV()" id="btn-analyze-tv">
                                 <i class="bi bi-robot me-1"></i>AI Recommend
                             </button>
+                            <button class="btn btn-sm btn-outline-primary" onclick="sendRequesterReviews()" id="btn-send-reviews">
+                                <i class="bi bi-envelope me-1"></i>Email Requesters
+                            </button>
                         </div>
                     </div>
                     <div id="tv-ai-panel" class="card-body border-bottom" style="display: none;">
@@ -1015,6 +1018,46 @@ async function loadCachedScans() {
 }
 
 loadCachedScans();
+
+async function sendRequesterReviews() {
+    if (tvCandidates.length === 0 && movieCandidates.length === 0) {
+        alert('No candidates found. Run a scan first.');
+        return;
+    }
+    
+    const hasRequesters = [...tvCandidates, ...movieCandidates].some(c => c.requester_email);
+    if (!hasRequesters) {
+        alert('No candidates have requester information. Nothing to send.');
+        return;
+    }
+    
+    if (!confirm('This will send review emails to all requesters with candidates for deletion. Continue?')) {
+        return;
+    }
+    
+    const btn = document.getElementById('btn-send-reviews');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Sending...';
+    
+    try {
+        const response = await fetch('/api/requester-review/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`Sent ${data.sent_count} review emails to requesters!${data.errors.length > 0 ? '\n\nErrors:\n' + data.errors.join('\n') : ''}`);
+        } else {
+            alert('Error: ' + (data.error || 'Failed to send emails'));
+        }
+    } catch (err) {
+        alert('Failed to send review emails: ' + err.message);
+    }
+    
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-envelope me-1"></i>Email Requesters';
+}
 
 async function analyzeTV() {
     if (tvCandidates.length === 0) {
