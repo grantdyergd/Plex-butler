@@ -731,10 +731,21 @@ function renderTVCandidates() {
 
 function excludeTVNow(index) {
     const show = tvCandidates[index];
-    if (!show) return;
+    if (!show) {
+        console.error('No show at index', index);
+        return;
+    }
+    
+    // Disable button to prevent double-clicks
+    const btn = event?.target?.closest('button');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    }
     
     const logContainer = document.getElementById('tv-log-container');
     logContainer.innerHTML += `<p class="log-line info">[INFO] Excluding "${show.title}"...</p>`;
+    logContainer.scrollTop = logContainer.scrollHeight;
     
     const savedChecks = {};
     tvCandidates.forEach((_, i) => {
@@ -1033,7 +1044,21 @@ function renderMovieCandidates() {
 
 function excludeMovieNow(index) {
     const movie = movieCandidates[index];
-    if (!movie) return;
+    if (!movie) {
+        console.error('No movie at index', index);
+        return;
+    }
+    
+    // Disable button to prevent double-clicks
+    const btn = event?.target?.closest('button');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    }
+    
+    const logContainer = document.getElementById('movie-log-container');
+    logContainer.innerHTML += `<p class="log-line info">[INFO] Excluding "${movie.title}"...</p>`;
+    logContainer.scrollTop = logContainer.scrollHeight;
     
     const savedChecks = {};
     movieCandidates.forEach((_, i) => {
