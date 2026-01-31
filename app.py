@@ -71,6 +71,8 @@ class Exclusion(db.Model):
     excluded_by = db.Column(db.String(50), default='admin')
     excluded_by_name = db.Column(db.String(200), nullable=True)
     excluded_by_email = db.Column(db.String(200), nullable=True)
+    original_requester_name = db.Column(db.String(200), nullable=True)
+    original_requester_email = db.Column(db.String(200), nullable=True)
 
 
 class DeletionHistory(db.Model):
@@ -106,6 +108,8 @@ class MovieExclusion(db.Model):
     excluded_by = db.Column(db.String(50), default='admin')
     excluded_by_name = db.Column(db.String(200), nullable=True)
     excluded_by_email = db.Column(db.String(200), nullable=True)
+    original_requester_name = db.Column(db.String(200), nullable=True)
+    original_requester_email = db.Column(db.String(200), nullable=True)
 
 
 class EmailHistory(db.Model):
