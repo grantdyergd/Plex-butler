@@ -1487,28 +1487,32 @@ def send_requester_review_emails():
 @app.route('/review/<token>')
 def requester_review_page(token):
     """Public page for requesters to review and exclude their content."""
-    review = RequesterReviewToken.query.filter_by(token=token).first()
-    
-    if not review:
-        return render_template('review_error.html', error="Invalid or expired review link."), 404
-    
-    if review.expires_at and datetime.utcnow() > review.expires_at:
-        return render_template('review_error.html', error="This review link has expired."), 410
-    
-    items = json.loads(review.items_json or '{}')
-    
-    existing_tv_exclusions = Exclusion.query.filter_by(excluded_by_email=review.requester_email).all()
-    existing_movie_exclusions = MovieExclusion.query.filter_by(excluded_by_email=review.requester_email).all()
-    
-    return render_template('requester_review.html',
-        token=token,
-        requester_name=review.requester_name,
-        tv_items=items.get('tv', []),
-        movie_items=items.get('movies', []),
-        existing_tv_exclusions=existing_tv_exclusions,
-        existing_movie_exclusions=existing_movie_exclusions,
-        is_completed=review.is_used
-    )
+    try:
+        review = RequesterReviewToken.query.filter_by(token=token).first()
+        
+        if not review:
+            return render_template('review_error.html', error="Invalid or expired review link."), 404
+        
+        if review.expires_at and datetime.utcnow() > review.expires_at:
+            return render_template('review_error.html', error="This review link has expired."), 410
+        
+        items = json.loads(review.items_json or '{}')
+        
+        existing_tv_exclusions = Exclusion.query.filter_by(excluded_by_email=review.requester_email).all()
+        existing_movie_exclusions = MovieExclusion.query.filter_by(excluded_by_email=review.requester_email).all()
+        
+        return render_template('requester_review.html',
+            token=token,
+            requester_name=review.requester_name,
+            tv_items=items.get('tv', []),
+            movie_items=items.get('movies', []),
+            existing_tv_exclusions=existing_tv_exclusions,
+            existing_movie_exclusions=existing_movie_exclusions,
+            is_completed=review.is_used
+        )
+    except Exception as e:
+        print(f"Error in review page: {str(e)}")
+        return render_template('review_error.html', error=f"An error occurred loading the review page."), 500
 
 
 @app.route('/api/review/<token>/submit', methods=['POST'])
