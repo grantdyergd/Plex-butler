@@ -1501,6 +1501,8 @@ def requester_review_page(token):
         existing_tv_exclusions = Exclusion.query.filter_by(excluded_by_email=review.requester_email).all()
         existing_movie_exclusions = MovieExclusion.query.filter_by(excluded_by_email=review.requester_email).all()
         
+        ombi_url = get_setting('OMBI_URL', '')
+        
         return render_template('requester_review.html',
             token=token,
             requester_name=review.requester_name,
@@ -1508,7 +1510,8 @@ def requester_review_page(token):
             movie_items=items.get('movies', []),
             existing_tv_exclusions=existing_tv_exclusions,
             existing_movie_exclusions=existing_movie_exclusions,
-            is_completed=review.is_used
+            is_completed=review.is_used,
+            ombi_url=ombi_url
         )
     except Exception as e:
         print(f"Error in review page: {str(e)}")
