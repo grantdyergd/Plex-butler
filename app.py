@@ -64,6 +64,9 @@ class Exclusion(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(500), unique=True, nullable=False)
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
+    excluded_by = db.Column(db.String(50), default='admin')
+    excluded_by_name = db.Column(db.String(200), nullable=True)
+    excluded_by_email = db.Column(db.String(200), nullable=True)
 
 
 class DeletionHistory(db.Model):
@@ -96,6 +99,9 @@ class MovieExclusion(db.Model):
     year = db.Column(db.Integer, nullable=True)
     tmdb_id = db.Column(db.Integer, nullable=True)
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
+    excluded_by = db.Column(db.String(50), default='admin')
+    excluded_by_name = db.Column(db.String(200), nullable=True)
+    excluded_by_email = db.Column(db.String(200), nullable=True)
 
 
 class EmailHistory(db.Model):
@@ -110,6 +116,18 @@ class EmailHistory(db.Model):
     sent_at = db.Column(db.DateTime, default=datetime.utcnow)
     was_successful = db.Column(db.Boolean, default=True)
     error_message = db.Column(db.Text, nullable=True)
+
+
+class RequesterReviewToken(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False)
+    requester_email = db.Column(db.String(200), nullable=False)
+    requester_name = db.Column(db.String(200), nullable=True)
+    items_json = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    is_used = db.Column(db.Boolean, default=False)
 
 
 class ScanCache(db.Model):
