@@ -520,8 +520,13 @@ function startTVScan() {
     fetch('/api/cleanup/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
     .then(r => r.json())
     .then(data => {
-        if (data.error) { alert(data.error); document.getElementById('btn-scan-tv').disabled = false; return; }
+        if (data.error) { alert(data.error); document.getElementById('btn-scan-tv').disabled = false; document.getElementById('tv-status-badge').style.display = 'none'; return; }
         tvPollInterval = setInterval(pollTVStatus, 1000);
+    })
+    .catch(err => {
+        alert('Network error: ' + err.message);
+        document.getElementById('btn-scan-tv').disabled = false;
+        document.getElementById('tv-status-badge').style.display = 'none';
     });
 }
 
@@ -782,8 +787,13 @@ function startMovieScan() {
     fetch('/api/movies/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
     .then(r => r.json())
     .then(data => {
-        if (data.error) { alert(data.error); document.getElementById('btn-scan-movies').disabled = false; return; }
+        if (data.error) { alert(data.error); document.getElementById('btn-scan-movies').disabled = false; document.getElementById('movie-status-badge').style.display = 'none'; return; }
         moviePollInterval = setInterval(pollMovieStatus, 1000);
+    })
+    .catch(err => {
+        alert('Network error: ' + err.message);
+        document.getElementById('btn-scan-movies').disabled = false;
+        document.getElementById('movie-status-badge').style.display = 'none';
     });
 }
 
