@@ -242,14 +242,23 @@ def load_watch_history_cache(media_type: str):
         cache = WatchHistoryCache.query.filter_by(media_type=media_type).first()
         if cache and cache.scanned_at:
             age = datetime.utcnow() - cache.scanned_at
+            print(f"[DEBUG] Found {media_type} cache from {cache.scanned_at}, age: {age.days} days")
             if age.days < WATCH_HISTORY_CACHE_DAYS:
+                history_data = json.loads(cache.history_json or '{}')
+                print(f"[DEBUG] Returning cached {media_type} history with {len(history_data)} entries")
                 return {
-                    'history': json.loads(cache.history_json or '{}'),
+                    'history': history_data,
                     'scanned_at': cache.scanned_at.isoformat(),
                     'age_days': age.days
                 }
+            else:
+                print(f"[DEBUG] Cache too old: {age.days} days >= {WATCH_HISTORY_CACHE_DAYS}")
+        else:
+            print(f"[DEBUG] No cache found for {media_type}")
     except Exception as e:
         print(f"Error loading watch history cache: {e}")
+        import traceback
+        traceback.print_exc()
     return None
 
 
