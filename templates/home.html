@@ -531,6 +531,7 @@ function pollTVStatus() {
         if (!data.running) {
             clearInterval(tvPollInterval);
             document.getElementById('btn-scan-tv').disabled = false;
+            document.getElementById('btn-execute-tv').disabled = false;
             document.getElementById('tv-status-badge').style.display = 'none';
             if (data.candidates && data.candidates.length > 0) {
                 tvCandidates = data.candidates;
@@ -780,6 +781,7 @@ function pollMovieStatus() {
         if (!data.running) {
             clearInterval(moviePollInterval);
             document.getElementById('btn-scan-movies').disabled = false;
+            document.getElementById('btn-execute-movies').disabled = false;
             document.getElementById('movie-status-badge').style.display = 'none';
             if (data.candidates && data.candidates.length > 0) {
                 movieCandidates = data.candidates;
