@@ -1341,6 +1341,11 @@ def clear_watch_history_cache_api():
 @login_required
 def send_requester_review_emails():
     """Generate and send review emails to all requesters with candidates."""
+    req_data = request.get_json() or {}
+    test_mode = req_data.get('test_mode', False)
+    test_requester_email = req_data.get('test_requester_email')
+    override_email = req_data.get('override_email')
+    
     tv_candidates = cleanup_status.get('candidates', [])
     movie_candidates = movie_cleanup_status.get('candidates', [])
     
@@ -1376,6 +1381,13 @@ def send_requester_review_emails():
     
     if not requester_items:
         return jsonify({'success': False, 'error': 'No requesters with candidates found. Run a scan first.'}), 400
+    
+    if test_mode:
+        if not test_requester_email or test_requester_email not in requester_items:
+            return jsonify({'success': False, 'error': 'Invalid test requester email'}), 400
+        if not override_email:
+            return jsonify({'success': False, 'error': 'Override email required for test mode'}), 400
+        requester_items = {test_requester_email: requester_items[test_requester_email]}
     
     sent_count = 0
     errors = []
@@ -1420,10 +1432,12 @@ def send_requester_review_emails():
             smtp_from = get_setting('SMTP_FROM')
             
             if smtp_host and smtp_user and smtp_password:
+                send_to = override_email if test_mode else email
+                
                 msg = MIMEMultipart('alternative')
-                msg['Subject'] = subject
+                msg['Subject'] = f"[TEST] {subject}" if test_mode else subject
                 msg['From'] = smtp_from or smtp_user
-                msg['To'] = email
+                msg['To'] = send_to
                 msg.attach(MIMEText(html_body, 'html'))
                 
                 with smtplib.SMTP(smtp_host, smtp_port) as server:
@@ -1431,18 +1445,19 @@ def send_requester_review_emails():
                     server.login(smtp_user, smtp_password)
                     server.send_message(msg)
                 
-                email_record = EmailHistory(
-                    media_type='review',
-                    media_title=f"{tv_count} shows, {movie_count} movies",
-                    action_type='requester_review',
-                    recipient_name=data['name'],
-                    recipient_email=email,
-                    subject=subject,
-                    body_html=html_body,
-                    was_successful=True
-                )
-                db.session.add(email_record)
-                db.session.commit()
+                if not test_mode:
+                    email_record = EmailHistory(
+                        media_type='review',
+                        media_title=f"{tv_count} shows, {movie_count} movies",
+                        action_type='requester_review',
+                        recipient_name=data['name'],
+                        recipient_email=email,
+                        subject=subject,
+                        body_html=html_body,
+                        was_successful=True
+                    )
+                    db.session.add(email_record)
+                    db.session.commit()
                 sent_count += 1
             else:
                 errors.append(f"SMTP not configured")

@@ -94,9 +94,19 @@
                             <button class="btn btn-sm btn-success" onclick="analyzeTV()" id="btn-analyze-tv">
                                 <i class="bi bi-robot me-1"></i>AI Recommend
                             </button>
-                            <button class="btn btn-sm btn-outline-primary" onclick="sendRequesterReviews()" id="btn-send-reviews">
-                                <i class="bi bi-envelope me-1"></i>Email Requesters
-                            </button>
+                            <div class="btn-group">
+                                <button class="btn btn-sm btn-outline-primary" onclick="sendRequesterReviews()" id="btn-send-reviews">
+                                    <i class="bi bi-envelope me-1"></i>Email Requesters
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown">
+                                    <span class="visually-hidden">Toggle Dropdown</span>
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end">
+                                    <li><a class="dropdown-item" href="#" onclick="sendRequesterReviews(); return false;"><i class="bi bi-send me-2"></i>Send to All Requesters</a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li><a class="dropdown-item" href="#" onclick="openTestEmailModal(); return false;"><i class="bi bi-bug me-2"></i>Test Mode</a></li>
+                                </ul>
+                            </div>
                         </div>
                     </div>
                     <div id="tv-ai-panel" class="card-body border-bottom" style="display: none;">
@@ -419,6 +429,37 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="testEmailModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-bug me-2"></i>Test Email Mode</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Send a test email for a specific requester to your email address instead.</p>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Select Requester</label>
+                    <select class="form-select" id="test-requester-select">
+                        <option value="">Loading requesters...</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Send To (Your Email)</label>
+                    <input type="email" class="form-control" id="test-override-email" value="grantdyer@gmail.com">
+                    <div class="form-text">The test email will be sent here instead of to the requester.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="sendTestEmail()">
+                    <i class="bi bi-send me-1"></i>Send Test Email
+                </button>
             </div>
         </div>
     </div>
@@ -1057,6 +1098,79 @@ async function sendRequesterReviews() {
     
     btn.disabled = false;
     btn.innerHTML = '<i class="bi bi-envelope me-1"></i>Email Requesters';
+}
+
+function openTestEmailModal() {
+    if (tvCandidates.length === 0 && movieCandidates.length === 0) {
+        alert('No candidates found. Run a scan first.');
+        return;
+    }
+    
+    const requesterMap = {};
+    [...tvCandidates, ...movieCandidates].forEach(c => {
+        if (c.requester_email) {
+            if (!requesterMap[c.requester_email]) {
+                requesterMap[c.requester_email] = {
+                    email: c.requester_email,
+                    name: c.requester_name || '',
+                    tvCount: 0,
+                    movieCount: 0
+                };
+            }
+            if (c.tvdb_id) requesterMap[c.requester_email].tvCount++;
+            else requesterMap[c.requester_email].movieCount++;
+        }
+    });
+    
+    const requesters = Object.values(requesterMap);
+    if (requesters.length === 0) {
+        alert('No candidates have requester information.');
+        return;
+    }
+    
+    const select = document.getElementById('test-requester-select');
+    select.innerHTML = '<option value="">-- Select a requester --</option>' +
+        requesters.map(r => 
+            `<option value="${r.email}">${r.name || r.email} (${r.tvCount} shows, ${r.movieCount} movies)</option>`
+        ).join('');
+    
+    new bootstrap.Modal(document.getElementById('testEmailModal')).show();
+}
+
+async function sendTestEmail() {
+    const requesterEmail = document.getElementById('test-requester-select').value;
+    const overrideEmail = document.getElementById('test-override-email').value;
+    
+    if (!requesterEmail) {
+        alert('Please select a requester.');
+        return;
+    }
+    if (!overrideEmail) {
+        alert('Please enter your email address.');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/requester-review/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                test_mode: true,
+                test_requester_email: requesterEmail,
+                override_email: overrideEmail
+            })
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`Test email sent to ${overrideEmail}!\n\nThis was a test for requester: ${requesterEmail}`);
+            bootstrap.Modal.getInstance(document.getElementById('testEmailModal')).hide();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to send test email'));
+        }
+    } catch (err) {
+        alert('Failed to send test email: ' + err.message);
+    }
 }
 
 async function analyzeTV() {
