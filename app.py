@@ -1525,8 +1525,19 @@ def requester_review_page(token):
         
         items = json.loads(review.items_json or '{}')
         
-        existing_tv_exclusions = Exclusion.query.filter_by(excluded_by_email=review.requester_email).all()
-        existing_movie_exclusions = MovieExclusion.query.filter_by(excluded_by_email=review.requester_email).all()
+        # Find all exclusions for content this requester originally requested OR excluded themselves
+        existing_tv_exclusions = Exclusion.query.filter(
+            db.or_(
+                Exclusion.excluded_by_email == review.requester_email,
+                Exclusion.original_requester_email == review.requester_email
+            )
+        ).all()
+        existing_movie_exclusions = MovieExclusion.query.filter(
+            db.or_(
+                MovieExclusion.excluded_by_email == review.requester_email,
+                MovieExclusion.original_requester_email == review.requester_email
+            )
+        ).all()
         
         ombi_url = get_setting('OMBI_URL', '')
         
