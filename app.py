@@ -2,6 +2,7 @@ import os
 import json
 import secrets
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
