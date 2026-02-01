@@ -1,0 +1,64 @@
+
+Log
+01-31 19:08:41
+[DEBUG] TV admin exclusion 'American Horror Story' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Canada's Drag Race' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Wednesday' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Diplomat' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[2026-02-01 00:09:46 +0000] [32] [INFO] Worker exiting (pid: 32)
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Southern Hospitality' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Bear' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Futurama' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Monster (2022)' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Looking' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Shrinking' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] Final TV exclusions for requester: 2
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Traitors (US)' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] Final Movie exclusions for requester: 0
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Last of Us' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Saturday Night Live' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'RuPaul's Drag Race All Stars' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The White Lotus' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Unconventional' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Great British Bake Off' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Severance' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Bachelor' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'RuPaul's Drag Race UK' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Foundation (2021)' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Savant' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'RuPaul's Drag Race' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'I'm Glad My Mom Died' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Silo' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'Love is Blind' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[DEBUG] TV admin exclusion 'The Gilded Age' - Ombi email: '' vs requester: 'tammy.faulds@gmail.com'
+01-31 19:09:46
+[2026-02-01 00:09:46 +0000] [25] [INFO] Shutting down: Master

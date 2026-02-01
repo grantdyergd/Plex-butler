@@ -1515,7 +1515,11 @@ def get_ombi_tv_requesters():
     ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
     ombi_key = get_setting('OMBI_API_KEY', '').strip()
     
+    print(f"[DEBUG OMBI] TV - URL: {ombi_url[:30] if ombi_url else 'NOT SET'}...")
+    print(f"[DEBUG OMBI] TV - API Key set: {bool(ombi_key)}")
+    
     if not ombi_url or not ombi_key:
+        print("[DEBUG OMBI] TV - Missing URL or API key, returning empty")
         return {}
     
     try:
@@ -1524,8 +1528,10 @@ def get_ombi_tv_requesters():
             headers={"ApiKey": ombi_key},
             timeout=30
         )
+        print(f"[DEBUG OMBI] TV - Response status: {response.status_code}")
         response.raise_for_status()
         requests_data = response.json()
+        print(f"[DEBUG OMBI] TV - Got {len(requests_data)} requests from Ombi")
         
         requesters = {}
         for req in requests_data:
@@ -1543,9 +1549,13 @@ def get_ombi_tv_requesters():
             
             if title and email:
                 requesters[title.lower()] = email.lower()
+            elif title:
+                print(f"[DEBUG OMBI] TV - No email for: {title}")
         
+        print(f"[DEBUG OMBI] TV - Final mapping has {len(requesters)} titles with emails")
         return requesters
-    except:
+    except Exception as e:
+        print(f"[DEBUG OMBI] TV - Error: {str(e)}")
         return {}
 
 
