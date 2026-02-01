@@ -584,7 +584,18 @@ def exclusions():
             if show_title:
                 existing = Exclusion.query.filter(db.func.lower(Exclusion.title) == show_title.lower()).first()
                 if not existing:
-                    new_exclusion = Exclusion(title=show_title)
+                    ombi_tv_requesters = get_ombi_tv_requesters()
+                    original_email = ombi_tv_requesters.get(show_title.lower(), '')
+                    original_name = None
+                    if original_email:
+                        ombi_tv_names = get_ombi_tv_requester_names()
+                        original_name = ombi_tv_names.get(show_title.lower(), '')
+                    new_exclusion = Exclusion(
+                        title=show_title,
+                        excluded_by='admin',
+                        original_requester_email=original_email if original_email else None,
+                        original_requester_name=original_name if original_name else None
+                    )
                     db.session.add(new_exclusion)
                     db.session.commit()
                 flash(f"Added '{show_title}' to TV show exclusions", 'success')
@@ -611,7 +622,19 @@ def exclusions():
                     MovieExclusion.year == year_val
                 ).first()
                 if not existing:
-                    new_exclusion = MovieExclusion(title=movie_title, year=year_val)
+                    ombi_movie_requesters = get_ombi_movie_requesters()
+                    original_email = ombi_movie_requesters.get(movie_title.lower(), '')
+                    original_name = None
+                    if original_email:
+                        ombi_movie_names = get_ombi_movie_requester_names()
+                        original_name = ombi_movie_names.get(movie_title.lower(), '')
+                    new_exclusion = MovieExclusion(
+                        title=movie_title,
+                        year=year_val,
+                        excluded_by='admin',
+                        original_requester_email=original_email if original_email else None,
+                        original_requester_name=original_name if original_name else None
+                    )
                     db.session.add(new_exclusion)
                     db.session.commit()
                 year_str = f" ({year_val})" if year_val else ""
@@ -1596,6 +1619,76 @@ def get_ombi_movie_requesters():
         return {}
 
 
+def get_ombi_tv_requester_names():
+    """Fetch TV request data from Ombi and return dict mapping titles to requester names."""
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+    
+    if not ombi_url or not ombi_key:
+        return {}
+    
+    try:
+        response = requests.get(
+            f"{ombi_url}/api/v1/Request/tv",
+            headers={"ApiKey": ombi_key},
+            timeout=30
+        )
+        response.raise_for_status()
+        requests_data = response.json()
+        
+        requesters = {}
+        for req in requests_data:
+            title = req.get("title", "").strip()
+            requester_user = req.get("requestedUser") or {}
+            name = requester_user.get("userName", "") or requester_user.get("alias", "")
+            
+            if not name:
+                child_requests = req.get("childRequests") or []
+                for child in child_requests:
+                    child_user = child.get("requestedUser") or {}
+                    name = child_user.get("userName", "") or child_user.get("alias", "")
+                    if name:
+                        break
+            
+            if title and name:
+                requesters[title.lower()] = name
+        
+        return requesters
+    except:
+        return {}
+
+
+def get_ombi_movie_requester_names():
+    """Fetch movie request data from Ombi and return dict mapping titles to requester names."""
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+    
+    if not ombi_url or not ombi_key:
+        return {}
+    
+    try:
+        response = requests.get(
+            f"{ombi_url}/api/v1/Request/movie",
+            headers={"ApiKey": ombi_key},
+            timeout=30
+        )
+        response.raise_for_status()
+        requests_data = response.json()
+        
+        requesters = {}
+        for req in requests_data:
+            title = req.get("title", "").strip()
+            requester_user = req.get("requestedUser") or {}
+            name = requester_user.get("userName", "") or requester_user.get("alias", "")
+            
+            if title and name:
+                requesters[title.lower()] = name
+        
+        return requesters
+    except:
+        return {}
+
+
 @app.route('/review/<token>')
 def requester_review_page(token):
     """Public page for requesters to review and exclude their content."""
@@ -1644,6 +1737,7 @@ def requester_review_page(token):
         print(f"[DEBUG] Total Movie exclusions: {len(all_movie_exclusions)}")
         
         existing_tv_exclusions = []
+        updates_made = False
         for exc in all_tv_exclusions:
             # Include if: requester excluded it themselves, OR original_requester matches, OR Ombi says they requested it
             if exc.excluded_by_email and exc.excluded_by_email.lower() == requester_email_lower:
@@ -1658,6 +1752,12 @@ def requester_review_page(token):
                 if ombi_email == requester_email_lower:
                     print(f"[DEBUG] TV match (ombi lookup): {exc.title}")
                     existing_tv_exclusions.append(exc)
+                    # Auto-populate original_requester_email if not set
+                    if not exc.original_requester_email:
+                        exc.original_requester_email = requester_email_lower
+                        exc.original_requester_name = review.requester_name
+                        updates_made = True
+                        print(f"[DEBUG] Auto-populated original_requester_email for: {exc.title}")
                 else:
                     print(f"[DEBUG] TV admin exclusion '{exc.title}' - Ombi email: '{ombi_email}' vs requester: '{requester_email_lower}'")
         
@@ -1675,6 +1775,21 @@ def requester_review_page(token):
                 if ombi_email == requester_email_lower:
                     print(f"[DEBUG] Movie match (ombi lookup): {exc.title}")
                     existing_movie_exclusions.append(exc)
+                    # Auto-populate original_requester_email if not set
+                    if not exc.original_requester_email:
+                        exc.original_requester_email = requester_email_lower
+                        exc.original_requester_name = review.requester_name
+                        updates_made = True
+                        print(f"[DEBUG] Auto-populated original_requester_email for movie: {exc.title}")
+        
+        # Commit any auto-populated requester info
+        if updates_made:
+            try:
+                db.session.commit()
+                print(f"[DEBUG] Committed auto-populated original_requester data")
+            except Exception as commit_err:
+                db.session.rollback()
+                print(f"[DEBUG] Failed to commit auto-populated data: {commit_err}")
         
         print(f"[DEBUG] Final TV exclusions for requester: {len(existing_tv_exclusions)}")
         print(f"[DEBUG] Final Movie exclusions for requester: {len(existing_movie_exclusions)}")
