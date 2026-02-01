@@ -496,6 +496,11 @@ def login():
         if user and user.check_password(password):
             login_user(user)
             next_page = request.args.get('next')
+            if next_page:
+                from urllib.parse import urlparse
+                parsed = urlparse(next_page)
+                if parsed.netloc and parsed.netloc != request.host:
+                    next_page = None
             return redirect(next_page or url_for('home'))
         
         flash('Invalid username or password', 'error')
