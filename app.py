@@ -1218,6 +1218,70 @@ def add_exclusion_api():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/exclusions/backfill-requesters', methods=['POST'])
+@login_required
+def backfill_exclusion_requesters():
+    """Backfill original_requester_email for all exclusions using Ombi data."""
+    try:
+        ombi_tv_requesters = get_ombi_tv_requesters()
+        ombi_tv_names = get_ombi_tv_requester_names()
+        ombi_movie_requesters = get_ombi_movie_requesters()
+        ombi_movie_names = get_ombi_movie_requester_names()
+        
+        tv_updated = 0
+        tv_skipped = 0
+        movie_updated = 0
+        movie_skipped = 0
+        details = []
+        
+        tv_exclusions = Exclusion.query.all()
+        for exc in tv_exclusions:
+            if exc.original_requester_email:
+                tv_skipped += 1
+                continue
+            
+            ombi_email = ombi_tv_requesters.get(exc.title.lower(), '')
+            if ombi_email:
+                ombi_name = ombi_tv_names.get(exc.title.lower(), '')
+                exc.original_requester_email = ombi_email
+                exc.original_requester_name = ombi_name if ombi_name else None
+                tv_updated += 1
+                details.append(f"TV: {exc.title} -> {ombi_email}")
+            else:
+                tv_skipped += 1
+        
+        movie_exclusions = MovieExclusion.query.all()
+        for exc in movie_exclusions:
+            if exc.original_requester_email:
+                movie_skipped += 1
+                continue
+            
+            ombi_email = ombi_movie_requesters.get(exc.title.lower(), '')
+            if ombi_email:
+                ombi_name = ombi_movie_names.get(exc.title.lower(), '')
+                exc.original_requester_email = ombi_email
+                exc.original_requester_name = ombi_name if ombi_name else None
+                movie_updated += 1
+                details.append(f"Movie: {exc.title} -> {ombi_email}")
+            else:
+                movie_skipped += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'tv_updated': tv_updated,
+            'tv_skipped': tv_skipped,
+            'movie_updated': movie_updated,
+            'movie_skipped': movie_skipped,
+            'details': details,
+            'message': f"Updated {tv_updated} TV shows and {movie_updated} movies with original requester info"
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 def check_stale_cleanup():
     """Check and reset stale cleanup operations that exceed timeout."""
     global cleanup_status

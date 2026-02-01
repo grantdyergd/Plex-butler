@@ -3,10 +3,19 @@
 
 {% block content %}
 <div class="row mb-4">
-    <div class="col-12">
-        <h2><i class="bi bi-shield-check me-2"></i>Exclusion Lists</h2>
-        <p class="text-muted">Items in these lists will never appear as deletion candidates.</p>
+    <div class="col-12 d-flex justify-content-between align-items-start">
+        <div>
+            <h2><i class="bi bi-shield-check me-2"></i>Exclusion Lists</h2>
+            <p class="text-muted">Items in these lists will never appear as deletion candidates.</p>
+        </div>
+        <button class="btn btn-outline-primary" onclick="backfillRequesters()" id="backfill-btn">
+            <i class="bi bi-arrow-repeat me-1"></i>Sync Requester Info from Ombi
+        </button>
     </div>
+</div>
+
+<div class="alert alert-info d-none" id="backfill-result">
+    <span id="backfill-message"></span>
 </div>
 
 <ul class="nav nav-tabs mb-4" id="exclusionTabs" role="tablist">
@@ -150,4 +159,43 @@
         </div>
     </div>
 </div>
+
+<script>
+async function backfillRequesters() {
+    const btn = document.getElementById('backfill-btn');
+    const resultDiv = document.getElementById('backfill-result');
+    const messageSpan = document.getElementById('backfill-message');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Syncing...';
+    resultDiv.classList.add('d-none');
+    
+    try {
+        const response = await fetch('/api/exclusions/backfill-requesters', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            resultDiv.classList.remove('d-none', 'alert-danger');
+            resultDiv.classList.add('alert-success');
+            messageSpan.innerHTML = `<strong>Success!</strong> ${result.message}. 
+                <br><small>TV: ${result.tv_updated} updated, ${result.tv_skipped} skipped | 
+                Movies: ${result.movie_updated} updated, ${result.movie_skipped} skipped</small>`;
+        } else {
+            resultDiv.classList.remove('d-none', 'alert-success');
+            resultDiv.classList.add('alert-danger');
+            messageSpan.textContent = 'Error: ' + (result.error || 'Unknown error');
+        }
+    } catch (err) {
+        resultDiv.classList.remove('d-none', 'alert-success');
+        resultDiv.classList.add('alert-danger');
+        messageSpan.textContent = 'Error syncing requester info: ' + err.message;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Sync Requester Info from Ombi';
+    }
+}
+</script>
 {% endblock %}
