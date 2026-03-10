@@ -2254,6 +2254,13 @@ Intent guide:
                 return jsonify({'reply': 'Plex is not configured. Add your Plex token in Settings.'})
             
             try:
+                plex_headers = {
+                    'X-Plex-Token': plex_token,
+                    'X-Plex-Client-Identifier': 'media-scrubber-chat',
+                    'X-Plex-Product': 'Media Scrubber',
+                    'X-Plex-Version': '1.0',
+                    'Accept': 'application/json'
+                }
                 search_resp = requests.get(
                     "https://metadata.provider.plex.tv/library/search",
                     params={
@@ -2262,10 +2269,7 @@ Intent guide:
                         'searchTypes': 'movie,tv',
                         'includeMetadata': 1
                     },
-                    headers={
-                        'X-Plex-Token': plex_token,
-                        'Accept': 'application/json'
-                    },
+                    headers=plex_headers,
                     timeout=15
                 )
                 search_resp.raise_for_status()
@@ -2321,16 +2325,30 @@ Intent guide:
             if not plex_token:
                 return jsonify({'reply': 'Plex is not configured. Add your Plex token in Settings.'})
             
+            plex_headers = {
+                'X-Plex-Token': plex_token,
+                'X-Plex-Client-Identifier': 'media-scrubber-chat',
+                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Version': '1.0',
+                'Accept': 'application/json'
+            }
+            
             try:
                 wl_resp = requests.get(
                     "https://metadata.provider.plex.tv/library/sections/watchlist/all",
-                    params={'X-Plex-Token': plex_token},
-                    headers={'Accept': 'application/json'},
+                    headers=plex_headers,
                     timeout=15
                 )
-                wl_resp.raise_for_status()
-                wl_data = wl_resp.json()
+                print(f"[Plex Watchlist] Status: {wl_resp.status_code}")
                 
+                if wl_resp.status_code == 401:
+                    return jsonify({'reply': 'Plex authentication failed. Your Plex token may have expired. Please update it in Settings.'})
+                
+                if wl_resp.status_code != 200:
+                    print(f"[Plex Watchlist] Response: {wl_resp.text[:300]}")
+                    return jsonify({'reply': f'Plex returned an unexpected response (status {wl_resp.status_code}). Try again or check your Plex token.'})
+                
+                wl_data = wl_resp.json()
                 items = wl_data.get('MediaContainer', {}).get('Metadata', [])
                 
                 if not items:
@@ -2343,9 +2361,12 @@ Intent guide:
                     lines.append(f"{icon} **{item.get('title', '')}**{year}")
                 
                 return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except requests.exceptions.ConnectionError:
+                print(f"[Plex Watchlist] Connection error to metadata.provider.plex.tv")
+                return jsonify({'reply': 'Could not connect to Plex servers. Please try again in a moment.'})
             except Exception as e:
                 print(f"[Plex Watchlist Show Error] {str(e)}")
-                return jsonify({'reply': 'Could not fetch your Plex watchlist. Please check your Plex token.'})
+                return jsonify({'reply': 'Could not fetch your Plex watchlist. Please check your Plex token in Settings.'})
         
         else:
             return jsonify({'reply': reply or raw})
@@ -2457,13 +2478,17 @@ def media_chat_add():
             return jsonify({'success': False, 'error': 'Missing item identifier'})
         
         try:
+            plex_headers = {
+                'X-Plex-Token': plex_token,
+                'X-Plex-Client-Identifier': 'media-scrubber-chat',
+                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Version': '1.0',
+                'Accept': 'application/json'
+            }
             add_resp = requests.put(
                 f"https://discover.provider.plex.tv/actions/addToWatchlist",
-                params={
-                    'ratingKey': rating_key,
-                    'X-Plex-Token': plex_token
-                },
-                headers={'Accept': 'application/json'},
+                params={'ratingKey': rating_key},
+                headers=plex_headers,
                 timeout=15
             )
             
