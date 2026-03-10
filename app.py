@@ -2335,7 +2335,7 @@ Intent guide:
             
             try:
                 wl_resp = requests.get(
-                    "https://metadata.provider.plex.tv/library/sections/watchlist/all",
+                    "https://discover.provider.plex.tv/library/sections/watchlist/all",
                     headers=plex_headers,
                     timeout=15
                 )
@@ -2349,16 +2349,20 @@ Intent guide:
                     return jsonify({'reply': f'Plex returned an unexpected response (status {wl_resp.status_code}). Try again or check your Plex token.'})
                 
                 wl_data = wl_resp.json()
-                items = wl_data.get('MediaContainer', {}).get('Metadata', [])
+                container = wl_data.get('MediaContainer', {})
+                items = container.get('Metadata', [])
+                total_size = container.get('totalSize', len(items))
                 
                 if not items:
                     return jsonify({'reply': 'Your Plex watchlist is empty.'})
                 
-                lines = [f"🟡 **Plex Watchlist ({len(items)} items)**:"]
+                lines = [f"🟡 **Plex Watchlist ({total_size} items)**:"]
                 for item in items:
                     icon = "🎬" if item.get('type') == 'movie' else "📺"
                     year = f" ({item.get('year')})" if item.get('year') else ""
                     lines.append(f"{icon} **{item.get('title', '')}**{year}")
+                if total_size > len(items):
+                    lines.append(f"\n*Showing first {len(items)} of {total_size} items.*")
                 
                 return jsonify({'reply': reply, 'data': '\n'.join(lines)})
             except requests.exceptions.ConnectionError:
