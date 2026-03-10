@@ -2262,30 +2262,50 @@ Intent guide:
                     'Accept': 'application/json'
                 }
                 search_resp = requests.get(
-                    "https://metadata.provider.plex.tv/library/search",
+                    "https://discover.provider.plex.tv/library/search",
                     params={
                         'query': query,
                         'limit': 8,
-                        'searchTypes': 'movie,tv',
-                        'includeMetadata': 1
+                        'searchTypes': 'tv',
+                        'searchProviders': 'discover'
                     },
                     headers=plex_headers,
                     timeout=15
                 )
                 search_resp.raise_for_status()
-                search_data = search_resp.json()
+                tv_data = search_resp.json()
                 
-                search_results = search_data.get('MediaContainer', {}).get('SearchResult', [])
+                movie_resp = requests.get(
+                    "https://discover.provider.plex.tv/library/search",
+                    params={
+                        'query': query,
+                        'limit': 8,
+                        'searchTypes': 'movie',
+                        'searchProviders': 'discover'
+                    },
+                    headers=plex_headers,
+                    timeout=15
+                )
+                movie_resp.raise_for_status()
+                movie_data = movie_resp.json()
                 
-                if not search_results:
-                    hub_results = search_data.get('MediaContainer', {}).get('Metadata', [])
-                    if not hub_results:
-                        return jsonify({'reply': f'No results found on Plex for "{query}". Try a different search term.'})
-                    search_results = [{'Metadata': m} for m in hub_results]
+                all_metadata = []
+                for data in [tv_data, movie_data]:
+                    container = data.get('MediaContainer', {})
+                    search_result_groups = container.get('SearchResult', [])
+                    if isinstance(search_result_groups, dict):
+                        search_result_groups = [search_result_groups]
+                    for group in search_result_groups:
+                        for sr in group.get('SearchResult', []):
+                            m = sr.get('Metadata', sr)
+                            if m.get('title'):
+                                all_metadata.append(m)
+                
+                if not all_metadata:
+                    return jsonify({'reply': f'No results found on Plex for "{query}". Try a different search term.'})
                 
                 watchlist_items = []
-                for result in search_results[:8]:
-                    metadata = result.get('Metadata') or result
+                for metadata in all_metadata[:8]:
                     title = metadata.get('title', '')
                     year = metadata.get('year', '')
                     media_type = metadata.get('type', '')
@@ -2293,18 +2313,16 @@ Intent guide:
                     guid = metadata.get('guid', '')
                     thumb = metadata.get('thumb', '')
                     
-                    if title and (rating_key or guid):
-                        poster_url = None
-                        if thumb:
-                            poster_url = f"https://metadata.provider.plex.tv{thumb}?X-Plex-Token={plex_token}"
-                        watchlist_items.append({
-                            'title': title,
-                            'year': year,
-                            'type': media_type,
-                            'ratingKey': rating_key,
-                            'guid': guid,
-                            'posterUrl': poster_url
-                        })
+                    poster_url = thumb if thumb and thumb.startswith('http') else None
+                    
+                    watchlist_items.append({
+                        'title': title,
+                        'year': year,
+                        'type': media_type,
+                        'ratingKey': rating_key,
+                        'guid': guid,
+                        'posterUrl': poster_url
+                    })
                 
                 if not watchlist_items:
                     return jsonify({'reply': f'No results found on Plex for "{query}".'})
