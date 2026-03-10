@@ -2352,35 +2352,49 @@ Intent guide:
             }
             
             try:
-                wl_resp = requests.get(
-                    "https://discover.provider.plex.tv/library/sections/watchlist/all",
-                    headers=plex_headers,
-                    timeout=15
-                )
-                print(f"[Plex Watchlist] Status: {wl_resp.status_code}")
+                all_items = []
+                offset = 0
+                page_size = 50
+                total_size = None
                 
-                if wl_resp.status_code == 401:
-                    return jsonify({'reply': 'Plex authentication failed. Your Plex token may have expired. Please update it in Settings.'})
+                while True:
+                    wl_resp = requests.get(
+                        "https://discover.provider.plex.tv/library/sections/watchlist/all",
+                        params={'X-Plex-Container-Start': offset, 'X-Plex-Container-Size': page_size},
+                        headers=plex_headers,
+                        timeout=15
+                    )
+                    
+                    if wl_resp.status_code == 401:
+                        return jsonify({'reply': 'Plex authentication failed. Your Plex token may have expired. Please update it in Settings.'})
+                    
+                    if wl_resp.status_code != 200:
+                        print(f"[Plex Watchlist] Status {wl_resp.status_code}: {wl_resp.text[:300]}")
+                        return jsonify({'reply': f'Plex returned an unexpected response (status {wl_resp.status_code}). Try again or check your Plex token.'})
+                    
+                    wl_data = wl_resp.json()
+                    container = wl_data.get('MediaContainer', {})
+                    items = container.get('Metadata', [])
+                    if total_size is None:
+                        total_size = container.get('totalSize', len(items))
+                    
+                    if not items:
+                        break
+                    
+                    all_items.extend(items)
+                    offset += len(items)
+                    
+                    if offset >= total_size:
+                        break
                 
-                if wl_resp.status_code != 200:
-                    print(f"[Plex Watchlist] Response: {wl_resp.text[:300]}")
-                    return jsonify({'reply': f'Plex returned an unexpected response (status {wl_resp.status_code}). Try again or check your Plex token.'})
-                
-                wl_data = wl_resp.json()
-                container = wl_data.get('MediaContainer', {})
-                items = container.get('Metadata', [])
-                total_size = container.get('totalSize', len(items))
-                
-                if not items:
+                if not all_items:
                     return jsonify({'reply': 'Your Plex watchlist is empty.'})
                 
                 lines = [f"🟡 **Plex Watchlist ({total_size} items)**:"]
-                for item in items:
+                for item in all_items:
                     icon = "🎬" if item.get('type') == 'movie' else "📺"
                     year = f" ({item.get('year')})" if item.get('year') else ""
                     lines.append(f"{icon} **{item.get('title', '')}**{year}")
-                if total_size > len(items):
-                    lines.append(f"\n*Showing first {len(items)} of {total_size} items.*")
                 
                 return jsonify({'reply': reply, 'data': '\n'.join(lines)})
             except requests.exceptions.ConnectionError:
