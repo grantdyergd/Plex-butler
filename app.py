@@ -2011,5 +2011,340 @@ def health_check():
         return jsonify({'status': 'unhealthy', 'database': str(e)}), 500
 
 
+@app.route('/media-chat')
+@login_required
+def media_chat():
+    return render_template('media_chat.html')
+
+
+@app.route('/api/media-chat/status')
+@login_required
+def media_chat_status():
+    status = {'sonarr': None, 'radarr': None, 'plex': None}
+    
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    
+    if sonarr_url and sonarr_key:
+        try:
+            r = requests.get(f"{sonarr_url}/api/v3/system/status", params={'apikey': sonarr_key}, timeout=5)
+            status['sonarr'] = r.ok
+        except:
+            status['sonarr'] = False
+    
+    if radarr_url and radarr_key:
+        try:
+            r = requests.get(f"{radarr_url}/api/v3/system/status", params={'apikey': radarr_key}, timeout=5)
+            status['radarr'] = r.ok
+        except:
+            status['radarr'] = False
+    
+    if plex_url and plex_token:
+        try:
+            r = requests.get(f"{plex_url}/identity", params={'X-Plex-Token': plex_token}, headers={'Accept': 'application/json'}, timeout=5)
+            status['plex'] = r.ok
+        except:
+            status['plex'] = False
+    
+    return jsonify(status)
+
+
+@app.route('/api/media-chat/send', methods=['POST'])
+@login_required
+def media_chat_send():
+    data = request.get_json()
+    user_message = data.get('message', '').strip()
+    
+    if not user_message:
+        return jsonify({'reply': 'Please type a message.'})
+    
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    
+    try:
+        intent_response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": """You control Sonarr (TV shows), Radarr (movies), and Plex. Return ONLY valid JSON, no markdown fences:
+{"intent":"search_show"|"search_movie"|"check_lib_show"|"check_lib_movie"|"queue_sonarr"|"queue_radarr"|"plex_library"|"chitchat","query":"title or search term","reply":"one sentence saying what you are doing"}
+
+Intent guide:
+- search_show: user wants to find/add a NEW TV show (search Sonarr's online database)
+- search_movie: user wants to find/add a NEW movie (search Radarr's online database)
+- check_lib_show: user wants to check if a TV show is ALREADY in their library
+- check_lib_movie: user wants to check if a movie is ALREADY in their library
+- queue_sonarr: user wants to see what's downloading in Sonarr
+- queue_radarr: user wants to see what's downloading in Radarr
+- plex_library: user wants to see their Plex libraries
+- chitchat: general conversation, greetings, or questions you can answer directly"""},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.1,
+            max_tokens=200
+        )
+        
+        raw = intent_response.choices[0].message.content.strip()
+        raw = raw.replace('```json', '').replace('```', '').strip()
+        
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return jsonify({'reply': raw})
+        
+        intent = parsed.get('intent', 'chitchat')
+        query = parsed.get('query', '')
+        reply = parsed.get('reply', '')
+        
+        if intent == 'search_show':
+            if not sonarr_url or not sonarr_key:
+                return jsonify({'reply': 'Sonarr is not configured. Go to Settings to add your Sonarr URL and API key.'})
+            
+            results = requests.get(f"{sonarr_url}/api/v3/series/lookup", params={'term': query, 'apikey': sonarr_key}, timeout=15).json()
+            profiles = requests.get(f"{sonarr_url}/api/v3/qualityprofile", params={'apikey': sonarr_key}, timeout=10).json()
+            
+            results = results[:8] if isinstance(results, list) else []
+            profiles = [{'id': p['id'], 'name': p['name']} for p in profiles] if isinstance(profiles, list) else []
+            
+            if not results:
+                return jsonify({'reply': f'No TV shows found for "{query}".'})
+            
+            return jsonify({
+                'reply': reply,
+                'cards': {
+                    'mediaType': 'show',
+                    'results': results,
+                    'profiles': profiles
+                }
+            })
+        
+        elif intent == 'search_movie':
+            if not radarr_url or not radarr_key:
+                return jsonify({'reply': 'Radarr is not configured. Go to Settings to add your Radarr URL and API key.'})
+            
+            results = requests.get(f"{radarr_url}/api/v3/movie/lookup", params={'term': query, 'apikey': radarr_key}, timeout=15).json()
+            profiles = requests.get(f"{radarr_url}/api/v3/qualityprofile", params={'apikey': radarr_key}, timeout=10).json()
+            
+            results = results[:8] if isinstance(results, list) else []
+            profiles = [{'id': p['id'], 'name': p['name']} for p in profiles] if isinstance(profiles, list) else []
+            
+            if not results:
+                return jsonify({'reply': f'No movies found for "{query}".'})
+            
+            return jsonify({
+                'reply': reply,
+                'cards': {
+                    'mediaType': 'movie',
+                    'results': results,
+                    'profiles': profiles
+                }
+            })
+        
+        elif intent == 'check_lib_show':
+            if not sonarr_url or not sonarr_key:
+                return jsonify({'reply': 'Sonarr is not configured.'})
+            
+            all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
+            matches = [s for s in all_series if query.lower() in s.get('title', '').lower()]
+            
+            if not matches:
+                return jsonify({'reply': f'**{query}** isn\'t in your Sonarr library. Want me to search for it to add?'})
+            
+            lines = []
+            for s in matches:
+                monitored = "Monitored" if s.get('monitored') else "Not monitored"
+                eps = s.get('statistics', {}).get('episodeFileCount', 0)
+                total = s.get('statistics', {}).get('totalEpisodeCount', 0)
+                size_bytes = s.get('statistics', {}).get('sizeOnDisk', 0)
+                size_gb = round(size_bytes / (1024**3), 1) if size_bytes else 0
+                lines.append(f"**{s['title']}** ({s.get('year', '')}) — {monitored} — {eps}/{total} episodes — {size_gb} GB")
+            
+            return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+        
+        elif intent == 'check_lib_movie':
+            if not radarr_url or not radarr_key:
+                return jsonify({'reply': 'Radarr is not configured.'})
+            
+            all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json()
+            matches = [m for m in all_movies if query.lower() in m.get('title', '').lower()]
+            
+            if not matches:
+                return jsonify({'reply': f'**{query}** isn\'t in your Radarr library. Want me to search for it to add?'})
+            
+            lines = []
+            for m in matches:
+                has_file = "Downloaded" if m.get('hasFile') else "Not downloaded"
+                size_bytes = m.get('sizeOnDisk', 0)
+                size_gb = round(size_bytes / (1024**3), 1) if size_bytes else 0
+                lines.append(f"**{m['title']}** ({m.get('year', '')}) — {has_file} — {size_gb} GB")
+            
+            return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+        
+        elif intent == 'queue_sonarr':
+            if not sonarr_url or not sonarr_key:
+                return jsonify({'reply': 'Sonarr is not configured.'})
+            
+            queue_data = requests.get(f"{sonarr_url}/api/v3/queue", params={'apikey': sonarr_key}, timeout=10).json()
+            records = queue_data.get('records', [])
+            
+            if not records:
+                return jsonify({'reply': 'Sonarr download queue is empty. Nothing downloading right now.'})
+            
+            lines = [f"📺 **Sonarr Queue ({len(records)})**:"]
+            for item in records:
+                title = item.get('series', {}).get('title', 'Unknown')
+                ep_title = item.get('episode', {}).get('title', '')
+                status = item.get('status', '')
+                size = item.get('size', 0)
+                sizeleft = item.get('sizeleft', 0)
+                pct = round((1 - sizeleft/size) * 100) if size else 0
+                lines.append(f"**{title}** — {ep_title} — {status} {pct}%")
+            
+            return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+        
+        elif intent == 'queue_radarr':
+            if not radarr_url or not radarr_key:
+                return jsonify({'reply': 'Radarr is not configured.'})
+            
+            queue_data = requests.get(f"{radarr_url}/api/v3/queue", params={'apikey': radarr_key}, timeout=10).json()
+            records = queue_data.get('records', [])
+            
+            if not records:
+                return jsonify({'reply': 'Radarr download queue is empty. Nothing downloading right now.'})
+            
+            lines = [f"🎬 **Radarr Queue ({len(records)})**:"]
+            for item in records:
+                title = item.get('movie', {}).get('title', 'Unknown')
+                status = item.get('status', '')
+                size = item.get('size', 0)
+                sizeleft = item.get('sizeleft', 0)
+                pct = round((1 - sizeleft/size) * 100) if size else 0
+                lines.append(f"**{title}** — {status} {pct}%")
+            
+            return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+        
+        elif intent == 'plex_library':
+            if not plex_url or not plex_token:
+                return jsonify({'reply': 'Plex is not configured.'})
+            
+            sections = requests.get(f"{plex_url}/library/sections", params={'X-Plex-Token': plex_token}, headers={'Accept': 'application/json'}, timeout=10).json()
+            dirs = sections.get('MediaContainer', {}).get('Directory', [])
+            
+            if not dirs:
+                return jsonify({'reply': 'No Plex libraries found.'})
+            
+            lines = ["🟡 **Plex Libraries**:"]
+            for d in dirs:
+                icon = "🎬" if d.get('type') == 'movie' else "📺"
+                lines.append(f"{icon} **{d.get('title', '')}** ({d.get('type', '')})")
+            
+            return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+        
+        else:
+            return jsonify({'reply': reply or raw})
+    
+    except Exception as e:
+        print(f"[Media Chat Error] {str(e)}")
+        return jsonify({'reply': 'Sorry, something went wrong processing your request. Please try again.'})
+
+
+@app.route('/api/media-chat/add', methods=['POST'])
+@login_required
+def media_chat_add():
+    data = request.get_json()
+    media_type = data.get('type')
+    item = data.get('item', {})
+    profile_id = data.get('profileId')
+    
+    if media_type == 'show':
+        sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+        sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+        
+        if not sonarr_url or not sonarr_key:
+            return jsonify({'success': False, 'error': 'Sonarr not configured'})
+        
+        try:
+            roots = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=10).json()
+            root_path = roots[0]['path'] if roots else '/tv'
+            
+            payload = {
+                'title': item.get('title'),
+                'tvdbId': item.get('tvdbId'),
+                'qualityProfileId': profile_id,
+                'titleSlug': item.get('titleSlug'),
+                'images': item.get('images', []),
+                'seasons': item.get('seasons', []),
+                'rootFolderPath': root_path,
+                'monitored': True,
+                'addOptions': {'searchForMissingEpisodes': True}
+            }
+            
+            r = requests.post(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key},
+                            json=payload, timeout=15)
+            
+            if r.ok:
+                return jsonify({'success': True, 'message': f'**{item.get("title")}** added to Sonarr and searching for episodes.'})
+            
+            error_data = r.json()
+            error_msg = error_data[0].get('errorMessage', '') if isinstance(error_data, list) and error_data else str(error_data)
+            
+            if 'already' in error_msg.lower() or 'exists' in error_msg.lower():
+                return jsonify({'success': True, 'already_exists': True, 'message': f'**{item.get("title")}** is already in Sonarr.'})
+            
+            return jsonify({'success': False, 'message': f'Sonarr error: {error_msg}'})
+        except Exception as e:
+            print(f"[Media Chat Add Error] Sonarr: {str(e)}")
+            return jsonify({'success': False, 'error': 'Failed to add show to Sonarr. Please try again.'})
+    
+    elif media_type == 'movie':
+        radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+        radarr_key = get_setting('RADARR_API_KEY', '').strip()
+        
+        if not radarr_url or not radarr_key:
+            return jsonify({'success': False, 'error': 'Radarr not configured'})
+        
+        try:
+            roots = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=10).json()
+            root_path = roots[0]['path'] if roots else '/movies'
+            
+            payload = {
+                'title': item.get('title'),
+                'tmdbId': item.get('tmdbId'),
+                'qualityProfileId': profile_id,
+                'titleSlug': item.get('titleSlug'),
+                'images': item.get('images', []),
+                'year': item.get('year'),
+                'rootFolderPath': root_path,
+                'monitored': True,
+                'addOptions': {'searchForMovie': True}
+            }
+            
+            r = requests.post(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key},
+                            json=payload, timeout=15)
+            
+            if r.ok:
+                return jsonify({'success': True, 'message': f'**{item.get("title")}** added to Radarr and searching for download.'})
+            
+            error_data = r.json()
+            error_msg = error_data[0].get('errorMessage', '') if isinstance(error_data, list) and error_data else str(error_data)
+            
+            if 'already' in error_msg.lower() or 'exists' in error_msg.lower():
+                return jsonify({'success': True, 'already_exists': True, 'message': f'**{item.get("title")}** is already in Radarr.'})
+            
+            return jsonify({'success': False, 'message': f'Radarr error: {error_msg}'})
+        except Exception as e:
+            print(f"[Media Chat Add Error] Radarr: {str(e)}")
+            return jsonify({'success': False, 'error': 'Failed to add movie to Radarr. Please try again.'})
+    
+    return jsonify({'success': False, 'error': 'Invalid media type'})
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

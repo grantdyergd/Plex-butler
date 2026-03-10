@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Media Chat</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        
+        :root {
+            --bg: #020f1a;
+            --surface: #061a2e;
+            --card: #0a2340;
+            --primary: #002744;
+            --accent: #6EB3EC;
+            --muted: #6C6C6C;
+            --text: #e8f4fd;
+            --border: rgba(110,179,236,0.12);
+            --border-light: rgba(110,179,236,0.18);
+            --green: #4ade80;
+            --red: #f87171;
+        }
+        
+        body {
+            font-family: 'DM Sans', 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .header {
+            padding: 11px 16px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        
+        .header-title { font-size: 14px; font-weight: 700; }
+        .header-sub { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+        
+        .status-dot {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            color: var(--muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--muted);
+            transition: all 0.3s;
+        }
+        
+        .dot.ok { background: var(--green); box-shadow: 0 0 6px var(--green); }
+        .dot.err { background: var(--red); }
+        
+        .back-btn {
+            background: transparent;
+            border: 1px solid var(--border-light);
+            color: var(--muted);
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            text-decoration: none;
+        }
+        
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .welcome {
+            text-align: center;
+            padding: 40px 16px;
+            color: var(--muted);
+        }
+        
+        .welcome-icon { font-size: 36px; margin-bottom: 12px; }
+        .welcome-title { font-size: 16px; color: var(--text); margin-bottom: 8px; font-weight: 600; }
+        .welcome-desc { font-size: 12px; line-height: 1.9; }
+        .welcome-desc em { color: var(--accent); font-style: normal; }
+        
+        .suggestions {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 18px;
+        }
+        
+        .sugg-btn {
+            padding: 6px 12px;
+            border-radius: 7px;
+            border: 1px solid var(--border-light);
+            background: transparent;
+            color: var(--muted);
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.15s;
+        }
+        
+        .sugg-btn:hover { border-color: var(--accent); color: var(--accent); }
+        
+        .msg-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+        
+        .msg-row.user { flex-direction: row-reverse; }
+        
+        .avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        
+        .avatar.bot {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+        }
+        
+        .avatar.user {
+            background: var(--card);
+            border: 1px solid var(--border-light);
+            color: var(--accent);
+        }
+        
+        .msg-bubble {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+        
+        .msg-bubble.bot {
+            background: var(--surface);
+            border: 1px solid rgba(110,179,236,0.1);
+            border-top-left-radius: 4px;
+        }
+        
+        .msg-bubble.user {
+            background: var(--primary);
+            border: 1px solid rgba(110,179,236,0.28);
+            border-top-right-radius: 4px;
+        }
+        
+        .msg-bubble strong { color: var(--accent); }
+        
+        .cards-container {
+            padding: 10px 13px;
+            background: var(--surface);
+            border: 1px solid rgba(110,179,236,0.1);
+            border-radius: 14px;
+            border-top-left-radius: 4px;
+            max-width: 90%;
+        }
+        
+        .cards-header {
+            font-size: 12px;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
+            margin-bottom: 8px;
+        }
+        
+        .profiles-row {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        
+        .profile-btn {
+            padding: 3px 10px;
+            border-radius: 5px;
+            border: 1px solid var(--border-light);
+            background: transparent;
+            color: var(--muted);
+            font-size: 11px;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.15s;
+        }
+        
+        .profile-btn.active {
+            border-color: var(--accent);
+            background: rgba(110,179,236,0.1);
+            color: var(--accent);
+        }
+        
+        .cards-scroll {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .media-card {
+            background: var(--card);
+            border: 1px solid rgba(110,179,236,0.15);
+            border-radius: 10px;
+            overflow: hidden;
+            width: 125px;
+            flex-shrink: 0;
+        }
+        
+        .media-card img {
+            width: 100%;
+            aspect-ratio: 2/3;
+            object-fit: cover;
+            display: block;
+        }
+        
+        .media-card .poster-placeholder {
+            width: 100%;
+            aspect-ratio: 2/3;
+            background: var(--primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+        }
+        
+        .media-card .info { padding: 7px 7px 0; }
+        .media-card .info .title { font-size: 11px; font-weight: 700; line-height: 1.3; margin-bottom: 2px; }
+        .media-card .info .meta { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+        
+        .media-card .actions { padding: 5px 7px 7px; }
+        
+        .add-btn {
+            width: 100%;
+            padding: 5px 0;
+            border-radius: 5px;
+            border: none;
+            background: var(--accent);
+            color: var(--primary);
+            font-size: 10px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.15s;
+        }
+        
+        .add-btn:disabled { opacity: 0.6; cursor: default; }
+        .add-btn.done { background: var(--green); color: #000; }
+        .add-btn.err { background: var(--red); color: white; }
+        
+        .typing {
+            display: flex;
+            gap: 4px;
+            padding: 10px 14px;
+            background: var(--surface);
+            border: 1px solid rgba(110,179,236,0.1);
+            border-radius: 14px;
+            border-top-left-radius: 4px;
+            width: fit-content;
+        }
+        
+        .typing .dot-anim {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--muted);
+            animation: bounce 1.2s infinite;
+        }
+        
+        .typing .dot-anim:nth-child(2) { animation-delay: 0.2s; }
+        .typing .dot-anim:nth-child(3) { animation-delay: 0.4s; }
+        
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+            30% { transform: translateY(-5px); opacity: 1; }
+        }
+        
+        .input-area {
+            padding: 10px 14px;
+            padding-bottom: max(10px, env(safe-area-inset-bottom));
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .chat-input {
+            flex: 1;
+            background: var(--card);
+            border: 1px solid var(--border-light);
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: var(--text);
+            font-size: 15px;
+            outline: none;
+            font-family: inherit;
+        }
+        
+        .chat-input::placeholder { color: var(--muted); }
+        
+        .send-btn {
+            background: var(--accent);
+            color: var(--primary);
+            border: none;
+            border-radius: 10px;
+            padding: 10px 18px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+        
+        .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        @media (max-width: 480px) {
+            .status-dots { display: none; }
+            .header { padding: 8px 12px; }
+            .chat-area { padding: 12px; gap: 12px; }
+            .input-area { padding: 8px 12px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <div class="header-icon">🎬</div>
+            <div>
+                <div class="header-title">Media Chat</div>
+                <div class="header-sub">Sonarr &middot; Radarr &middot; Plex</div>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="status-dots" style="display:flex;gap:14px;">
+                <div class="status-dot"><div class="dot" id="dot-sonarr"></div>sonarr</div>
+                <div class="status-dot"><div class="dot" id="dot-radarr"></div>radarr</div>
+                <div class="status-dot"><div class="dot" id="dot-plex"></div>plex</div>
+            </div>
+            <a href="/" class="back-btn">&#8592; Back</a>
+        </div>
+    </div>
+
+    <div class="chat-area" id="chat-area">
+        <div class="welcome" id="welcome">
+            <div class="welcome-icon">🎬</div>
+            <div class="welcome-title">Media Chat</div>
+            <div class="welcome-desc">
+                Chat naturally to manage your media library.<br>
+                <em>"Add Severance to Sonarr"</em> &middot; <em>"Search for Dune"</em><br>
+                <em>"What's downloading?"</em> &middot; <em>"Show my Plex libraries"</em>
+            </div>
+            <div class="suggestions">
+                <button class="sugg-btn" onclick="fillInput('Is Severance in my library?')">📺 Check a show</button>
+                <button class="sugg-btn" onclick="fillInput('Search for Dune Part Two')">🎬 Find a movie</button>
+                <button class="sugg-btn" onclick="fillInput('What\\'s in my download queue?')">⬇ Downloads</button>
+                <button class="sugg-btn" onclick="fillInput('Show my Plex libraries')">🟡 Plex</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="input-area">
+        <div class="input-row">
+            <input type="text" class="chat-input" id="chat-input" placeholder="Search shows, movies, check downloads..."
+                   autocomplete="off" autocorrect="on" autocapitalize="sentences">
+            <button class="send-btn" id="send-btn" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const chatArea = document.getElementById('chat-area');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const welcome = document.getElementById('welcome');
+        let loading = false;
+        let selectedProfiles = {};
+
+        chatInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+        });
+
+        function fillInput(text) {
+            chatInput.value = text;
+            chatInput.focus();
+        }
+
+        function scrollToBottom() {
+            requestAnimationFrame(() => chatArea.scrollTop = chatArea.scrollHeight);
+        }
+
+        function escapeHtmlContent(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            const escaped = escapeHtmlContent(text);
+            return escaped
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\n/g, '<br>');
+        }
+
+        function addMessage(role, content, extra) {
+            if (welcome) welcome.style.display = 'none';
+
+            if (role === 'typing') {
+                const existing = document.getElementById('typing-indicator');
+                if (existing) return;
+                const row = document.createElement('div');
+                row.className = 'msg-row';
+                row.id = 'typing-indicator';
+                row.innerHTML = `
+                    <div class="avatar bot">🎬</div>
+                    <div class="typing">
+                        <div class="dot-anim"></div>
+                        <div class="dot-anim"></div>
+                        <div class="dot-anim"></div>
+                    </div>`;
+                chatArea.appendChild(row);
+                scrollToBottom();
+                return;
+            }
+
+            const typing = document.getElementById('typing-indicator');
+            if (typing) typing.remove();
+
+            const row = document.createElement('div');
+            row.className = `msg-row ${role}`;
+
+            if (extra && extra.type === 'cards') {
+                row.innerHTML = `
+                    <div class="avatar bot">🎬</div>
+                    <div class="cards-container" id="cards-${Date.now()}">
+                        ${buildCardsHTML(extra)}
+                    </div>`;
+            } else {
+                const avatarClass = role === 'user' ? 'user' : 'bot';
+                const avatarContent = role === 'user' ? 'G' : '🎬';
+                const bubbleClass = role === 'user' ? 'user' : 'bot';
+                row.innerHTML = `
+                    <div class="avatar ${avatarClass}">${avatarContent}</div>
+                    <div class="msg-bubble ${bubbleClass}">${renderMarkdown(content)}</div>`;
+            }
+
+            chatArea.appendChild(row);
+            scrollToBottom();
+        }
+
+        function buildCardsHTML(extra) {
+            const { mediaType, results, profiles } = extra;
+            const icon = mediaType === 'show' ? '📺 Sonarr' : '🎬 Radarr';
+            const containerId = `cards-group-${Date.now()}`;
+            const defaultProfile = profiles.length > 0 ? profiles[0].id : null;
+            selectedProfiles[containerId] = defaultProfile;
+
+            let html = `<div class="cards-header">${icon} — ${results.length} results</div>`;
+            
+            if (profiles.length > 0) {
+                html += `<div class="profiles-row">`;
+                profiles.forEach(p => {
+                    const active = p.id === defaultProfile ? 'active' : '';
+                    html += `<button class="profile-btn ${active}" onclick="selectProfile('${containerId}', ${p.id}, this)">${p.name}</button>`;
+                });
+                html += `</div>`;
+            }
+
+            html += `<div class="cards-scroll">`;
+            results.forEach((item, idx) => {
+                const poster = item.remotePoster || (item.images && item.images.find(i => i.coverType === 'poster')?.remoteUrl);
+                const posterHTML = poster 
+                    ? `<img src="${poster}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-placeholder" style="display:none">${mediaType === 'show' ? '📺' : '🎬'}</div>`
+                    : `<div class="poster-placeholder">${mediaType === 'show' ? '📺' : '🎬'}</div>`;
+                const network = item.network ? ` &middot; ${escapeHtml(item.network)}` : '';
+
+                html += `
+                    <div class="media-card">
+                        ${posterHTML}
+                        <div class="info">
+                            <div class="title">${escapeHtml(item.title)}</div>
+                            <div class="meta">${item.year || ''}${network}</div>
+                        </div>
+                        <div class="actions">
+                            <button class="add-btn" id="add-${containerId}-${idx}" 
+                                onclick="addMedia('${mediaType}', ${JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;')}, '${containerId}', ${idx})">
+                                Add
+                            </button>
+                        </div>
+                    </div>`;
+            });
+            html += `</div>`;
+            return html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function selectProfile(containerId, profileId, btn) {
+            selectedProfiles[containerId] = profileId;
+            const parent = btn.parentElement;
+            parent.querySelectorAll('.profile-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        async function addMedia(mediaType, item, containerId, idx) {
+            const btn = document.getElementById(`add-${containerId}-${idx}`);
+            if (!btn || btn.classList.contains('done')) return;
+            
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                const response = await fetch('/api/media-chat/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: mediaType,
+                        item: item,
+                        profileId: selectedProfiles[containerId]
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = '✓ Added';
+                    btn.classList.add('done');
+                    addMessage('assistant', result.message);
+                } else {
+                    if (result.already_exists) {
+                        btn.textContent = '✓ Exists';
+                        btn.classList.add('done');
+                        addMessage('assistant', result.message);
+                    } else {
+                        btn.textContent = 'Error';
+                        btn.classList.add('err');
+                        addMessage('assistant', result.message || result.error);
+                        setTimeout(() => { btn.textContent = 'Add'; btn.classList.remove('err'); btn.disabled = false; }, 3000);
+                    }
+                }
+            } catch (err) {
+                btn.textContent = 'Error';
+                btn.classList.add('err');
+                addMessage('assistant', `Error: ${err.message}`);
+                setTimeout(() => { btn.textContent = 'Add'; btn.classList.remove('err'); btn.disabled = false; }, 3000);
+            }
+        }
+
+        async function sendMessage() {
+            const text = chatInput.value.trim();
+            if (!text || loading) return;
+
+            loading = true;
+            sendBtn.disabled = true;
+            chatInput.value = '';
+            
+            addMessage('user', text);
+            addMessage('typing');
+
+            try {
+                const response = await fetch('/api/media-chat/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+                const result = await response.json();
+
+                const typing = document.getElementById('typing-indicator');
+                if (typing) typing.remove();
+
+                if (result.reply) {
+                    addMessage('assistant', result.reply);
+                }
+
+                if (result.cards) {
+                    addMessage('assistant', null, {
+                        type: 'cards',
+                        mediaType: result.cards.mediaType,
+                        results: result.cards.results,
+                        profiles: result.cards.profiles
+                    });
+                }
+
+                if (result.data) {
+                    addMessage('assistant', result.data);
+                }
+
+            } catch (err) {
+                const typing = document.getElementById('typing-indicator');
+                if (typing) typing.remove();
+                addMessage('assistant', `Error: ${err.message}`);
+            }
+
+            loading = false;
+            sendBtn.disabled = false;
+            chatInput.focus();
+        }
+
+        async function checkStatus() {
+            try {
+                const response = await fetch('/api/media-chat/status');
+                const status = await response.json();
+                
+                ['sonarr', 'radarr', 'plex'].forEach(service => {
+                    const dot = document.getElementById(`dot-${service}`);
+                    if (dot) {
+                        dot.classList.remove('ok', 'err');
+                        if (status[service] === true) dot.classList.add('ok');
+                        else if (status[service] === false) dot.classList.add('err');
+                    }
+                });
+            } catch (err) {
+                console.error('Status check failed:', err);
+            }
+        }
+
+        checkStatus();
+    </script>
+</body>
+</html>

@@ -1,0 +1,342 @@
+import { useState, useRef, useEffect } from "react";
+
+const P = "#002744", C = "#6EB3EC", D = "#6C6C6C";
+
+function fmt(b) {
+  if (!b) return "0 B";
+  const k = 1024, s = ["B","KB","MB","GB"], i = Math.floor(Math.log(b)/Math.log(k));
+  return (b/Math.pow(k,i)).toFixed(1)+" "+s[i];
+}
+
+function Dots() {
+  return (
+    <div style={{display:"flex",gap:4,padding:"10px 14px",background:"#061a2e",border:"1px solid rgba(110,179,236,0.1)",borderRadius:12,borderTopLeftRadius:4,width:"fit-content"}}>
+      {[0,1,2].map(i=><div key={i} style={{width:6,height:6,borderRadius:"50%",background:D,animation:"bounce 1.2s infinite",animationDelay:`${i*.2}s`}}/>)}
+      <style>{`@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-5px);opacity:1}}`}</style>
+    </div>
+  );
+}
+
+function SettingsOverlay({cfg,onSave,canClose,onClose}) {
+  const [form,setForm] = useState({...cfg});
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const fi = {width:"100%",background:"#0a2340",border:"1px solid rgba(110,179,236,0.15)",borderRadius:7,padding:"8px 11px",color:"#e8f4fd",fontSize:13,fontFamily:"monospace",outline:"none",boxSizing:"border-box"};
+  const Sec = ({icon,label,color,uk,kk,uph,kph="your-api-key"}) => (
+    <div style={{marginBottom:18}}>
+      <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:color||C,marginBottom:10,fontFamily:"monospace"}}>{icon} {label}</div>
+      <div style={{marginBottom:8}}>
+        <div style={{fontSize:11,color:D,marginBottom:4,fontFamily:"monospace"}}>Base URL</div>
+        <input style={fi} value={form[uk]} onChange={e=>set(uk,e.target.value)} placeholder={uph}/>
+      </div>
+      <div>
+        <div style={{fontSize:11,color:D,marginBottom:4,fontFamily:"monospace"}}>API Key / Token</div>
+        <input style={fi} type="password" value={form[kk]} onChange={e=>set(kk,e.target.value)} placeholder={kph}/>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{position:"absolute",inset:0,background:"rgba(2,15,26,0.95)",backdropFilter:"blur(10px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:50}}>
+      <div style={{background:"#061a2e",border:"1px solid rgba(110,179,236,0.3)",borderRadius:16,padding:26,width:440,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}}>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:3}}>Connect Your Media Stack</div>
+        <div style={{fontSize:12,color:D,marginBottom:22}}>Stored in memory for this session only.</div>
+        <Sec icon="📺" label="Sonarr" uk="sonarrUrl" kk="sonarrKey" uph="https://sonarr.yourdomain.com"/>
+        <div style={{height:1,background:"rgba(110,179,236,0.1)",margin:"4px 0 18px"}}/>
+        <Sec icon="🎬" label="Radarr" uk="radarrUrl" kk="radarrKey" uph="https://radarr.yourdomain.com"/>
+        <div style={{height:1,background:"rgba(110,179,236,0.1)",margin:"4px 0 18px"}}/>
+        <Sec icon="🟡" label="Plex" color="#f5a623" uk="plexUrl" kk="plexToken" uph="https://plex.yourdomain.com" kph="your-plex-token"/>
+        <div style={{display:"flex",gap:8,marginTop:6}}>
+          <button onClick={()=>onSave(form)} style={{flex:1,background:C,color:P,border:"none",borderRadius:8,padding:"11px 0",fontWeight:700,fontSize:14,cursor:"pointer"}}>Save & Connect</button>
+          {canClose && <button onClick={onClose} style={{background:"transparent",border:"1px solid rgba(110,179,236,0.2)",color:D,borderRadius:8,padding:"11px 16px",fontSize:13,cursor:"pointer"}}>Cancel</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Cards({results,profiles,mediaType,onAdd}) {
+  const [selP,setSelP] = useState(profiles[0]?.id);
+  const [added,setAdded] = useState({});
+  const handle = async(item,idx) => {
+    setAdded(a=>({...a,[idx]:"loading"}));
+    const ok = await onAdd(item,selP);
+    setAdded(a=>({...a,[idx]:ok?"done":"err"}));
+  };
+  return (
+    <div>
+      <div style={{marginBottom:8,fontSize:12,color:C,fontFamily:"monospace"}}>{mediaType==="show"?"📺 Sonarr":"🎬 Radarr"} — {results.length} results</div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
+        {profiles.map(p=>(
+          <button key={p.id} onClick={()=>setSelP(p.id)}
+            style={{padding:"3px 9px",borderRadius:5,border:`1px solid ${selP===p.id?C:"rgba(110,179,236,0.2)"}`,background:selP===p.id?"rgba(110,179,236,0.1)":"transparent",color:selP===p.id?C:D,fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>
+            {p.name}
+          </button>
+        ))}
+      </div>
+      <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+        {results.map((item,idx)=>{
+          const poster = item.remotePoster||item.images?.find(i=>i.coverType==="poster")?.remoteUrl;
+          const st = added[idx];
+          return (
+            <div key={idx} style={{background:"#0a2340",border:"1px solid rgba(110,179,236,0.15)",borderRadius:9,overflow:"hidden",width:125,flexShrink:0}}>
+              {poster
+                ? <img src={poster} style={{width:"100%",aspectRatio:"2/3",objectFit:"cover",display:"block"}} loading="lazy" onError={e=>e.target.style.display="none"}/>
+                : <div style={{width:"100%",aspectRatio:"2/3",background:P,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>{mediaType==="show"?"📺":"🎬"}</div>
+              }
+              <div style={{padding:"7px 7px 0"}}>
+                <div style={{fontSize:11,fontWeight:700,lineHeight:1.3,marginBottom:2}}>{item.title}</div>
+                <div style={{fontSize:10,color:D,fontFamily:"monospace"}}>{item.year||""}{item.network?` · ${item.network}`:""}</div>
+              </div>
+              <div style={{padding:"5px 7px 7px"}}>
+                <button disabled={st==="done"||st==="loading"} onClick={()=>handle(item,idx)}
+                  style={{width:"100%",padding:"5px 0",borderRadius:5,border:"none",background:st==="done"?"#4ade80":C,color:st==="done"?"#000":P,fontSize:10,fontWeight:700,cursor:st==="done"?"default":"pointer",fontFamily:"monospace",opacity:st==="loading"?.6:1}}>
+                  {st==="loading"?"…":st==="done"?"✓ Added":"Add"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const empty = {sonarrUrl:"",sonarrKey:"",radarrUrl:"",radarrKey:"",plexUrl:"",plexToken:""};
+  const [cfg,setCfg] = useState(empty);
+  const [showS,setShowS] = useState(true);
+  const [conn,setConn] = useState({sonarr:null,radarr:null,plex:null});
+  const [msgs,setMsgs] = useState([]);
+  const [inp,setInp] = useState("");
+  const [loading,setLoading] = useState(false);
+  const chatRef = useRef(null);
+  const saved = useRef(false);
+
+  useEffect(()=>{ if(chatRef.current) chatRef.current.scrollTop=chatRef.current.scrollHeight; },[msgs]);
+
+  const add = (role,content,extra={}) => setMsgs(m=>[...m,{role,content,extra,id:Date.now()+Math.random()}]);
+
+  const checkConn = async(c) => {
+    const n={sonarr:null,radarr:null,plex:null};
+    try{const r=await fetch(`${c.sonarrUrl}/api/v3/system/status?apikey=${c.sonarrKey}`);n.sonarr=r.ok;}catch{n.sonarr=false;}
+    try{const r=await fetch(`${c.radarrUrl}/api/v3/system/status?apikey=${c.radarrKey}`);n.radarr=r.ok;}catch{n.radarr=false;}
+    try{const r=await fetch(`${c.plexUrl}/identity?X-Plex-Token=${c.plexToken}`,{headers:{Accept:"application/json"}});n.plex=r.ok;}catch{n.plex=false;}
+    setConn(n); return n;
+  };
+
+  const handleSave = async(form) => {
+    const cl = Object.fromEntries(Object.entries(form).map(([k,v])=>[k,v.replace(/\/$/,"")]));
+    setCfg(cl); setShowS(false); saved.current=true;
+    const n = await checkConn(cl);
+    const ok = [n.sonarr?"📺 Sonarr":null,n.radarr?"🎬 Radarr":null,n.plex?"🟡 Plex":null].filter(Boolean);
+    const fail = [!n.sonarr?"Sonarr":null,!n.radarr?"Radarr":null,!n.plex?"Plex":null].filter(Boolean);
+    add("assistant", ok.length
+      ? `Connected: ${ok.join(" · ")}${fail.length?`\n\nCouldn't reach: ${fail.join(", ")} — check URLs/keys.`:""}`
+      : "Couldn't connect to any service. Check your URLs and API keys.");
+  };
+
+  const sonarrSearch = async(q) => {
+    const [s,p] = await Promise.all([
+      fetch(`${cfg.sonarrUrl}/api/v3/series/lookup?term=${encodeURIComponent(q)}&apikey=${cfg.sonarrKey}`).then(r=>r.json()),
+      fetch(`${cfg.sonarrUrl}/api/v3/qualityprofile?apikey=${cfg.sonarrKey}`).then(r=>r.json()),
+    ]);
+    return {results:s.slice(0,8),profiles:p};
+  };
+
+  const radarrSearch = async(q) => {
+    const [r,p] = await Promise.all([
+      fetch(`${cfg.radarrUrl}/api/v3/movie/lookup?term=${encodeURIComponent(q)}&apikey=${cfg.radarrKey}`).then(r=>r.json()),
+      fetch(`${cfg.radarrUrl}/api/v3/qualityprofile?apikey=${cfg.radarrKey}`).then(r=>r.json()),
+    ]);
+    return {results:r.slice(0,8),profiles:p};
+  };
+
+  const addShow = async(series,profileId) => {
+    try {
+      const roots = await fetch(`${cfg.sonarrUrl}/api/v3/rootfolder?apikey=${cfg.sonarrKey}`).then(r=>r.json());
+      const r = await fetch(`${cfg.sonarrUrl}/api/v3/series?apikey=${cfg.sonarrKey}`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({title:series.title,tvdbId:series.tvdbId,qualityProfileId:profileId,titleSlug:series.titleSlug,images:series.images,seasons:series.seasons||[],rootFolderPath:roots[0]?.path,monitored:true,addOptions:{searchForMissingEpisodes:true}})});
+      if(r.ok){add("assistant",`✅ **${series.title}** added to Sonarr.`);return true;}
+      const e=await r.json(); const msg=e[0]?.errorMessage||"Unknown";
+      if(msg.toLowerCase().includes("already")){add("assistant",`ℹ️ **${series.title}** already in Sonarr.`);return true;}
+      add("assistant",`Sonarr error: ${msg}`); return false;
+    } catch(e){add("assistant",`Error: ${e.message}`);return false;}
+  };
+
+  const addMovie = async(movie,profileId) => {
+    try {
+      const roots = await fetch(`${cfg.radarrUrl}/api/v3/rootfolder?apikey=${cfg.radarrKey}`).then(r=>r.json());
+      const r = await fetch(`${cfg.radarrUrl}/api/v3/movie?apikey=${cfg.radarrKey}`,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({title:movie.title,tmdbId:movie.tmdbId,qualityProfileId:profileId,titleSlug:movie.titleSlug,images:movie.images,year:movie.year,rootFolderPath:roots[0]?.path,monitored:true,addOptions:{searchForMovie:true}})});
+      if(r.ok){add("assistant",`✅ **${movie.title}** added to Radarr.`);return true;}
+      const e=await r.json(); const msg=e[0]?.errorMessage||"Unknown";
+      if(msg.toLowerCase().includes("already")){add("assistant",`ℹ️ **${movie.title}** already in Radarr.`);return true;}
+      add("assistant",`Radarr error: ${msg}`); return false;
+    } catch(e){add("assistant",`Error: ${e.message}`);return false;}
+  };
+
+  const checkSonarrLib = async(q) => {
+    const all = await fetch(`${cfg.sonarrUrl}/api/v3/series?apikey=${cfg.sonarrKey}`).then(r=>r.json());
+    return all.filter(s=>s.title.toLowerCase().includes(q.toLowerCase()));
+  };
+
+  const checkRadarrLib = async(q) => {
+    const all = await fetch(`${cfg.radarrUrl}/api/v3/movie?apikey=${cfg.radarrKey}`).then(r=>r.json());
+    return all.filter(m=>m.title.toLowerCase().includes(q.toLowerCase()));
+  };
+
+  const getSonarrQ = async() => { const d=await fetch(`${cfg.sonarrUrl}/api/v3/queue?apikey=${cfg.sonarrKey}`).then(r=>r.json()); return d.records||[]; };
+  const getRadarrQ = async() => { const d=await fetch(`${cfg.radarrUrl}/api/v3/queue?apikey=${cfg.radarrKey}`).then(r=>r.json()); return d.records||[]; };
+  const getPlexSecs = async() => { const d=await fetch(`${cfg.plexUrl}/library/sections?X-Plex-Token=${cfg.plexToken}`,{headers:{Accept:"application/json"}}).then(r=>r.json()); return d.MediaContainer?.Directory||[]; };
+
+  const handleIntent = async(text) => {
+    const res = await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,
+        system:`You control Sonarr (TV shows), Radarr (movies), Plex. Return ONLY valid JSON, no markdown:
+{"intent":"search_show"|"search_movie"|"check_lib_show"|"check_lib_movie"|"queue_sonarr"|"queue_radarr"|"plex_library"|"chitchat","query":"title or search term","reply":"one sentence saying what you are doing"}`,
+        messages:[{role:"user",content:text}]})});
+    const data = await res.json();
+    const raw = data.content?.[0]?.text||"{}";
+    let p; try{p=JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{p={intent:"chitchat",reply:raw,query:""};}
+    const {intent,query,reply} = p;
+    if(reply) add("assistant",reply);
+    switch(intent) {
+      case "search_show": {
+        const {results,profiles} = await sonarrSearch(query);
+        if(!results.length){add("assistant",`No TV shows found for "${query}".`);break;}
+        add("assistant",null,{type:"cards",mediaType:"show",results,profiles}); break;
+      }
+      case "search_movie": {
+        const {results,profiles} = await radarrSearch(query);
+        if(!results.length){add("assistant",`No movies found for "${query}".`);break;}
+        add("assistant",null,{type:"cards",mediaType:"movie",results,profiles}); break;
+      }
+      case "check_lib_show": {
+        const f = await checkSonarrLib(query);
+        if(!f.length){add("assistant",`"${query}" isn't in Sonarr. Want me to search for it?`);break;}
+        add("assistant",f.map(s=>`• **${s.title}** (${s.year}) — ${s.monitored?"Monitored ✓":"Not monitored"} — ${s.statistics?.episodeFileCount||0} eps`).join("\n")); break;
+      }
+      case "check_lib_movie": {
+        const f = await checkRadarrLib(query);
+        if(!f.length){add("assistant",`"${query}" isn't in Radarr. Want me to search for it?`);break;}
+        add("assistant",f.map(m=>`• **${m.title}** (${m.year}) — ${m.hasFile?"Downloaded ✓":"Not downloaded"}`).join("\n")); break;
+      }
+      case "queue_sonarr": {
+        const items = await getSonarrQ();
+        if(!items.length){add("assistant","Sonarr queue is empty.");break;}
+        add("assistant",`📺 Sonarr Queue (${items.length}):\n`+items.map(i=>{const pct=i.size?Math.round((1-i.sizeleft/i.size)*100):0;return`• **${i.series?.title}** — ${i.episode?.title||""} — ${i.status} ${pct}%`;}).join("\n")); break;
+      }
+      case "queue_radarr": {
+        const items = await getRadarrQ();
+        if(!items.length){add("assistant","Radarr queue is empty.");break;}
+        add("assistant",`🎬 Radarr Queue (${items.length}):\n`+items.map(i=>{const pct=i.size?Math.round((1-i.sizeleft/i.size)*100):0;return`• **${i.movie?.title}** — ${i.status} ${pct}%`;}).join("\n")); break;
+      }
+      case "plex_library": {
+        const secs = await getPlexSecs();
+        if(!secs.length){add("assistant","No Plex libraries found.");break;}
+        add("assistant","🟡 Plex Libraries:\n"+secs.map(s=>`• ${s.type==="movie"?"🎬":"📺"} **${s.title}** (${s.type})`).join("\n")); break;
+      }
+      default: break;
+    }
+  };
+
+  const send = async() => {
+    if(!inp.trim()||loading) return;
+    const text=inp.trim(); setInp(""); setLoading(true); add("user",text);
+    try{await handleIntent(text);}catch(e){add("assistant",`Error: ${e.message}`);}
+    setLoading(false);
+  };
+
+  const renderText = (content) => {
+    if(!content) return null;
+    return content.split("\n").map((line,i)=>{
+      const parts=line.split(/\*\*(.*?)\*\*/g);
+      return <div key={i} style={{marginBottom:line===""?6:0}}>{parts.map((p,j)=>j%2===1?<strong key={j}>{p}</strong>:p)}</div>;
+    });
+  };
+
+  const sugg = [
+    {l:"📺 Check a show",t:"Is Severance in my Sonarr library?"},
+    {l:"🎬 Find a movie",t:"Search for Dune Part Two in Radarr"},
+    {l:"⬇ Downloads",t:"What's in my Sonarr queue?"},
+    {l:"🟡 Plex",t:"Show my Plex libraries"},
+  ];
+
+  return (
+    <div style={{background:"#020f1a",color:"#e8f4fd",fontFamily:"'DM Sans','Segoe UI',sans-serif",height:"100vh",display:"flex",flexDirection:"column",overflow:"hidden",position:"relative"}}>
+
+      {/* Header */}
+      <div style={{padding:"11px 16px",background:"#061a2e",borderBottom:"1px solid rgba(110,179,236,0.12)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:28,height:28,background:`linear-gradient(135deg,${P},${C})`,borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🎬</div>
+          <div>
+            <div style={{fontSize:13,fontWeight:700}}>Media Chat</div>
+            <div style={{fontSize:10,color:D,fontFamily:"monospace"}}>Sonarr · Radarr · Plex</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          {[["sonarr","sonarr"],["radarr","radarr"],["plex","plex"]].map(([k,l])=>(
+            <div key={k} style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:D,fontFamily:"monospace"}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:conn[k]===true?"#4ade80":conn[k]===false?"#f87171":D,boxShadow:conn[k]===true?"0 0 5px #4ade80":"none",transition:"all .3s"}}/>
+              {l}
+            </div>
+          ))}
+          <button onClick={()=>setShowS(true)} style={{background:"transparent",border:"1px solid rgba(110,179,236,0.2)",color:D,padding:"4px 10px",borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"monospace"}}>⚙</button>
+        </div>
+      </div>
+
+      {/* Chat area */}
+      <div ref={chatRef} style={{flex:1,overflowY:"auto",padding:"16px",display:"flex",flexDirection:"column",gap:12}}>
+        {msgs.length===0 && (
+          <div style={{textAlign:"center",padding:"30px 16px",color:D}}>
+            <div style={{fontSize:32,marginBottom:10}}>🎬</div>
+            <div style={{fontSize:14,color:"#e8f4fd",marginBottom:6,fontWeight:600}}>Media Chat</div>
+            <div style={{fontSize:12,lineHeight:1.8}}>Hit ⚙ to connect, then chat naturally.<br/><em>"Is Vladimir in Sonarr?"</em> · <em>"Add Dune"</em> · <em>"What's downloading?"</em></div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"center",marginTop:16}}>
+              {sugg.map(s=><button key={s.t} onClick={()=>setInp(s.t)} style={{padding:"5px 10px",borderRadius:6,border:"1px solid rgba(110,179,236,0.18)",background:"transparent",color:D,fontSize:11,cursor:"pointer"}}>{s.l}</button>)}
+            </div>
+          </div>
+        )}
+        {msgs.map(msg=>(
+          <div key={msg.id} style={{display:"flex",flexDirection:msg.role==="user"?"row-reverse":"row",gap:8,alignItems:"flex-start"}}>
+            <div style={{width:26,height:26,borderRadius:6,background:msg.role==="user"?"#0a2340":`linear-gradient(135deg,${P},${C})`,border:msg.role==="user"?"1px solid rgba(110,179,236,0.2)":"none",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,color:msg.role==="user"?C:"#fff",flexShrink:0}}>
+              {msg.role==="user"?"G":"🎬"}
+            </div>
+            <div style={{maxWidth:"85%"}}>
+              {msg.extra?.type==="cards" ? (
+                <div style={{padding:"10px 13px",background:"#061a2e",border:"1px solid rgba(110,179,236,0.1)",borderRadius:12,borderTopLeftRadius:4}}>
+                  <Cards results={msg.extra.results} profiles={msg.extra.profiles} mediaType={msg.extra.mediaType} onAdd={msg.extra.mediaType==="show"?addShow:addMovie}/>
+                </div>
+              ) : msg.content ? (
+                <div style={{padding:"9px 13px",borderRadius:12,background:msg.role==="user"?P:"#061a2e",border:`1px solid ${msg.role==="user"?"rgba(110,179,236,0.28)":"rgba(110,179,236,0.1)"}`,borderTopLeftRadius:msg.role==="user"?12:4,borderTopRightRadius:msg.role==="user"?4:12,fontSize:13,lineHeight:1.65}}>
+                  {renderText(msg.content)}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+            <div style={{width:26,height:26,borderRadius:6,background:`linear-gradient(135deg,${P},${C})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,flexShrink:0}}>🎬</div>
+            <Dots/>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div style={{padding:"10px 14px",background:"#061a2e",borderTop:"1px solid rgba(110,179,236,0.12)",flexShrink:0}}>
+        <div style={{display:"flex",gap:8}}>
+          <input value={inp} onChange={e=>setInp(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} disabled={loading}
+            placeholder="Search shows, movies, check downloads…"
+            style={{flex:1,background:"#0a2340",border:"1px solid rgba(110,179,236,0.2)",borderRadius:9,padding:"9px 13px",color:"#e8f4fd",fontSize:14,outline:"none",fontFamily:"inherit"}}/>
+          <button onClick={send} disabled={loading||!inp.trim()}
+            style={{background:loading||!inp.trim()?D:C,color:P,border:"none",borderRadius:8,padding:"9px 16px",fontWeight:700,fontSize:13,cursor:loading||!inp.trim()?"not-allowed":"pointer",opacity:loading||!inp.trim()?.5:1,transition:"all .2s"}}>
+            Send
+          </button>
+        </div>
+      </div>
+
+      {/* Settings overlay */}
+      {showS && <SettingsOverlay cfg={cfg} onSave={handleSave} canClose={saved.current} onClose={()=>setShowS(false)}/>}
+    </div>
+  );
+}

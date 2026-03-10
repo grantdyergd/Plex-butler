@@ -129,6 +129,19 @@ For deployment, the following environment variables should be set:
 6. On execute: Deletes from both Plex and Sonarr, notifies requesters via email
 
 ## Recent Changes
+- Added **Media Chat** - AI-powered chat interface for managing media library (Mar 2026)
+  - Full-screen mobile-optimized dark UI at `/media-chat`
+  - Chat naturally to search/add shows (Sonarr) and movies (Radarr)
+  - Check library contents, download queues, and Plex libraries
+  - Uses OpenAI (via Replit AI Integrations) for intent classification
+  - Backend proxies all API calls (keys stay server-side)
+  - Card-based results with poster images and quality profile selection
+  - Connection status dots for Sonarr, Radarr, Plex
+  - Accessible from navbar "Media Chat" link
+- Added exclusion requester backfill from Ombi (Mar 2026)
+  - "Sync Requester Info from Ombi" button on Exclusions page
+  - Auto-populates original_requester_email for all exclusions
+  - New admin exclusions automatically look up requester from Ombi
 - Extended requester review system to show ALL exclusions for requester's content (Jan 2026)
   - Shows admin-excluded items in addition to self-excluded items
   - Tracks original requester info when admin excludes content
