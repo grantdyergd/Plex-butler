@@ -132,6 +132,7 @@ For deployment, the following environment variables should be set:
 - Added **Media Chat** - AI-powered chat interface for managing media library (Mar 2026)
   - Full-screen mobile-optimized dark UI at `/media-chat`
   - Chat naturally to search/add shows (Sonarr) and movies (Radarr)
+  - **Plex Watchlist** - search and add movies/shows to Plex watchlist, view current watchlist
   - Check library contents, download queues, and Plex libraries
   - Uses OpenAI (via Replit AI Integrations) for intent classification
   - Backend proxies all API calls (keys stay server-side)

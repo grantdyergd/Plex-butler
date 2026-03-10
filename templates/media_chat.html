@@ -406,7 +406,8 @@
                 <button class="sugg-btn" onclick="fillInput('Is Severance in my library?')">📺 Check a show</button>
                 <button class="sugg-btn" onclick="fillInput('Search for Dune Part Two')">🎬 Find a movie</button>
                 <button class="sugg-btn" onclick="fillInput('What\\'s in my download queue?')">⬇ Downloads</button>
-                <button class="sugg-btn" onclick="fillInput('Show my Plex libraries')">🟡 Plex</button>
+                <button class="sugg-btn" onclick="fillInput('Add The Bear to my Plex watchlist')">🟡 Watchlist</button>
+                <button class="sugg-btn" onclick="fillInput('Show my Plex watchlist')">📋 My Watchlist</button>
             </div>
         </div>
     </div>
@@ -502,41 +503,45 @@
 
         function buildCardsHTML(extra) {
             const { mediaType, results, profiles } = extra;
-            const icon = mediaType === 'show' ? '📺 Sonarr' : '🎬 Radarr';
+            const iconLabel = mediaType === 'show' ? '📺 Sonarr' : mediaType === 'movie' ? '🎬 Radarr' : '🟡 Plex Watchlist';
+            const placeholderIcon = mediaType === 'show' ? '📺' : mediaType === 'watchlist' ? '🟡' : '🎬';
+            const btnLabel = mediaType === 'watchlist' ? 'Watchlist' : 'Add';
             const containerId = `cards-group-${Date.now()}`;
             const defaultProfile = profiles.length > 0 ? profiles[0].id : null;
             selectedProfiles[containerId] = defaultProfile;
 
-            let html = `<div class="cards-header">${icon} — ${results.length} results</div>`;
+            let html = `<div class="cards-header">${iconLabel} — ${results.length} results</div>`;
             
             if (profiles.length > 0) {
                 html += `<div class="profiles-row">`;
                 profiles.forEach(p => {
                     const active = p.id === defaultProfile ? 'active' : '';
-                    html += `<button class="profile-btn ${active}" onclick="selectProfile('${containerId}', ${p.id}, this)">${p.name}</button>`;
+                    html += `<button class="profile-btn ${active}" onclick="selectProfile('${containerId}', ${p.id}, this)">${escapeHtml(p.name)}</button>`;
                 });
                 html += `</div>`;
             }
 
             html += `<div class="cards-scroll">`;
             results.forEach((item, idx) => {
-                const poster = item.remotePoster || (item.images && item.images.find(i => i.coverType === 'poster')?.remoteUrl);
+                let poster = item.remotePoster || item.posterUrl || (item.images && item.images.find(i => i.coverType === 'poster')?.remoteUrl);
                 const posterHTML = poster 
-                    ? `<img src="${poster}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-placeholder" style="display:none">${mediaType === 'show' ? '📺' : '🎬'}</div>`
-                    : `<div class="poster-placeholder">${mediaType === 'show' ? '📺' : '🎬'}</div>`;
+                    ? `<img src="${poster}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-placeholder" style="display:none">${placeholderIcon}</div>`
+                    : `<div class="poster-placeholder">${placeholderIcon}</div>`;
                 const network = item.network ? ` &middot; ${escapeHtml(item.network)}` : '';
+                const typeLabel = item.type ? ` &middot; ${escapeHtml(item.type)}` : '';
+                const meta = mediaType === 'watchlist' ? `${item.year || ''}${typeLabel}` : `${item.year || ''}${network}`;
 
                 html += `
                     <div class="media-card">
                         ${posterHTML}
                         <div class="info">
                             <div class="title">${escapeHtml(item.title)}</div>
-                            <div class="meta">${item.year || ''}${network}</div>
+                            <div class="meta">${meta}</div>
                         </div>
                         <div class="actions">
                             <button class="add-btn" id="add-${containerId}-${idx}" 
                                 onclick="addMedia('${mediaType}', ${JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;')}, '${containerId}', ${idx})">
-                                Add
+                                ${btnLabel}
                             </button>
                         </div>
                     </div>`;

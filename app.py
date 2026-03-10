@@ -2074,7 +2074,7 @@ def media_chat_send():
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": """You control Sonarr (TV shows), Radarr (movies), and Plex. Return ONLY valid JSON, no markdown fences:
-{"intent":"search_show"|"search_movie"|"check_lib_show"|"check_lib_movie"|"queue_sonarr"|"queue_radarr"|"plex_library"|"chitchat","query":"title or search term","reply":"one sentence saying what you are doing"}
+{"intent":"search_show"|"search_movie"|"check_lib_show"|"check_lib_movie"|"queue_sonarr"|"queue_radarr"|"plex_library"|"plex_watchlist_add"|"plex_watchlist_show"|"chitchat","query":"title or search term","reply":"one sentence saying what you are doing"}
 
 Intent guide:
 - search_show: user wants to find/add a NEW TV show (search Sonarr's online database)
@@ -2084,6 +2084,8 @@ Intent guide:
 - queue_sonarr: user wants to see what's downloading in Sonarr
 - queue_radarr: user wants to see what's downloading in Radarr
 - plex_library: user wants to see their Plex libraries
+- plex_watchlist_add: user wants to add a movie or show to their Plex watchlist
+- plex_watchlist_show: user wants to see what's on their Plex watchlist
 - chitchat: general conversation, greetings, or questions you can answer directly"""},
                 {"role": "user", "content": user_message}
             ],
@@ -2247,6 +2249,104 @@ Intent guide:
             
             return jsonify({'reply': reply, 'data': '\n'.join(lines)})
         
+        elif intent == 'plex_watchlist_add':
+            if not plex_token:
+                return jsonify({'reply': 'Plex is not configured. Add your Plex token in Settings.'})
+            
+            try:
+                search_resp = requests.get(
+                    "https://metadata.provider.plex.tv/library/search",
+                    params={
+                        'query': query,
+                        'limit': 8,
+                        'searchTypes': 'movie,tv',
+                        'includeMetadata': 1
+                    },
+                    headers={
+                        'X-Plex-Token': plex_token,
+                        'Accept': 'application/json'
+                    },
+                    timeout=15
+                )
+                search_resp.raise_for_status()
+                search_data = search_resp.json()
+                
+                search_results = search_data.get('MediaContainer', {}).get('SearchResult', [])
+                
+                if not search_results:
+                    hub_results = search_data.get('MediaContainer', {}).get('Metadata', [])
+                    if not hub_results:
+                        return jsonify({'reply': f'No results found on Plex for "{query}". Try a different search term.'})
+                    search_results = [{'Metadata': m} for m in hub_results]
+                
+                watchlist_items = []
+                for result in search_results[:8]:
+                    metadata = result.get('Metadata') or result
+                    title = metadata.get('title', '')
+                    year = metadata.get('year', '')
+                    media_type = metadata.get('type', '')
+                    rating_key = metadata.get('ratingKey', '')
+                    guid = metadata.get('guid', '')
+                    thumb = metadata.get('thumb', '')
+                    
+                    if title and (rating_key or guid):
+                        poster_url = None
+                        if thumb:
+                            poster_url = f"https://metadata.provider.plex.tv{thumb}?X-Plex-Token={plex_token}"
+                        watchlist_items.append({
+                            'title': title,
+                            'year': year,
+                            'type': media_type,
+                            'ratingKey': rating_key,
+                            'guid': guid,
+                            'posterUrl': poster_url
+                        })
+                
+                if not watchlist_items:
+                    return jsonify({'reply': f'No results found on Plex for "{query}".'})
+                
+                return jsonify({
+                    'reply': reply,
+                    'cards': {
+                        'mediaType': 'watchlist',
+                        'results': watchlist_items,
+                        'profiles': []
+                    }
+                })
+            except Exception as e:
+                print(f"[Plex Watchlist Search Error] {str(e)}")
+                return jsonify({'reply': 'Could not search Plex. Please check your Plex token in Settings.'})
+        
+        elif intent == 'plex_watchlist_show':
+            if not plex_token:
+                return jsonify({'reply': 'Plex is not configured. Add your Plex token in Settings.'})
+            
+            try:
+                wl_resp = requests.get(
+                    "https://metadata.provider.plex.tv/library/sections/watchlist/all",
+                    params={'X-Plex-Token': plex_token},
+                    headers={'Accept': 'application/json'},
+                    timeout=15
+                )
+                wl_resp.raise_for_status()
+                wl_data = wl_resp.json()
+                
+                items = wl_data.get('MediaContainer', {}).get('Metadata', [])
+                
+                if not items:
+                    return jsonify({'reply': 'Your Plex watchlist is empty.'})
+                
+                lines = [f"🟡 **Plex Watchlist ({len(items)} items)**:"]
+                for item in items:
+                    icon = "🎬" if item.get('type') == 'movie' else "📺"
+                    year = f" ({item.get('year')})" if item.get('year') else ""
+                    lines.append(f"{icon} **{item.get('title', '')}**{year}")
+                
+                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except Exception as e:
+                print(f"[Plex Watchlist Show Error] {str(e)}")
+                return jsonify({'reply': 'Could not fetch your Plex watchlist. Please check your Plex token.'})
+        
         else:
             return jsonify({'reply': reply or raw})
     
@@ -2342,6 +2442,41 @@ def media_chat_add():
         except Exception as e:
             print(f"[Media Chat Add Error] Radarr: {str(e)}")
             return jsonify({'success': False, 'error': 'Failed to add movie to Radarr. Please try again.'})
+    
+    elif media_type == 'watchlist':
+        plex_token = get_setting('PLEX_TOKEN', '').strip()
+        
+        if not plex_token:
+            return jsonify({'success': False, 'error': 'Plex not configured'})
+        
+        rating_key = item.get('ratingKey', '')
+        guid = item.get('guid', '')
+        title = item.get('title', 'Unknown')
+        
+        if not rating_key and not guid:
+            return jsonify({'success': False, 'error': 'Missing item identifier'})
+        
+        try:
+            add_resp = requests.put(
+                f"https://discover.provider.plex.tv/actions/addToWatchlist",
+                params={
+                    'ratingKey': rating_key,
+                    'X-Plex-Token': plex_token
+                },
+                headers={'Accept': 'application/json'},
+                timeout=15
+            )
+            
+            if add_resp.status_code in (200, 201, 204):
+                return jsonify({'success': True, 'message': f'**{title}** added to your Plex watchlist!'})
+            elif add_resp.status_code == 409:
+                return jsonify({'success': True, 'already_exists': True, 'message': f'**{title}** is already on your Plex watchlist.'})
+            else:
+                print(f"[Plex Watchlist Add] Status {add_resp.status_code}: {add_resp.text[:200]}")
+                return jsonify({'success': False, 'message': f'Plex returned status {add_resp.status_code}. The item may not be available for watchlist.'})
+        except Exception as e:
+            print(f"[Media Chat Add Error] Plex watchlist: {str(e)}")
+            return jsonify({'success': False, 'error': 'Failed to add to Plex watchlist. Please try again.'})
     
     return jsonify({'success': False, 'error': 'Invalid media type'})
 
