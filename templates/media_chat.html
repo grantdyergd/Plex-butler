@@ -300,6 +300,82 @@
         .delete-btn:hover { background: #e74c3c; }
         .bulk-btn { font-size: 0.65rem; padding: 4px 10px; margin-left: 10px; vertical-align: middle; }
         
+        .rec-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            padding: 4px 0;
+        }
+        .rec-item input[type="checkbox"] {
+            margin-top: 4px;
+            accent-color: var(--accent);
+            width: 15px;
+            height: 15px;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+        .rec-item-text { flex: 1; }
+        .rec-quick-add {
+            padding: 3px 8px;
+            border-radius: 5px;
+            border: 1px solid var(--accent);
+            background: transparent;
+            color: var(--accent);
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            white-space: nowrap;
+            flex-shrink: 0;
+            margin-top: 1px;
+            transition: all 0.15s;
+        }
+        .rec-quick-add:hover { background: rgba(110,179,236,0.15); }
+        .rec-quick-add:disabled { opacity: 0.5; cursor: default; }
+        .rec-quick-add.done { border-color: var(--green); color: var(--green); background: rgba(74,222,128,0.1); }
+        .rec-quick-add.err { border-color: var(--red); color: var(--red); }
+        .rec-bulk-bar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+        }
+        .rec-bulk-btn {
+            padding: 5px 14px;
+            border-radius: 6px;
+            border: none;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            transition: all 0.15s;
+        }
+        .rec-select-all {
+            background: transparent;
+            border: 1px solid var(--border-light);
+            color: var(--muted);
+        }
+        .rec-select-all:hover { border-color: var(--accent); color: var(--accent); }
+        .rec-add-selected {
+            background: var(--accent);
+            color: var(--primary);
+        }
+        .rec-add-selected:disabled { opacity: 0.4; cursor: default; }
+        .rec-section-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .rec-section-header input[type="checkbox"] {
+            accent-color: var(--accent);
+            width: 15px;
+            height: 15px;
+            cursor: pointer;
+        }
+        
         .typing {
             display: flex;
             gap: 4px;
@@ -726,6 +802,163 @@
             addMessage('assistant', `**${success}** items ${resultLabel}${failed ? `, ${failed} failed` : ''}.`);
         }
 
+        function addRecSections(sections) {
+            if (welcome) welcome.style.display = 'none';
+            const typing = document.getElementById('typing-indicator');
+            if (typing) typing.remove();
+
+            const row = document.createElement('div');
+            row.className = 'msg-row';
+            const recId = `rec-${Date.now()}`;
+            
+            let html = `<div class="avatar bot">🎬</div><div class="msg-bubble bot" style="max-width:90%">`;
+            html += `<div style="margin-bottom:6px"><strong>🌟 Recommendations</strong> <span style="color:var(--muted);font-size:11px">(live from TMDb)</span></div>`;
+            
+            let globalIdx = 0;
+            sections.forEach((section, sIdx) => {
+                const sectionId = `${recId}-s${sIdx}`;
+                html += `<div class="rec-section-header">`;
+                html += `<input type="checkbox" onchange="toggleSection('${sectionId}', this.checked)" title="Select all in section">`;
+                html += `<strong>${escapeHtmlContent(section.label)} (${section.items.length})</strong>`;
+                html += `</div>`;
+                
+                section.items.forEach((item, iIdx) => {
+                    const itemId = `${recId}-${globalIdx}`;
+                    const dateStr = item.date ? `📅 ${item.date}` : '';
+                    const ratingStr = item.rating ? `⭐ ${item.rating}` : '';
+                    const itemJson = JSON.stringify({title: item.title, year: item.year, addType: section.addType}).replace(/"/g, '&quot;');
+                    
+                    html += `<div class="rec-item" data-section="${sectionId}">`;
+                    html += `<input type="checkbox" class="rec-check" data-rec-id="${recId}" data-item-id="${itemId}" data-title="${escapeHtml(item.title)}" data-year="${item.year || ''}" data-add-type="${section.addType}" onchange="updateBulkBar('${recId}')">`;
+                    html += `<div class="rec-item-text">`;
+                    html += `<strong>${escapeHtml(item.title)}</strong> (${item.year || ''}) ${dateStr} ${ratingStr}`;
+                    if (item.overview) html += `<br><span style="color:var(--muted);font-size:11px">${escapeHtml(item.overview)}...</span>`;
+                    html += `</div>`;
+                    html += `<button class="rec-quick-add" id="qa-${itemId}" onclick="quickAddMedia('${section.addType}', '${escapeHtml(item.title).replace(/'/g, "\\'")}', ${item.year || 0}, '${itemId}')">+ Add</button>`;
+                    html += `</div>`;
+                    globalIdx++;
+                });
+            });
+            
+            html += `<div class="rec-bulk-bar" id="bulk-bar-${recId}">`;
+            html += `<button class="rec-bulk-btn rec-select-all" onclick="selectAllRec('${recId}')">Select All</button>`;
+            html += `<button class="rec-bulk-btn rec-add-selected" id="add-sel-${recId}" onclick="addSelectedRec('${recId}')" disabled>Add Selected (0)</button>`;
+            html += `</div>`;
+            
+            html += `</div>`;
+            row.innerHTML = html;
+            chatArea.appendChild(row);
+            scrollToBottom();
+        }
+
+        function toggleSection(sectionId, checked) {
+            document.querySelectorAll(`.rec-item[data-section="${sectionId}"] .rec-check`).forEach(cb => {
+                if (!cb.closest('.rec-item').querySelector('.rec-quick-add.done')) {
+                    cb.checked = checked;
+                }
+            });
+            const recId = document.querySelector(`.rec-item[data-section="${sectionId}"] .rec-check`)?.dataset.recId;
+            if (recId) updateBulkBar(recId);
+        }
+
+        function selectAllRec(recId) {
+            const checks = document.querySelectorAll(`.rec-check[data-rec-id="${recId}"]`);
+            const allChecked = Array.from(checks).filter(c => !c.closest('.rec-item').querySelector('.rec-quick-add.done')).every(c => c.checked);
+            checks.forEach(cb => {
+                if (!cb.closest('.rec-item').querySelector('.rec-quick-add.done')) {
+                    cb.checked = !allChecked;
+                }
+            });
+            updateBulkBar(recId);
+        }
+
+        function updateBulkBar(recId) {
+            const checks = document.querySelectorAll(`.rec-check[data-rec-id="${recId}"]:checked`);
+            const count = Array.from(checks).filter(c => !c.closest('.rec-item').querySelector('.rec-quick-add.done')).length;
+            const btn = document.getElementById(`add-sel-${recId}`);
+            if (btn) {
+                btn.disabled = count === 0;
+                btn.textContent = `Add Selected (${count})`;
+            }
+        }
+
+        async function quickAddMedia(addType, title, year, itemId) {
+            const btn = document.getElementById(`qa-${itemId}`);
+            if (!btn || btn.classList.contains('done')) return;
+            
+            btn.disabled = true;
+            btn.textContent = '...';
+            
+            try {
+                const searchResp = await fetch('/api/media-chat/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: `Add ${title} to ${addType === 'show' ? 'Sonarr' : 'Radarr'}` })
+                });
+                const searchResult = await searchResp.json();
+                
+                if (searchResult.cards && searchResult.cards.results && searchResult.cards.results.length > 0) {
+                    const item = searchResult.cards.results[0];
+                    const profileId = searchResult.cards.profiles && searchResult.cards.profiles.length > 0 ? searchResult.cards.profiles[0].id : null;
+                    
+                    const addResp = await fetch('/api/media-chat/add', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ type: addType, item: item, profileId: profileId })
+                    });
+                    const addResult = await addResp.json();
+                    
+                    if (addResult.success || addResult.already_exists) {
+                        btn.textContent = '✓ Added';
+                        btn.classList.add('done');
+                        const cb = btn.closest('.rec-item')?.querySelector('.rec-check');
+                        if (cb) { cb.checked = false; cb.disabled = true; }
+                    } else {
+                        btn.textContent = 'Error';
+                        btn.classList.add('err');
+                        addMessage('assistant', addResult.message || 'Failed to add');
+                        setTimeout(() => { btn.textContent = '+ Add'; btn.classList.remove('err'); btn.disabled = false; }, 3000);
+                    }
+                } else {
+                    btn.textContent = 'Not found';
+                    btn.classList.add('err');
+                    setTimeout(() => { btn.textContent = '+ Add'; btn.classList.remove('err'); btn.disabled = false; }, 3000);
+                }
+            } catch (err) {
+                btn.textContent = 'Error';
+                btn.classList.add('err');
+                setTimeout(() => { btn.textContent = '+ Add'; btn.classList.remove('err'); btn.disabled = false; }, 3000);
+            }
+        }
+
+        async function addSelectedRec(recId) {
+            const checks = Array.from(document.querySelectorAll(`.rec-check[data-rec-id="${recId}"]:checked`))
+                .filter(c => !c.closest('.rec-item').querySelector('.rec-quick-add.done'));
+            
+            if (checks.length === 0) return;
+            
+            const bulkBtn = document.getElementById(`add-sel-${recId}`);
+            if (bulkBtn) { bulkBtn.disabled = true; bulkBtn.textContent = `Adding 0/${checks.length}...`; }
+            
+            let done = 0;
+            for (const cb of checks) {
+                const title = cb.dataset.title;
+                const year = parseInt(cb.dataset.year) || 0;
+                const addType = cb.dataset.addType;
+                const itemId = cb.dataset.itemId;
+                
+                await quickAddMedia(addType, title, year, itemId);
+                done++;
+                if (bulkBtn) bulkBtn.textContent = `Adding ${done}/${checks.length}...`;
+            }
+            
+            if (bulkBtn) {
+                bulkBtn.textContent = `Done (${done} added)`;
+                bulkBtn.classList.add('done');
+            }
+            updateBulkBar(recId);
+        }
+
         async function sendMessage() {
             const text = chatInput.value.trim();
             if (!text || loading) return;
@@ -759,6 +992,10 @@
                         results: result.cards.results,
                         profiles: result.cards.profiles
                     });
+                }
+
+                if (result.rec_sections) {
+                    addRecSections(result.rec_sections);
                 }
 
                 if (result.data) {

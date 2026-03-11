@@ -3037,53 +3037,55 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                     except Exception as e:
                         print(f"[TMDb Upcoming Movie Error] {e}")
                 
-                lines = [f"🌟 **Recommendations** (live from TMDb, filtered against your library):"]
+                sections = []
                 
                 if tmdb_anticipated_shows:
-                    lines.append(f"\n🔥 **Most Anticipated TV Shows ({len(tmdb_anticipated_shows[:10])})**:")
-                    for s in tmdb_anticipated_shows[:10]:
-                        air = f"📅 {s['air_date']}" if s.get('air_date') else "TBA"
-                        rating_str = f"⭐ {s['rating']}" if s['rating'] else ""
-                        lines.append(f"➕ **{s['title']}** ({s['year']}) {air} {rating_str} — {s['overview']}...")
+                    sections.append({
+                        'label': '🔥 Most Anticipated TV Shows',
+                        'addType': 'show',
+                        'items': [{'title': s['title'], 'year': s['year'], 'rating': s['rating'], 'date': s.get('air_date', ''), 'overview': s['overview']} for s in tmdb_anticipated_shows[:10]]
+                    })
                 
                 if tmdb_anticipated_movies:
-                    lines.append(f"\n🔥 **Most Anticipated Movies ({len(tmdb_anticipated_movies[:10])})**:")
-                    for m in tmdb_anticipated_movies[:10]:
-                        release = f"📅 {m['release_date']}" if m.get('release_date') else "TBA"
-                        rating_str = f"⭐ {m['rating']}" if m['rating'] else ""
-                        lines.append(f"➕ **{m['title']}** ({m['year']}) {release} {rating_str} — {m['overview']}...")
+                    sections.append({
+                        'label': '🔥 Most Anticipated Movies',
+                        'addType': 'movie',
+                        'items': [{'title': m['title'], 'year': m['year'], 'rating': m['rating'], 'date': m.get('release_date', ''), 'overview': m['overview']} for m in tmdb_anticipated_movies[:10]]
+                    })
                 
                 if tmdb_trending_shows:
-                    lines.append(f"\n📺 **Trending TV Right Now ({len(tmdb_trending_shows[:8])})**:")
-                    for s in tmdb_trending_shows[:8]:
-                        rating_str = f"⭐ {s['rating']}" if s['rating'] else ""
-                        lines.append(f"➕ **{s['title']}** ({s['year']}) {rating_str} — {s['overview']}...")
+                    sections.append({
+                        'label': '📺 Trending TV Right Now',
+                        'addType': 'show',
+                        'items': [{'title': s['title'], 'year': s['year'], 'rating': s['rating'], 'date': s.get('air_date', ''), 'overview': s['overview']} for s in tmdb_trending_shows[:8]]
+                    })
                 
                 if tmdb_trending_movies:
-                    lines.append(f"\n🎬 **Trending Movies Right Now ({len(tmdb_trending_movies[:8])})**:")
-                    for m in tmdb_trending_movies[:8]:
-                        rating_str = f"⭐ {m['rating']}" if m['rating'] else ""
-                        lines.append(f"➕ **{m['title']}** ({m['year']}) {rating_str} — {m['overview']}...")
+                    sections.append({
+                        'label': '🎬 Trending Movies Right Now',
+                        'addType': 'movie',
+                        'items': [{'title': m['title'], 'year': m['year'], 'rating': m['rating'], 'date': m.get('release_date', ''), 'overview': m['overview']} for m in tmdb_trending_movies[:8]]
+                    })
                 
                 if tmdb_upcoming_movies:
-                    upcoming_filtered = [m for m in tmdb_upcoming_movies if m['title'] not in seen_movie_names or m['title'] in {um['title'] for um in tmdb_upcoming_movies}]
-                    new_upcoming = [m for m in upcoming_filtered if m['title'] not in {am['title'] for am in tmdb_anticipated_movies} and m['title'] not in {tm['title'] for tm in tmdb_trending_movies}]
+                    anticipated_titles = {am['title'] for am in tmdb_anticipated_movies}
+                    trending_titles = {tm['title'] for tm in tmdb_trending_movies}
+                    new_upcoming = [m for m in tmdb_upcoming_movies if m['title'] not in anticipated_titles and m['title'] not in trending_titles]
                     if new_upcoming:
-                        lines.append(f"\n🗓️ **More Upcoming Movies ({len(new_upcoming[:6])})**:")
-                        for m in new_upcoming[:6]:
-                            release = f"📅 {m['release_date']}" if m.get('release_date') else ""
-                            lines.append(f"➕ **{m['title']}** ({m['year']}) {release} — {m['overview']}...")
+                        sections.append({
+                            'label': '🗓️ More Upcoming Movies',
+                            'addType': 'movie',
+                            'items': [{'title': m['title'], 'year': m['year'], 'rating': m['rating'], 'date': m.get('release_date', ''), 'overview': m['overview']} for m in new_upcoming[:6]]
+                        })
                 
-                total_recs = len(tmdb_anticipated_shows[:10]) + len(tmdb_anticipated_movies[:10]) + len(tmdb_trending_shows[:8]) + len(tmdb_trending_movies[:8])
-                if total_recs == 0:
+                total_items = sum(len(s['items']) for s in sections)
+                if total_items == 0:
                     if not tmdb_key:
-                        lines.append("\n⚠️ TMDb API key not configured. Add TMDB_API_KEY to get real trending data.")
+                        return jsonify({'reply': reply, 'data': '⚠️ TMDb API key not configured. Add TMDB_API_KEY to get real trending data.'})
                     else:
-                        lines.append("\nNo new recommendations found — your library is very comprehensive!")
+                        return jsonify({'reply': reply, 'data': 'No new recommendations found — your library is very comprehensive!'})
                 
-                lines.append(f"\n*Say \"Add [title] to Sonarr\" or \"Add [title] to Radarr\" to add any of these.*")
-                
-                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+                return jsonify({'reply': reply, 'rec_sections': sections})
             except Exception as e:
                 print(f"[Recommend Error] {str(e)}")
                 import traceback
