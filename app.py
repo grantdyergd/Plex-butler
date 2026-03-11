@@ -2952,6 +2952,9 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                 today = __import__('datetime').datetime.now().strftime('%Y-%m-%d')
                 one_year = (__import__('datetime').datetime.now() + __import__('datetime').timedelta(days=365)).strftime('%Y-%m-%d')
                 
+                tv_genres = {10759:'Action & Adventure',16:'Animation',35:'Comedy',80:'Crime',99:'Documentary',18:'Drama',10751:'Family',10762:'Kids',9648:'Mystery',10763:'News',10764:'Reality',10765:'Sci-Fi & Fantasy',10766:'Soap',10767:'Talk',10768:'War & Politics',37:'Western'}
+                movie_genres = {28:'Action',12:'Adventure',16:'Animation',35:'Comedy',80:'Crime',99:'Documentary',18:'Drama',10751:'Family',14:'Fantasy',36:'History',27:'Horror',10402:'Music',9648:'Mystery',10749:'Romance',878:'Sci-Fi',10770:'TV Movie',53:'Thriller',10752:'War',37:'Western'}
+                
                 def add_show(item, target_list):
                     name = item.get('name', '')
                     if not name or name in seen_show_names or is_in_library(name, existing_shows):
@@ -2965,7 +2968,9 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                     popularity = item.get('popularity', 0)
                     overview = (item.get('overview', '') or '')[:120]
                     first_air = item.get('first_air_date', '')
-                    target_list.append({'title': name, 'year': year, 'rating': round(rating, 1), 'popularity': round(popularity, 1), 'overview': overview, 'air_date': first_air})
+                    genre_names = [tv_genres.get(gid, '') for gid in item.get('genre_ids', [])]
+                    genre_str = ', '.join([g for g in genre_names if g][:3])
+                    target_list.append({'title': name, 'year': year, 'rating': round(rating, 1), 'popularity': round(popularity, 1), 'overview': overview, 'air_date': first_air, 'genres': genre_str, 'tmdb_id': item.get('id'), 'media_type': 'tv'})
                 
                 def add_movie(item, target_list):
                     title = item.get('title', '')
@@ -2980,7 +2985,9 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                     popularity = item.get('popularity', 0)
                     overview = (item.get('overview', '') or '')[:120]
                     release_date = item.get('release_date', '')
-                    target_list.append({'title': title, 'year': year, 'rating': round(rating, 1), 'popularity': round(popularity, 1), 'overview': overview, 'release_date': release_date})
+                    genre_names = [movie_genres.get(gid, '') for gid in item.get('genre_ids', [])]
+                    genre_str = ', '.join([g for g in genre_names if g][:3])
+                    target_list.append({'title': title, 'year': year, 'rating': round(rating, 1), 'popularity': round(popularity, 1), 'overview': overview, 'release_date': release_date, 'genres': genre_str, 'tmdb_id': item.get('id'), 'media_type': 'movie'})
                 
                 if tmdb_key:
                     try:
@@ -3037,34 +3044,92 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                     except Exception as e:
                         print(f"[TMDb Upcoming Movie Error] {e}")
                 
+                def enrich_with_cast(items, max_items=10):
+                    from concurrent.futures import ThreadPoolExecutor
+                    display_items = items[:max_items]
+                    
+                    def fetch_credits(item):
+                        tmdb_id = item.get('tmdb_id')
+                        media_type = item.get('media_type', 'movie')
+                        if not tmdb_id or not tmdb_key:
+                            return
+                        try:
+                            url = f"{tmdb_base}/{media_type}/{tmdb_id}"
+                            resp = requests.get(url, params={'api_key': tmdb_key, 'language': 'en-US', 'append_to_response': 'credits'}, timeout=8).json()
+                            cast = resp.get('credits', {}).get('cast', [])
+                            top_cast = [c.get('name', '') for c in cast[:4] if c.get('name')]
+                            item['cast'] = ', '.join(top_cast)
+                            if media_type == 'tv':
+                                networks = resp.get('networks', [])
+                                if networks:
+                                    item['network'] = networks[0].get('name', '')
+                                item['status'] = resp.get('status', '')
+                            else:
+                                runtime = resp.get('runtime')
+                                if runtime:
+                                    item['runtime'] = f"{runtime}m"
+                        except Exception:
+                            pass
+                    
+                    try:
+                        with ThreadPoolExecutor(max_workers=5) as executor:
+                            executor.map(fetch_credits, display_items)
+                    except Exception:
+                        pass
+                    
+                    return display_items
+                
+                display_anticipated_shows = enrich_with_cast(tmdb_anticipated_shows, 10)
+                display_anticipated_movies = enrich_with_cast(tmdb_anticipated_movies, 10)
+                display_trending_shows = enrich_with_cast(tmdb_trending_shows, 8)
+                display_trending_movies = enrich_with_cast(tmdb_trending_movies, 8)
+                
+                def build_item(item, date_key='air_date'):
+                    result = {
+                        'title': item['title'],
+                        'year': item['year'],
+                        'rating': item['rating'],
+                        'date': item.get(date_key, ''),
+                        'overview': item['overview'],
+                        'genres': item.get('genres', ''),
+                        'cast': item.get('cast', ''),
+                    }
+                    if item.get('network'):
+                        result['network'] = item['network']
+                    if item.get('status'):
+                        result['status'] = item['status']
+                    if item.get('runtime'):
+                        result['runtime'] = item['runtime']
+                    return result
+                
                 sections = []
                 
-                if tmdb_anticipated_shows:
+                if display_anticipated_shows:
                     sections.append({
                         'label': '🔥 Most Anticipated TV Shows',
                         'addType': 'show',
-                        'items': [{'title': s['title'], 'year': s['year'], 'rating': s['rating'], 'date': s.get('air_date', ''), 'overview': s['overview']} for s in tmdb_anticipated_shows[:10]]
+                        'items': [build_item(s, 'air_date') for s in display_anticipated_shows]
                     })
                 
-                if tmdb_anticipated_movies:
+                if display_anticipated_movies:
                     sections.append({
                         'label': '🔥 Most Anticipated Movies',
                         'addType': 'movie',
-                        'items': [{'title': m['title'], 'year': m['year'], 'rating': m['rating'], 'date': m.get('release_date', ''), 'overview': m['overview']} for m in tmdb_anticipated_movies[:10]]
+                        'items': [build_item(m, 'release_date') for m in display_anticipated_movies]
                     })
                 
-                if tmdb_trending_shows:
+                if display_trending_shows:
                     sections.append({
                         'label': '📺 Trending TV Right Now',
                         'addType': 'show',
-                        'items': [{'title': s['title'], 'year': s['year'], 'rating': s['rating'], 'date': s.get('air_date', ''), 'overview': s['overview']} for s in tmdb_trending_shows[:8]]
+                        'items': [build_item(s, 'air_date') for s in display_trending_shows]
                     })
                 
-                if tmdb_trending_movies:
+                if display_trending_movies:
                     sections.append({
                         'label': '🎬 Trending Movies Right Now',
                         'addType': 'movie',
-                        'items': [{'title': m['title'], 'year': m['year'], 'rating': m['rating'], 'date': m.get('release_date', ''), 'overview': m['overview']} for m in tmdb_trending_movies[:8]]
+                        'items': [build_item(m, 'release_date') for m in display_trending_movies]
                     })
                 
                 if tmdb_upcoming_movies:
@@ -3072,10 +3137,11 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                     trending_titles = {tm['title'] for tm in tmdb_trending_movies}
                     new_upcoming = [m for m in tmdb_upcoming_movies if m['title'] not in anticipated_titles and m['title'] not in trending_titles]
                     if new_upcoming:
+                        display_upcoming = enrich_with_cast(new_upcoming, 6)
                         sections.append({
                             'label': '🗓️ More Upcoming Movies',
                             'addType': 'movie',
-                            'items': [{'title': m['title'], 'year': m['year'], 'rating': m['rating'], 'date': m.get('release_date', ''), 'overview': m['overview']} for m in new_upcoming[:6]]
+                            'items': [build_item(m, 'release_date') for m in display_upcoming]
                         })
                 
                 total_items = sum(len(s['items']) for s in sections)

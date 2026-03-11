@@ -832,6 +832,13 @@
                     html += `<input type="checkbox" class="rec-check" data-rec-id="${recId}" data-item-id="${itemId}" data-title="${escapeHtml(item.title)}" data-year="${item.year || ''}" data-add-type="${section.addType}" onchange="updateBulkBar('${recId}')">`;
                     html += `<div class="rec-item-text">`;
                     html += `<strong>${escapeHtml(item.title)}</strong> (${item.year || ''}) ${dateStr} ${ratingStr}`;
+                    let metaParts = [];
+                    if (item.genres) metaParts.push(item.genres);
+                    if (item.network) metaParts.push(item.network);
+                    if (item.runtime) metaParts.push(item.runtime);
+                    if (item.status && item.status !== 'Returning Series') metaParts.push(item.status);
+                    if (metaParts.length) html += `<br><span style="color:var(--accent);font-size:11px">${escapeHtml(metaParts.join(' · '))}</span>`;
+                    if (item.cast) html += `<br><span style="color:var(--muted);font-size:11px">🎭 ${escapeHtml(item.cast)}</span>`;
                     if (item.overview) html += `<br><span style="color:var(--muted);font-size:11px">${escapeHtml(item.overview)}...</span>`;
                     html += `</div>`;
                     html += `<button class="rec-quick-add" id="qa-${itemId}" onclick="quickAddMedia('${section.addType}', '${escapeHtml(item.title).replace(/'/g, "\\'")}', ${item.year || 0}, '${itemId}')">+ Add</button>`;
