@@ -2074,31 +2074,47 @@ def media_chat_send():
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": """You control Sonarr (TV shows), Radarr (movies), Plex, and Ombi (requests). Return ONLY valid JSON, no markdown fences:
-{"intent":"<intent>","query":"title or search term","reply":"one sentence saying what you are doing"}
+{"intent":"<intent>","query":"title or search term","reply":"one sentence saying what you are doing","filter":{}}
+
+The "filter" field is optional. Use it for bulk/conditional operations:
+- {"before_year": 2025} — items released before 2025
+- {"after_year": 2020} — items released after 2020
+- {"type": "movie"} or {"type": "show"} — filter by media type
+- {"status": "ended"} — for ended/canceled shows
+- {"has_file": false} — items without downloaded files
+- Combine filters: {"before_year": 2020, "type": "movie"}
+- {"all": true} — user wants ALL items (e.g. "delete everything", "remove all")
 
 Intent guide:
 - search_show: user wants to find/add a NEW TV show (search Sonarr's online database)
 - search_movie: user wants to find/add a NEW movie (search Radarr's online database)
 - check_lib_show: user wants to check if a TV show is ALREADY in their library
 - check_lib_movie: user wants to check if a movie is ALREADY in their library
-- delete_show: user wants to remove/delete a TV show FROM their library
-- delete_movie: user wants to remove/delete a movie FROM their library
+- delete_show: user wants to remove/delete TV show(s) FROM their library. Use filter for bulk (e.g. "delete all ended shows")
+- delete_movie: user wants to remove/delete movie(s) FROM their library. Use filter for bulk (e.g. "delete all movies before 2010")
 - queue_sonarr: user wants to see what's downloading in Sonarr
 - queue_radarr: user wants to see what's downloading in Radarr
 - plex_library: user wants to see their Plex libraries
 - plex_watchlist_add: user wants to add a movie or show to their Plex watchlist
 - plex_watchlist_show: user wants to see what's on their Plex watchlist
-- plex_watchlist_remove: user wants to remove something from their Plex watchlist
+- plex_watchlist_remove: user wants to remove item(s) from their Plex watchlist. Use query for specific title, or filter for bulk (e.g. "remove all movies before 2020 from watchlist")
 - plex_recently_added: user wants to see what was recently added to Plex (what's new)
 - missing_episodes: user wants to check for missing/wanted episodes (optionally for a specific show)
 - disk_space: user wants to check storage, disk space, or library size
 - ombi_requests: user wants to see pending/recent media requests from Ombi
 - calendar: user wants to see upcoming episodes or movie releases this week
-- chitchat: general conversation, greetings, or questions you can answer directly"""},
+- chitchat: general conversation, greetings, or questions you can answer directly
+
+IMPORTANT: Understand complex requests. Examples:
+- "Delete everything on the watchlist before 2025" → intent: plex_watchlist_remove, filter: {"before_year": 2025}
+- "Remove all movies from my watchlist" → intent: plex_watchlist_remove, filter: {"type": "movie"}
+- "Delete all ended shows from Sonarr" → intent: delete_show, filter: {"status": "ended"}
+- "Remove The Bear from my watchlist" → intent: plex_watchlist_remove, query: "The Bear"
+"""},
                 {"role": "user", "content": user_message}
             ],
             temperature=0.1,
-            max_tokens=200
+            max_tokens=300
         )
         
         raw = intent_response.choices[0].message.content.strip()
@@ -2112,6 +2128,7 @@ Intent guide:
         intent = parsed.get('intent', 'chitchat')
         query = parsed.get('query', '')
         reply = parsed.get('reply', '')
+        filters = parsed.get('filter', {})
         
         if intent == 'search_show':
             if not sonarr_url or not sonarr_key:
@@ -2417,10 +2434,25 @@ Intent guide:
                 return jsonify({'reply': 'Sonarr is not configured.'})
             
             all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
-            matches = [s for s in all_series if query.lower() in s.get('title', '').lower()]
+            
+            if filters:
+                matches = list(all_series) if isinstance(all_series, list) else []
+                if filters.get('before_year'):
+                    matches = [s for s in matches if s.get('year', 9999) < filters['before_year']]
+                if filters.get('after_year'):
+                    matches = [s for s in matches if s.get('year', 0) > filters['after_year']]
+                if filters.get('status') == 'ended':
+                    matches = [s for s in matches if s.get('status', '').lower() in ('ended', 'deleted')]
+                if filters.get('has_file') is False:
+                    matches = [s for s in matches if s.get('statistics', {}).get('episodeFileCount', 0) == 0]
+                if query:
+                    matches = [s for s in matches if query.lower() in s.get('title', '').lower()]
+            else:
+                matches = [s for s in all_series if query.lower() in s.get('title', '').lower()]
             
             if not matches:
-                return jsonify({'reply': f'**{query}** isn\'t in your Sonarr library, so there\'s nothing to delete.'})
+                filter_desc = query or 'your filters'
+                return jsonify({'reply': f'No shows matching {filter_desc} found in your Sonarr library.'})
             
             delete_items = []
             for s in matches:
@@ -2454,10 +2486,23 @@ Intent guide:
                 return jsonify({'reply': 'Radarr is not configured.'})
             
             all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json()
-            matches = [m for m in all_movies if query.lower() in m.get('title', '').lower()]
+            
+            if filters:
+                matches = list(all_movies) if isinstance(all_movies, list) else []
+                if filters.get('before_year'):
+                    matches = [m for m in matches if m.get('year', 9999) < filters['before_year']]
+                if filters.get('after_year'):
+                    matches = [m for m in matches if m.get('year', 0) > filters['after_year']]
+                if filters.get('has_file') is False:
+                    matches = [m for m in matches if not m.get('hasFile')]
+                if query:
+                    matches = [m for m in matches if query.lower() in m.get('title', '').lower()]
+            else:
+                matches = [m for m in all_movies if query.lower() in m.get('title', '').lower()]
             
             if not matches:
-                return jsonify({'reply': f'**{query}** isn\'t in your Radarr library, so there\'s nothing to delete.'})
+                filter_desc = query or 'your filters'
+                return jsonify({'reply': f'No movies matching {filter_desc} found in your Radarr library.'})
             
             delete_items = []
             for m in matches:
@@ -2524,13 +2569,31 @@ Intent guide:
                     if offset >= total_size:
                         break
                 
-                matches = [i for i in all_items if query.lower() in i.get('title', '').lower()]
+                if filters:
+                    matches = list(all_items)
+                    if filters.get('before_year'):
+                        matches = [i for i in matches if i.get('year', 9999) < filters['before_year']]
+                    if filters.get('after_year'):
+                        matches = [i for i in matches if i.get('year', 0) > filters['after_year']]
+                    if filters.get('type'):
+                        type_map = {'movie': 'movie', 'show': 'show', 'tv': 'show'}
+                        target_type = type_map.get(filters['type'].lower(), filters['type'].lower())
+                        matches = [i for i in matches if i.get('type', '').lower() == target_type]
+                    if filters.get('all'):
+                        pass
+                    if query and not filters.get('all'):
+                        matches = [i for i in matches if query.lower() in i.get('title', '').lower()]
+                elif query:
+                    matches = [i for i in all_items if query.lower() in i.get('title', '').lower()]
+                else:
+                    return jsonify({'reply': 'Please specify what to remove from your watchlist — a title or a filter like "before 2020".'})
                 
                 if not matches:
-                    return jsonify({'reply': f'**{query}** isn\'t on your Plex watchlist.'})
+                    filter_desc = query or 'your filters'
+                    return jsonify({'reply': f'No watchlist items matching {filter_desc} found.'})
                 
                 remove_items = []
-                for item in matches[:8]:
+                for item in matches:
                     thumb = item.get('thumb', '')
                     poster_url = thumb if thumb and thumb.startswith('http') else None
                     remove_items.append({

@@ -298,6 +298,7 @@
         .add-btn.err { background: var(--red); color: white; }
         .delete-btn { background: #c0392b; }
         .delete-btn:hover { background: #e74c3c; }
+        .bulk-btn { font-size: 0.65rem; padding: 4px 10px; margin-left: 10px; vertical-align: middle; }
         
         .typing {
             display: flex;
@@ -525,7 +526,12 @@
             const defaultProfile = profiles.length > 0 ? profiles[0].id : null;
             selectedProfiles[containerId] = defaultProfile;
 
-            let html = `<div class="cards-header">${cfg.icon} — ${results.length} results</div>`;
+            let headerExtra = '';
+            if (isDestructive && results.length > 1) {
+                const allLabel = isRemove ? 'Remove All' : 'Delete All';
+                headerExtra = ` <button class="add-btn delete-btn bulk-btn" id="bulk-${containerId}" onclick="bulkDelete('${mediaType}', '${containerId}', ${results.length})">${allLabel} (${results.length})</button>`;
+            }
+            let html = `<div class="cards-header">${cfg.icon} — ${results.length} results${headerExtra}</div>`;
             
             if (profiles.length > 0) {
                 html += `<div class="profiles-row">`;
@@ -552,9 +558,11 @@
                 const meta = metaParts.filter(Boolean).join(' &middot; ');
 
                 const btnClass = isDestructive ? 'add-btn delete-btn' : 'add-btn';
+                const itemJson = JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;');
                 const action = isDestructive
-                    ? `deleteMedia('${mediaType}', ${JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;')}, '${containerId}', ${idx})`
-                    : `addMedia('${mediaType}', ${JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;')}, '${containerId}', ${idx})`;
+                    ? `deleteMedia('${mediaType}', ${itemJson}, '${containerId}', ${idx})`
+                    : `addMedia('${mediaType}', ${itemJson}, '${containerId}', ${idx})`;
+                const payloadAttr = isDestructive ? `data-payload='${JSON.stringify({type: mediaType, item: item}).replace(/'/g, "&#39;")}'` : '';
 
                 html += `
                     <div class="media-card">
@@ -564,7 +572,7 @@
                             <div class="meta">${meta}</div>
                         </div>
                         <div class="actions">
-                            <button class="${btnClass}" id="add-${containerId}-${idx}" onclick="${action}">
+                            <button class="${btnClass}" id="add-${containerId}-${idx}" onclick="${action}" ${payloadAttr}>
                                 ${cfg.btn}
                             </button>
                         </div>
@@ -667,6 +675,54 @@
                 const originalLabel = mediaType === 'watchlist_remove' ? 'Remove' : 'Delete';
                 setTimeout(() => { btn.textContent = originalLabel; btn.classList.remove('err'); btn.disabled = false; }, 3000);
             }
+        }
+
+        async function bulkDelete(mediaType, containerId, count) {
+            const bulkBtn = document.getElementById(`bulk-${containerId}`);
+            if (!bulkBtn) return;
+            
+            const label = mediaType === 'watchlist_remove' ? 'remove' : 'delete';
+            if (!confirm(`${label.charAt(0).toUpperCase() + label.slice(1)} all ${count} items? This cannot be undone.`)) return;
+            
+            bulkBtn.disabled = true;
+            bulkBtn.textContent = `Processing...`;
+            
+            let success = 0, failed = 0;
+            for (let idx = 0; idx < count; idx++) {
+                const btn = document.getElementById(`add-${containerId}-${idx}`);
+                if (!btn || btn.classList.contains('done')) { success++; continue; }
+                
+                btn.disabled = true;
+                btn.textContent = '...';
+                
+                try {
+                    const itemData = btn.getAttribute('onclick') || btn.parentElement.parentElement.dataset.item;
+                    const response = await fetch('/api/media-chat/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: btn.dataset.payload
+                    });
+                    const result = await response.json();
+                    if (result.success) {
+                        btn.textContent = '✓';
+                        btn.classList.add('done');
+                        success++;
+                    } else {
+                        btn.textContent = '✗';
+                        btn.classList.add('err');
+                        failed++;
+                    }
+                } catch {
+                    btn.textContent = '✗';
+                    btn.classList.add('err');
+                    failed++;
+                }
+            }
+            
+            bulkBtn.textContent = `Done (${success}/${count})`;
+            bulkBtn.classList.add('done');
+            const resultLabel = mediaType === 'watchlist_remove' ? 'removed from your watchlist' : 'deleted';
+            addMessage('assistant', `**${success}** items ${resultLabel}${failed ? `, ${failed} failed` : ''}.`);
         }
 
         async function sendMessage() {
