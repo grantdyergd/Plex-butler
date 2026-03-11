@@ -2941,6 +2941,8 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                 tmdb_key = os.environ.get('TMDB_API_KEY', '')
                 tmdb_base = 'https://api.themoviedb.org/3'
                 
+                tmdb_anticipated_shows = []
+                tmdb_anticipated_movies = []
                 tmdb_trending_shows = []
                 tmdb_trending_movies = []
                 tmdb_upcoming_movies = []
@@ -2960,9 +2962,10 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                     seen_show_names.add(name)
                     year = (item.get('first_air_date', '') or '')[:4]
                     rating = item.get('vote_average', 0)
+                    popularity = item.get('popularity', 0)
                     overview = (item.get('overview', '') or '')[:120]
                     first_air = item.get('first_air_date', '')
-                    target_list.append({'title': name, 'year': year, 'rating': round(rating, 1), 'overview': overview, 'air_date': first_air})
+                    target_list.append({'title': name, 'year': year, 'rating': round(rating, 1), 'popularity': round(popularity, 1), 'overview': overview, 'air_date': first_air})
                 
                 def add_movie(item, target_list):
                     title = item.get('title', '')
@@ -2974,11 +2977,38 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                     seen_movie_names.add(title)
                     year = (item.get('release_date', '') or '')[:4]
                     rating = item.get('vote_average', 0)
+                    popularity = item.get('popularity', 0)
                     overview = (item.get('overview', '') or '')[:120]
                     release_date = item.get('release_date', '')
-                    target_list.append({'title': title, 'year': year, 'rating': round(rating, 1), 'overview': overview, 'release_date': release_date})
+                    target_list.append({'title': title, 'year': year, 'rating': round(rating, 1), 'popularity': round(popularity, 1), 'overview': overview, 'release_date': release_date})
                 
                 if tmdb_key:
+                    try:
+                        for page in [1, 2, 3]:
+                            resp = requests.get(f"{tmdb_base}/discover/tv", params={
+                                'api_key': tmdb_key, 'language': 'en-US', 'sort_by': 'popularity.desc',
+                                'first_air_date.gte': today, 'first_air_date.lte': one_year,
+                                'with_original_language': 'en', 'page': page,
+                                'vote_count.gte': 0
+                            }, timeout=10).json()
+                            for item in resp.get('results', [])[:20]:
+                                add_show(item, tmdb_anticipated_shows)
+                    except Exception as e:
+                        print(f"[TMDb Anticipated TV Error] {e}")
+                    
+                    try:
+                        for page in [1, 2, 3]:
+                            resp = requests.get(f"{tmdb_base}/discover/movie", params={
+                                'api_key': tmdb_key, 'language': 'en-US', 'sort_by': 'popularity.desc',
+                                'primary_release_date.gte': today, 'primary_release_date.lte': one_year,
+                                'with_original_language': 'en', 'page': page,
+                                'vote_count.gte': 0
+                            }, timeout=10).json()
+                            for item in resp.get('results', [])[:20]:
+                                add_movie(item, tmdb_anticipated_movies)
+                    except Exception as e:
+                        print(f"[TMDb Anticipated Movie Error] {e}")
+                    
                     try:
                         resp = requests.get(f"{tmdb_base}/trending/tv/week", params={'api_key': tmdb_key, 'language': 'en-US'}, timeout=10).json()
                         for item in resp.get('results', [])[:20]:
@@ -2994,18 +3024,6 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                         print(f"[TMDb On Air Error] {e}")
                     
                     try:
-                        for page in [1, 2]:
-                            resp = requests.get(f"{tmdb_base}/discover/tv", params={
-                                'api_key': tmdb_key, 'language': 'en-US', 'sort_by': 'popularity.desc',
-                                'first_air_date.gte': today, 'first_air_date.lte': one_year,
-                                'with_original_language': 'en', 'page': page
-                            }, timeout=10).json()
-                            for item in resp.get('results', [])[:20]:
-                                add_show(item, tmdb_upcoming_shows)
-                    except Exception as e:
-                        print(f"[TMDb Upcoming TV Error] {e}")
-                    
-                    try:
                         resp = requests.get(f"{tmdb_base}/trending/movie/week", params={'api_key': tmdb_key, 'language': 'en-US'}, timeout=10).json()
                         for item in resp.get('results', [])[:20]:
                             add_movie(item, tmdb_trending_movies)
@@ -3018,48 +3036,45 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                             add_movie(item, tmdb_upcoming_movies)
                     except Exception as e:
                         print(f"[TMDb Upcoming Movie Error] {e}")
-                    
-                    try:
-                        for page in [1, 2]:
-                            resp = requests.get(f"{tmdb_base}/discover/movie", params={
-                                'api_key': tmdb_key, 'language': 'en-US', 'sort_by': 'popularity.desc',
-                                'primary_release_date.gte': today, 'primary_release_date.lte': one_year,
-                                'with_original_language': 'en', 'page': page
-                            }, timeout=10).json()
-                            for item in resp.get('results', [])[:20]:
-                                add_movie(item, tmdb_upcoming_movies)
-                    except Exception as e:
-                        print(f"[TMDb Discover Movie Error] {e}")
                 
-                lines = [f"🌟 **Trending & Upcoming** (live from TMDb, filtered against your library):"]
+                lines = [f"🌟 **Recommendations** (live from TMDb, filtered against your library):"]
                 
-                if tmdb_trending_shows:
-                    lines.append(f"\n📺 **Trending TV Shows ({len(tmdb_trending_shows[:10])})**:")
-                    for s in tmdb_trending_shows[:10]:
-                        rating_str = f"⭐ {s['rating']}" if s['rating'] else ""
-                        lines.append(f"➕ **{s['title']}** ({s['year']}) {rating_str} — {s['overview']}...")
-                
-                if tmdb_upcoming_shows:
-                    lines.append(f"\n🗓️ **Upcoming New TV Shows ({len(tmdb_upcoming_shows[:10])})**:")
-                    for s in tmdb_upcoming_shows[:10]:
-                        air = f"📅 {s['air_date']}" if s.get('air_date') else ""
+                if tmdb_anticipated_shows:
+                    lines.append(f"\n🔥 **Most Anticipated TV Shows ({len(tmdb_anticipated_shows[:10])})**:")
+                    for s in tmdb_anticipated_shows[:10]:
+                        air = f"📅 {s['air_date']}" if s.get('air_date') else "TBA"
                         rating_str = f"⭐ {s['rating']}" if s['rating'] else ""
                         lines.append(f"➕ **{s['title']}** ({s['year']}) {air} {rating_str} — {s['overview']}...")
                 
+                if tmdb_anticipated_movies:
+                    lines.append(f"\n🔥 **Most Anticipated Movies ({len(tmdb_anticipated_movies[:10])})**:")
+                    for m in tmdb_anticipated_movies[:10]:
+                        release = f"📅 {m['release_date']}" if m.get('release_date') else "TBA"
+                        rating_str = f"⭐ {m['rating']}" if m['rating'] else ""
+                        lines.append(f"➕ **{m['title']}** ({m['year']}) {release} {rating_str} — {m['overview']}...")
+                
+                if tmdb_trending_shows:
+                    lines.append(f"\n📺 **Trending TV Right Now ({len(tmdb_trending_shows[:8])})**:")
+                    for s in tmdb_trending_shows[:8]:
+                        rating_str = f"⭐ {s['rating']}" if s['rating'] else ""
+                        lines.append(f"➕ **{s['title']}** ({s['year']}) {rating_str} — {s['overview']}...")
+                
                 if tmdb_trending_movies:
-                    lines.append(f"\n🎬 **Trending Movies ({len(tmdb_trending_movies[:10])})**:")
-                    for m in tmdb_trending_movies[:10]:
+                    lines.append(f"\n🎬 **Trending Movies Right Now ({len(tmdb_trending_movies[:8])})**:")
+                    for m in tmdb_trending_movies[:8]:
                         rating_str = f"⭐ {m['rating']}" if m['rating'] else ""
                         lines.append(f"➕ **{m['title']}** ({m['year']}) {rating_str} — {m['overview']}...")
                 
                 if tmdb_upcoming_movies:
-                    lines.append(f"\n🗓️ **Upcoming Movies ({len(tmdb_upcoming_movies[:10])})**:")
-                    for m in tmdb_upcoming_movies[:10]:
-                        release = f"📅 {m['release_date']}" if m.get('release_date') else ""
-                        rating_str = f"⭐ {m['rating']}" if m['rating'] else ""
-                        lines.append(f"➕ **{m['title']}** ({m['year']}) {release} {rating_str} — {m['overview']}...")
+                    upcoming_filtered = [m for m in tmdb_upcoming_movies if m['title'] not in seen_movie_names or m['title'] in {um['title'] for um in tmdb_upcoming_movies}]
+                    new_upcoming = [m for m in upcoming_filtered if m['title'] not in {am['title'] for am in tmdb_anticipated_movies} and m['title'] not in {tm['title'] for tm in tmdb_trending_movies}]
+                    if new_upcoming:
+                        lines.append(f"\n🗓️ **More Upcoming Movies ({len(new_upcoming[:6])})**:")
+                        for m in new_upcoming[:6]:
+                            release = f"📅 {m['release_date']}" if m.get('release_date') else ""
+                            lines.append(f"➕ **{m['title']}** ({m['year']}) {release} — {m['overview']}...")
                 
-                total_recs = len(tmdb_trending_shows[:10]) + len(tmdb_upcoming_shows[:10]) + len(tmdb_trending_movies[:10]) + len(tmdb_upcoming_movies[:10])
+                total_recs = len(tmdb_anticipated_shows[:10]) + len(tmdb_anticipated_movies[:10]) + len(tmdb_trending_shows[:8]) + len(tmdb_trending_movies[:8])
                 if total_recs == 0:
                     if not tmdb_key:
                         lines.append("\n⚠️ TMDb API key not configured. Add TMDB_API_KEY to get real trending data.")
