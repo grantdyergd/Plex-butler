@@ -2103,6 +2103,7 @@ Intent guide:
 - disk_space: user wants to check storage, disk space, or library size
 - ombi_requests: user wants to see pending/recent media requests from Ombi
 - calendar: user wants to see upcoming episodes or movie releases this week
+- recommend: user wants recommendations for popular/trending/upcoming shows or movies. Use query for specifics like "comedy", "sci-fi", "upcoming movies", etc.
 - chitchat: general conversation, greetings, or questions you can answer directly
 
 IMPORTANT: Understand complex requests. Examples:
@@ -2903,6 +2904,88 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
             except Exception as e:
                 print(f"[Calendar Error] {str(e)}")
                 return jsonify({'reply': 'Could not fetch calendar data.'})
+        
+        elif intent == 'recommend':
+            try:
+                existing_shows = set()
+                existing_movies = set()
+                
+                if sonarr_url and sonarr_key:
+                    try:
+                        all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=10).json()
+                        existing_shows = {s.get('title', '').lower() for s in all_series}
+                    except Exception:
+                        pass
+                
+                if radarr_url and radarr_key:
+                    try:
+                        all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=10).json()
+                        existing_movies = {m.get('title', '').lower() for m in all_movies}
+                    except Exception:
+                        pass
+                
+                library_context = ""
+                if existing_shows:
+                    sample_shows = list(existing_shows)[:20]
+                    library_context += f"\nUser's current TV shows (sample): {', '.join(sample_shows)}"
+                if existing_movies:
+                    sample_movies = list(existing_movies)[:20]
+                    library_context += f"\nUser's current movies (sample): {', '.join(sample_movies)}"
+                
+                rec_response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": f"""You are a media recommendation expert. The current date is {__import__('datetime').datetime.now().strftime('%B %Y')}.
+
+Recommend popular, trending, critically acclaimed, or upcoming TV shows and movies. Focus on what's currently hot and generating buzz.
+{library_context}
+
+Return ONLY valid JSON, no markdown fences:
+{{"shows": [{{"title": "Show Name", "year": 2025, "reason": "Brief reason"}}], "movies": [{{"title": "Movie Name", "year": 2025, "reason": "Brief reason"}}]}}
+
+Provide 5-8 shows and 5-8 movies. Prioritize things NOT already in the user's library. Include a mix of currently airing, recently released, and highly anticipated upcoming titles."""},
+                        {"role": "user", "content": query or "What's popular and trending right now? Give me your best recommendations for TV shows and movies."}
+                    ],
+                    temperature=0.7,
+                    max_tokens=800
+                )
+                
+                rec_raw = rec_response.choices[0].message.content.strip()
+                rec_raw = rec_raw.replace('```json', '').replace('```', '').strip()
+                
+                try:
+                    recs = json.loads(rec_raw)
+                except json.JSONDecodeError:
+                    return jsonify({'reply': rec_raw})
+                
+                lines = [f"🌟 **Recommendations**:"]
+                
+                rec_shows = recs.get('shows', [])
+                if rec_shows:
+                    lines.append(f"\n📺 **TV Shows ({len(rec_shows)})**:")
+                    for s in rec_shows:
+                        title = s.get('title', '')
+                        year = s.get('year', '')
+                        reason = s.get('reason', '')
+                        in_lib = "✅ In library" if title.lower() in existing_shows else "➕ Not in library"
+                        lines.append(f"**{title}** ({year}) — {reason} [{in_lib}]")
+                
+                rec_movies = recs.get('movies', [])
+                if rec_movies:
+                    lines.append(f"\n🎬 **Movies ({len(rec_movies)})**:")
+                    for m in rec_movies:
+                        title = m.get('title', '')
+                        year = m.get('year', '')
+                        reason = m.get('reason', '')
+                        in_lib = "✅ In library" if title.lower() in existing_movies else "➕ Not in library"
+                        lines.append(f"**{title}** ({year}) — {reason} [{in_lib}]")
+                
+                lines.append(f"\n*Say \"Add [title] to Sonarr\" or \"Add [title] to Radarr\" to add any of these.*")
+                
+                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except Exception as e:
+                print(f"[Recommend Error] {str(e)}")
+                return jsonify({'reply': 'Could not generate recommendations. Please try again.'})
         
         else:
             return jsonify({'reply': reply or raw})
