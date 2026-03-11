@@ -2913,38 +2913,78 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                 if sonarr_url and sonarr_key:
                     try:
                         all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=10).json()
-                        existing_shows = {s.get('title', '').lower() for s in all_series}
+                        existing_shows = {s.get('title', '').lower().strip() for s in all_series}
                     except Exception:
                         pass
                 
                 if radarr_url and radarr_key:
                     try:
-                        all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=10).json()
-                        existing_movies = {m.get('title', '').lower() for m in all_movies}
+                        all_movies_list = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=10).json()
+                        existing_movies = {m.get('title', '').lower().strip() for m in all_movies_list}
                     except Exception:
                         pass
                 
-                library_context = ""
-                if existing_shows:
-                    sample_shows = list(existing_shows)[:20]
-                    library_context += f"\nUser's current TV shows (sample): {', '.join(sample_shows)}"
-                if existing_movies:
-                    sample_movies = list(existing_movies)[:20]
-                    library_context += f"\nUser's current movies (sample): {', '.join(sample_movies)}"
+                def is_in_library(title, lib_set):
+                    import re as _re
+                    clean = _re.sub(r'\s*[:]\s*season\s+\d+', '', title, flags=_re.IGNORECASE).strip().lower()
+                    clean = _re.sub(r'\s*\(?\d{4}\)?$', '', clean).strip()
+                    if clean in lib_set:
+                        return True
+                    for existing in lib_set:
+                        if clean and clean in existing:
+                            return True
+                        if existing and existing in clean:
+                            return True
+                    return False
+                
+                trending_shows = []
+                trending_movies = []
+                
+                try:
+                    sonarr_upcoming = requests.get(f"{sonarr_url}/api/v3/importlist/movie" if False else f"{sonarr_url}/api/v3/series/lookup", 
+                                                    params={'apikey': sonarr_key, 'term': 'year:2025 2026'}, timeout=10).json() if sonarr_url and sonarr_key else []
+                except Exception:
+                    sonarr_upcoming = []
+                
+                try:
+                    if radarr_url and radarr_key:
+                        radarr_discover = requests.get(f"{radarr_url}/api/v3/importlist/movie", params={'apikey': radarr_key}, timeout=10).json()
+                        for m in radarr_discover[:20]:
+                            title = m.get('title', '')
+                            year = m.get('year', '')
+                            if title and not is_in_library(title, existing_movies):
+                                trending_movies.append(f"{title} ({year})")
+                except Exception:
+                    pass
+                
+                trending_context = ""
+                if trending_movies:
+                    trending_context += f"\nTrending movies from Radarr discovery: {', '.join(trending_movies[:15])}"
+                
+                full_shows_list = ', '.join(sorted(existing_shows)) if existing_shows else "none"
+                full_movies_list = ', '.join(sorted(existing_movies)) if existing_movies else "none"
                 
                 rec_response = openai_client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
                         {"role": "system", "content": f"""You are a media recommendation expert. The current date is {__import__('datetime').datetime.now().strftime('%B %Y')}.
 
-Recommend popular, trending, critically acclaimed, or upcoming TV shows and movies. Focus on what's currently hot and generating buzz.
-{library_context}
+CRITICAL RULES:
+1. ONLY recommend shows/movies the user does NOT already have. Check the full library lists below carefully.
+2. Use just the show/movie base title — NEVER include "Season X" or "S0X" in the title.
+3. Focus on brand new, upcoming, or recently announced shows and movies that are generating major buzz.
+4. Prioritize: new series premieres, highly anticipated upcoming releases, breakout hits, and trending new content.
+5. Do NOT recommend additional seasons of shows the user already has — their system handles that automatically.
+
+User's COMPLETE TV show library: {full_shows_list}
+User's COMPLETE movie library: {full_movies_list}
+{trending_context}
 
 Return ONLY valid JSON, no markdown fences:
-{{"shows": [{{"title": "Show Name", "year": 2025, "reason": "Brief reason"}}], "movies": [{{"title": "Movie Name", "year": 2025, "reason": "Brief reason"}}]}}
+{{"shows": [{{"title": "Show Name", "year": 2025, "reason": "Brief reason why this is a must-watch"}}], "movies": [{{"title": "Movie Name", "year": 2025, "reason": "Brief reason why this is a must-watch"}}]}}
 
-Provide 5-8 shows and 5-8 movies. Prioritize things NOT already in the user's library. Include a mix of currently airing, recently released, and highly anticipated upcoming titles."""},
-                        {"role": "user", "content": query or "What's popular and trending right now? Give me your best recommendations for TV shows and movies."}
+Provide 5-8 shows and 5-8 movies that are NOT in the user's library. Every recommendation must be something new they should add."""},
+                        {"role": "user", "content": query or "What are the hottest new and upcoming TV shows and movies right now? Give me brand new content I should be watching."}
                     ],
                     temperature=0.7,
                     max_tokens=800
@@ -2958,33 +2998,39 @@ Provide 5-8 shows and 5-8 movies. Prioritize things NOT already in the user's li
                 except json.JSONDecodeError:
                     return jsonify({'reply': rec_raw})
                 
-                lines = [f"🌟 **Recommendations**:"]
+                lines = [f"🌟 **New Content Recommendations** (not in your library):"]
                 
                 rec_shows = recs.get('shows', [])
-                if rec_shows:
-                    lines.append(f"\n📺 **TV Shows ({len(rec_shows)})**:")
-                    for s in rec_shows:
+                filtered_shows = [s for s in rec_shows if not is_in_library(s.get('title', ''), existing_shows)]
+                if filtered_shows:
+                    lines.append(f"\n📺 **TV Shows ({len(filtered_shows)})**:")
+                    for s in filtered_shows:
                         title = s.get('title', '')
                         year = s.get('year', '')
                         reason = s.get('reason', '')
-                        in_lib = "✅ In library" if title.lower() in existing_shows else "➕ Not in library"
-                        lines.append(f"**{title}** ({year}) — {reason} [{in_lib}]")
+                        lines.append(f"➕ **{title}** ({year}) — {reason}")
                 
                 rec_movies = recs.get('movies', [])
-                if rec_movies:
-                    lines.append(f"\n🎬 **Movies ({len(rec_movies)})**:")
-                    for m in rec_movies:
+                filtered_movies = [m for m in rec_movies if not is_in_library(m.get('title', ''), existing_movies)]
+                if filtered_movies:
+                    lines.append(f"\n🎬 **Movies ({len(filtered_movies)})**:")
+                    for m in filtered_movies:
                         title = m.get('title', '')
                         year = m.get('year', '')
                         reason = m.get('reason', '')
-                        in_lib = "✅ In library" if title.lower() in existing_movies else "➕ Not in library"
-                        lines.append(f"**{title}** ({year}) — {reason} [{in_lib}]")
+                        lines.append(f"➕ **{title}** ({year}) — {reason}")
+                
+                skipped = (len(rec_shows) - len(filtered_shows)) + (len(rec_movies) - len(filtered_movies))
+                if skipped > 0:
+                    lines.append(f"\n*({skipped} already in your library were filtered out)*")
                 
                 lines.append(f"\n*Say \"Add [title] to Sonarr\" or \"Add [title] to Radarr\" to add any of these.*")
                 
                 return jsonify({'reply': reply, 'data': '\n'.join(lines)})
             except Exception as e:
                 print(f"[Recommend Error] {str(e)}")
+                import traceback
+                traceback.print_exc()
                 return jsonify({'reply': 'Could not generate recommendations. Please try again.'})
         
         else:
