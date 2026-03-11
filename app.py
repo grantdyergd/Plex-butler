@@ -2907,6 +2907,8 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
         
         elif intent == 'recommend':
             try:
+                import re as _re
+                
                 existing_shows = set()
                 existing_movies = set()
                 
@@ -2925,104 +2927,104 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                         pass
                 
                 def is_in_library(title, lib_set):
-                    import re as _re
                     clean = _re.sub(r'\s*[:]\s*season\s+\d+', '', title, flags=_re.IGNORECASE).strip().lower()
                     clean = _re.sub(r'\s*\(?\d{4}\)?$', '', clean).strip()
+                    if not clean:
+                        return False
                     if clean in lib_set:
                         return True
                     for existing in lib_set:
-                        if clean and clean in existing:
-                            return True
-                        if existing and existing in clean:
+                        if existing and (clean in existing or existing in clean):
                             return True
                     return False
                 
-                trending_shows = []
-                trending_movies = []
+                tmdb_key = os.environ.get('TMDB_API_KEY', '')
+                tmdb_base = 'https://api.themoviedb.org/3'
                 
-                try:
-                    sonarr_upcoming = requests.get(f"{sonarr_url}/api/v3/importlist/movie" if False else f"{sonarr_url}/api/v3/series/lookup", 
-                                                    params={'apikey': sonarr_key, 'term': 'year:2025 2026'}, timeout=10).json() if sonarr_url and sonarr_key else []
-                except Exception:
-                    sonarr_upcoming = []
+                tmdb_trending_shows = []
+                tmdb_trending_movies = []
+                tmdb_upcoming_movies = []
                 
-                try:
-                    if radarr_url and radarr_key:
-                        radarr_discover = requests.get(f"{radarr_url}/api/v3/importlist/movie", params={'apikey': radarr_key}, timeout=10).json()
-                        for m in radarr_discover[:20]:
-                            title = m.get('title', '')
-                            year = m.get('year', '')
+                if tmdb_key:
+                    try:
+                        resp = requests.get(f"{tmdb_base}/trending/tv/week", params={'api_key': tmdb_key, 'language': 'en-US'}, timeout=10).json()
+                        for item in resp.get('results', [])[:20]:
+                            name = item.get('name', '')
+                            year = (item.get('first_air_date', '') or '')[:4]
+                            rating = item.get('vote_average', 0)
+                            overview = (item.get('overview', '') or '')[:100]
+                            if name and not is_in_library(name, existing_shows):
+                                tmdb_trending_shows.append({'title': name, 'year': year, 'rating': round(rating, 1), 'overview': overview})
+                    except Exception as e:
+                        print(f"[TMDb Trending TV Error] {e}")
+                    
+                    try:
+                        resp = requests.get(f"{tmdb_base}/trending/movie/week", params={'api_key': tmdb_key, 'language': 'en-US'}, timeout=10).json()
+                        for item in resp.get('results', [])[:20]:
+                            title = item.get('title', '')
+                            year = (item.get('release_date', '') or '')[:4]
+                            rating = item.get('vote_average', 0)
+                            overview = (item.get('overview', '') or '')[:100]
                             if title and not is_in_library(title, existing_movies):
-                                trending_movies.append(f"{title} ({year})")
-                except Exception:
-                    pass
+                                tmdb_trending_movies.append({'title': title, 'year': year, 'rating': round(rating, 1), 'overview': overview})
+                    except Exception as e:
+                        print(f"[TMDb Trending Movie Error] {e}")
+                    
+                    try:
+                        resp = requests.get(f"{tmdb_base}/movie/upcoming", params={'api_key': tmdb_key, 'language': 'en-US', 'region': 'US'}, timeout=10).json()
+                        for item in resp.get('results', [])[:20]:
+                            title = item.get('title', '')
+                            year = (item.get('release_date', '') or '')[:4]
+                            release_date = item.get('release_date', '')
+                            rating = item.get('vote_average', 0)
+                            overview = (item.get('overview', '') or '')[:100]
+                            if title and not is_in_library(title, existing_movies):
+                                tmdb_upcoming_movies.append({'title': title, 'year': year, 'release_date': release_date, 'rating': round(rating, 1), 'overview': overview})
+                    except Exception as e:
+                        print(f"[TMDb Upcoming Movie Error] {e}")
+                    
+                    try:
+                        resp = requests.get(f"{tmdb_base}/tv/on_the_air", params={'api_key': tmdb_key, 'language': 'en-US'}, timeout=10).json()
+                        on_air_names = {s['title'] for s in tmdb_trending_shows}
+                        for item in resp.get('results', [])[:20]:
+                            name = item.get('name', '')
+                            if name in on_air_names:
+                                continue
+                            year = (item.get('first_air_date', '') or '')[:4]
+                            rating = item.get('vote_average', 0)
+                            overview = (item.get('overview', '') or '')[:100]
+                            if name and not is_in_library(name, existing_shows):
+                                tmdb_trending_shows.append({'title': name, 'year': year, 'rating': round(rating, 1), 'overview': overview})
+                    except Exception as e:
+                        print(f"[TMDb On Air Error] {e}")
                 
-                trending_context = ""
-                if trending_movies:
-                    trending_context += f"\nTrending movies from Radarr discovery: {', '.join(trending_movies[:15])}"
+                lines = [f"🌟 **Trending & Upcoming** (from TMDb, filtered against your library):"]
                 
-                full_shows_list = ', '.join(sorted(existing_shows)) if existing_shows else "none"
-                full_movies_list = ', '.join(sorted(existing_movies)) if existing_movies else "none"
+                if tmdb_trending_shows:
+                    lines.append(f"\n📺 **Trending TV Shows ({len(tmdb_trending_shows[:10])})**:")
+                    for s in tmdb_trending_shows[:10]:
+                        rating_str = f"⭐ {s['rating']}" if s['rating'] else ""
+                        lines.append(f"➕ **{s['title']}** ({s['year']}) {rating_str} — {s['overview']}...")
                 
-                rec_response = openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": f"""You are a media recommendation expert. The current date is {__import__('datetime').datetime.now().strftime('%B %Y')}.
-
-CRITICAL RULES:
-1. ONLY recommend shows/movies the user does NOT already have. Check the full library lists below carefully.
-2. Use just the show/movie base title — NEVER include "Season X" or "S0X" in the title.
-3. Focus on brand new, upcoming, or recently announced shows and movies that are generating major buzz.
-4. Prioritize: new series premieres, highly anticipated upcoming releases, breakout hits, and trending new content.
-5. Do NOT recommend additional seasons of shows the user already has — their system handles that automatically.
-
-User's COMPLETE TV show library: {full_shows_list}
-User's COMPLETE movie library: {full_movies_list}
-{trending_context}
-
-Return ONLY valid JSON, no markdown fences:
-{{"shows": [{{"title": "Show Name", "year": 2025, "reason": "Brief reason why this is a must-watch"}}], "movies": [{{"title": "Movie Name", "year": 2025, "reason": "Brief reason why this is a must-watch"}}]}}
-
-Provide 5-8 shows and 5-8 movies that are NOT in the user's library. Every recommendation must be something new they should add."""},
-                        {"role": "user", "content": query or "What are the hottest new and upcoming TV shows and movies right now? Give me brand new content I should be watching."}
-                    ],
-                    temperature=0.7,
-                    max_tokens=800
-                )
+                if tmdb_trending_movies:
+                    lines.append(f"\n🎬 **Trending Movies ({len(tmdb_trending_movies[:10])})**:")
+                    for m in tmdb_trending_movies[:10]:
+                        rating_str = f"⭐ {m['rating']}" if m['rating'] else ""
+                        lines.append(f"➕ **{m['title']}** ({m['year']}) {rating_str} — {m['overview']}...")
                 
-                rec_raw = rec_response.choices[0].message.content.strip()
-                rec_raw = rec_raw.replace('```json', '').replace('```', '').strip()
+                if tmdb_upcoming_movies:
+                    upcoming_filtered = [m for m in tmdb_upcoming_movies if m['title'] not in {t['title'] for t in tmdb_trending_movies}]
+                    if upcoming_filtered:
+                        lines.append(f"\n🗓️ **Upcoming Movies ({len(upcoming_filtered[:8])})**:")
+                        for m in upcoming_filtered[:8]:
+                            release = f"📅 {m['release_date']}" if m.get('release_date') else ""
+                            lines.append(f"➕ **{m['title']}** ({m['year']}) {release} — {m['overview']}...")
                 
-                try:
-                    recs = json.loads(rec_raw)
-                except json.JSONDecodeError:
-                    return jsonify({'reply': rec_raw})
-                
-                lines = [f"🌟 **New Content Recommendations** (not in your library):"]
-                
-                rec_shows = recs.get('shows', [])
-                filtered_shows = [s for s in rec_shows if not is_in_library(s.get('title', ''), existing_shows)]
-                if filtered_shows:
-                    lines.append(f"\n📺 **TV Shows ({len(filtered_shows)})**:")
-                    for s in filtered_shows:
-                        title = s.get('title', '')
-                        year = s.get('year', '')
-                        reason = s.get('reason', '')
-                        lines.append(f"➕ **{title}** ({year}) — {reason}")
-                
-                rec_movies = recs.get('movies', [])
-                filtered_movies = [m for m in rec_movies if not is_in_library(m.get('title', ''), existing_movies)]
-                if filtered_movies:
-                    lines.append(f"\n🎬 **Movies ({len(filtered_movies)})**:")
-                    for m in filtered_movies:
-                        title = m.get('title', '')
-                        year = m.get('year', '')
-                        reason = m.get('reason', '')
-                        lines.append(f"➕ **{title}** ({year}) — {reason}")
-                
-                skipped = (len(rec_shows) - len(filtered_shows)) + (len(rec_movies) - len(filtered_movies))
-                if skipped > 0:
-                    lines.append(f"\n*({skipped} already in your library were filtered out)*")
+                if not tmdb_trending_shows and not tmdb_trending_movies and not tmdb_upcoming_movies:
+                    if not tmdb_key:
+                        lines.append("\n⚠️ TMDb API key not configured. Add TMDB_API_KEY to get real trending data.")
+                    else:
+                        lines.append("\nNo new recommendations found — your library is very comprehensive!")
                 
                 lines.append(f"\n*Say \"Add [title] to Sonarr\" or \"Add [title] to Radarr\" to add any of these.*")
                 

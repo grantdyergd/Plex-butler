@@ -139,8 +139,10 @@ For deployment, the following environment variables should be set:
   - **Disk Space** - view storage usage and free space across Sonarr/Radarr root folders
   - **Ombi Requests** - view pending and fulfilled media requests
   - **Calendar** - see upcoming TV episodes and movie releases for the week
+  - **Recommendations** - TMDb-powered trending/upcoming content, filtered against existing library
   - Check library contents, download queues, and Plex libraries
   - Uses OpenAI (via Replit AI Integrations) for intent classification
+  - Uses TMDb API (TMDB_API_KEY env var) for real-time trending data
   - Backend proxies all API calls (keys stay server-side)
   - Card-based results with poster images and quality profile selection
   - Destructive actions (delete/remove) require confirmation dialog
