@@ -3119,11 +3119,27 @@ def media_chat_add():
             roots = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=10).json()
             root_path = roots[0]['path'] if roots else '/tv'
             
+            tvdb_id = item.get('tvdbId')
+            try:
+                tvdb_id = int(tvdb_id) if tvdb_id else 0
+            except (ValueError, TypeError):
+                tvdb_id = 0
+            
+            qual_id = profile_id
+            try:
+                qual_id = int(qual_id) if qual_id else None
+            except (ValueError, TypeError):
+                qual_id = None
+            
+            if not qual_id:
+                profiles = requests.get(f"{sonarr_url}/api/v3/qualityprofile", params={'apikey': sonarr_key}, timeout=10).json()
+                qual_id = profiles[0]['id'] if profiles else 1
+            
             payload = {
                 'title': item.get('title'),
-                'tvdbId': item.get('tvdbId'),
-                'qualityProfileId': profile_id,
-                'titleSlug': item.get('titleSlug'),
+                'tvdbId': tvdb_id,
+                'qualityProfileId': int(qual_id),
+                'titleSlug': item.get('titleSlug') or item.get('title', '').lower().replace(' ', '-'),
                 'images': item.get('images', []),
                 'seasons': item.get('seasons', []),
                 'rootFolderPath': root_path,
@@ -3159,13 +3175,35 @@ def media_chat_add():
             roots = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=10).json()
             root_path = roots[0]['path'] if roots else '/movies'
             
+            tmdb_id = item.get('tmdbId')
+            try:
+                tmdb_id = int(tmdb_id) if tmdb_id else 0
+            except (ValueError, TypeError):
+                tmdb_id = 0
+            
+            qual_id = profile_id
+            try:
+                qual_id = int(qual_id) if qual_id else None
+            except (ValueError, TypeError):
+                qual_id = None
+            
+            if not qual_id:
+                profiles = requests.get(f"{radarr_url}/api/v3/qualityprofile", params={'apikey': radarr_key}, timeout=10).json()
+                qual_id = profiles[0]['id'] if profiles else 1
+            
+            movie_year = item.get('year')
+            try:
+                movie_year = int(movie_year) if movie_year else 0
+            except (ValueError, TypeError):
+                movie_year = 0
+            
             payload = {
                 'title': item.get('title'),
-                'tmdbId': item.get('tmdbId'),
-                'qualityProfileId': profile_id,
-                'titleSlug': item.get('titleSlug'),
+                'tmdbId': tmdb_id,
+                'qualityProfileId': int(qual_id),
+                'titleSlug': item.get('titleSlug') or item.get('title', '').lower().replace(' ', '-'),
                 'images': item.get('images', []),
-                'year': item.get('year'),
+                'year': movie_year,
                 'rootFolderPath': root_path,
                 'monitored': True,
                 'addOptions': {'searchForMovie': True}
