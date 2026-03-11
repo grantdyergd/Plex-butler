@@ -2110,6 +2110,10 @@ IMPORTANT: Understand complex requests. Examples:
 - "Remove all movies from my watchlist" → intent: plex_watchlist_remove, filter: {"type": "movie"}
 - "Delete all ended shows from Sonarr" → intent: delete_show, filter: {"status": "ended"}
 - "Remove The Bear from my watchlist" → intent: plex_watchlist_remove, query: "The Bear"
+- "Remove Wayward, Together, Alien Earth from my watchlist" → intent: plex_watchlist_remove, query: "Wayward, Together, Alien Earth" (comma-separated list of titles)
+- "Delete Severance and The Bear from Sonarr" → intent: delete_show, query: "Severance, The Bear"
+
+When the user lists multiple titles, put them ALL in the query field as a comma-separated list. Do NOT paraphrase or reword titles.
 """},
                 {"role": "user", "content": user_message}
             ],
@@ -2129,6 +2133,21 @@ IMPORTANT: Understand complex requests. Examples:
         query = parsed.get('query', '')
         reply = parsed.get('reply', '')
         filters = parsed.get('filter', {})
+        
+        def multi_title_match(items, query_str, title_key='title'):
+            if not query_str:
+                return items
+            titles = [t.strip().lower() for t in query_str.replace(' and ', ',').split(',') if t.strip()]
+            if len(titles) <= 1:
+                return [i for i in items if query_str.lower() in i.get(title_key, '').lower()]
+            matched = []
+            for i in items:
+                item_title = i.get(title_key, '').lower()
+                for t in titles:
+                    if t in item_title:
+                        matched.append(i)
+                        break
+            return matched
         
         if intent == 'search_show':
             if not sonarr_url or not sonarr_key:
@@ -2179,7 +2198,7 @@ IMPORTANT: Understand complex requests. Examples:
                 return jsonify({'reply': 'Sonarr is not configured.'})
             
             all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
-            matches = [s for s in all_series if query.lower() in s.get('title', '').lower()]
+            matches = multi_title_match(all_series, query)
             
             if not matches:
                 return jsonify({'reply': f'**{query}** isn\'t in your Sonarr library. Want me to search for it to add?'})
@@ -2200,7 +2219,7 @@ IMPORTANT: Understand complex requests. Examples:
                 return jsonify({'reply': 'Radarr is not configured.'})
             
             all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json()
-            matches = [m for m in all_movies if query.lower() in m.get('title', '').lower()]
+            matches = multi_title_match(all_movies, query)
             
             if not matches:
                 return jsonify({'reply': f'**{query}** isn\'t in your Radarr library. Want me to search for it to add?'})
@@ -2446,9 +2465,9 @@ IMPORTANT: Understand complex requests. Examples:
                 if filters.get('has_file') is False:
                     matches = [s for s in matches if s.get('statistics', {}).get('episodeFileCount', 0) == 0]
                 if query:
-                    matches = [s for s in matches if query.lower() in s.get('title', '').lower()]
+                    matches = multi_title_match(matches, query)
             else:
-                matches = [s for s in all_series if query.lower() in s.get('title', '').lower()]
+                matches = multi_title_match(all_series, query)
             
             if not matches:
                 filter_desc = query or 'your filters'
@@ -2496,9 +2515,9 @@ IMPORTANT: Understand complex requests. Examples:
                 if filters.get('has_file') is False:
                     matches = [m for m in matches if not m.get('hasFile')]
                 if query:
-                    matches = [m for m in matches if query.lower() in m.get('title', '').lower()]
+                    matches = multi_title_match(matches, query)
             else:
-                matches = [m for m in all_movies if query.lower() in m.get('title', '').lower()]
+                matches = multi_title_match(all_movies, query)
             
             if not matches:
                 filter_desc = query or 'your filters'
@@ -2582,9 +2601,9 @@ IMPORTANT: Understand complex requests. Examples:
                     if filters.get('all'):
                         pass
                     if query and not filters.get('all'):
-                        matches = [i for i in matches if query.lower() in i.get('title', '').lower()]
+                        matches = multi_title_match(matches, query)
                 elif query:
-                    matches = [i for i in all_items if query.lower() in i.get('title', '').lower()]
+                    matches = multi_title_match(all_items, query)
                 else:
                     return jsonify({'reply': 'Please specify what to remove from your watchlist — a title or a filter like "before 2020".'})
                 
