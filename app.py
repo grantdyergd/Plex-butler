@@ -2073,19 +2073,27 @@ def media_chat_send():
         intent_response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": """You control Sonarr (TV shows), Radarr (movies), and Plex. Return ONLY valid JSON, no markdown fences:
-{"intent":"search_show"|"search_movie"|"check_lib_show"|"check_lib_movie"|"queue_sonarr"|"queue_radarr"|"plex_library"|"plex_watchlist_add"|"plex_watchlist_show"|"chitchat","query":"title or search term","reply":"one sentence saying what you are doing"}
+                {"role": "system", "content": """You control Sonarr (TV shows), Radarr (movies), Plex, and Ombi (requests). Return ONLY valid JSON, no markdown fences:
+{"intent":"<intent>","query":"title or search term","reply":"one sentence saying what you are doing"}
 
 Intent guide:
 - search_show: user wants to find/add a NEW TV show (search Sonarr's online database)
 - search_movie: user wants to find/add a NEW movie (search Radarr's online database)
 - check_lib_show: user wants to check if a TV show is ALREADY in their library
 - check_lib_movie: user wants to check if a movie is ALREADY in their library
+- delete_show: user wants to remove/delete a TV show FROM their library
+- delete_movie: user wants to remove/delete a movie FROM their library
 - queue_sonarr: user wants to see what's downloading in Sonarr
 - queue_radarr: user wants to see what's downloading in Radarr
 - plex_library: user wants to see their Plex libraries
 - plex_watchlist_add: user wants to add a movie or show to their Plex watchlist
 - plex_watchlist_show: user wants to see what's on their Plex watchlist
+- plex_watchlist_remove: user wants to remove something from their Plex watchlist
+- plex_recently_added: user wants to see what was recently added to Plex (what's new)
+- missing_episodes: user wants to check for missing/wanted episodes (optionally for a specific show)
+- disk_space: user wants to check storage, disk space, or library size
+- ombi_requests: user wants to see pending/recent media requests from Ombi
+- calendar: user wants to see upcoming episodes or movie releases this week
 - chitchat: general conversation, greetings, or questions you can answer directly"""},
                 {"role": "user", "content": user_message}
             ],
@@ -2404,6 +2412,416 @@ Intent guide:
                 print(f"[Plex Watchlist Show Error] {str(e)}")
                 return jsonify({'reply': 'Could not fetch your Plex watchlist. Please check your Plex token in Settings.'})
         
+        elif intent == 'delete_show':
+            if not sonarr_url or not sonarr_key:
+                return jsonify({'reply': 'Sonarr is not configured.'})
+            
+            all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
+            matches = [s for s in all_series if query.lower() in s.get('title', '').lower()]
+            
+            if not matches:
+                return jsonify({'reply': f'**{query}** isn\'t in your Sonarr library, so there\'s nothing to delete.'})
+            
+            delete_items = []
+            for s in matches:
+                size_gb = round(s.get('statistics', {}).get('sizeOnDisk', 0) / (1024**3), 1)
+                eps = s.get('statistics', {}).get('episodeFileCount', 0)
+                poster = None
+                for img in s.get('images', []):
+                    if img.get('coverType') == 'poster' and img.get('remoteUrl'):
+                        poster = img['remoteUrl']
+                        break
+                delete_items.append({
+                    'id': s['id'],
+                    'title': s['title'],
+                    'year': s.get('year', ''),
+                    'remotePoster': poster,
+                    'sizeGb': size_gb,
+                    'episodeCount': eps
+                })
+            
+            return jsonify({
+                'reply': reply,
+                'cards': {
+                    'mediaType': 'delete_show',
+                    'results': delete_items,
+                    'profiles': []
+                }
+            })
+        
+        elif intent == 'delete_movie':
+            if not radarr_url or not radarr_key:
+                return jsonify({'reply': 'Radarr is not configured.'})
+            
+            all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json()
+            matches = [m for m in all_movies if query.lower() in m.get('title', '').lower()]
+            
+            if not matches:
+                return jsonify({'reply': f'**{query}** isn\'t in your Radarr library, so there\'s nothing to delete.'})
+            
+            delete_items = []
+            for m in matches:
+                size_gb = round(m.get('sizeOnDisk', 0) / (1024**3), 1)
+                has_file = m.get('hasFile', False)
+                poster = None
+                for img in m.get('images', []):
+                    if img.get('coverType') == 'poster' and img.get('remoteUrl'):
+                        poster = img['remoteUrl']
+                        break
+                delete_items.append({
+                    'id': m['id'],
+                    'title': m['title'],
+                    'year': m.get('year', ''),
+                    'remotePoster': poster,
+                    'sizeGb': size_gb,
+                    'hasFile': has_file
+                })
+            
+            return jsonify({
+                'reply': reply,
+                'cards': {
+                    'mediaType': 'delete_movie',
+                    'results': delete_items,
+                    'profiles': []
+                }
+            })
+        
+        elif intent == 'plex_watchlist_remove':
+            if not plex_token:
+                return jsonify({'reply': 'Plex is not configured. Add your Plex token in Settings.'})
+            
+            plex_headers = {
+                'X-Plex-Token': plex_token,
+                'X-Plex-Client-Identifier': 'media-scrubber-chat',
+                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Version': '1.0',
+                'Accept': 'application/json'
+            }
+            
+            try:
+                all_items = []
+                offset = 0
+                page_size = 50
+                total_size = None
+                while True:
+                    wl_resp = requests.get(
+                        "https://discover.provider.plex.tv/library/sections/watchlist/all",
+                        params={'X-Plex-Container-Start': offset, 'X-Plex-Container-Size': page_size},
+                        headers=plex_headers,
+                        timeout=15
+                    )
+                    if wl_resp.status_code != 200:
+                        return jsonify({'reply': 'Could not fetch your Plex watchlist. Please check your token.'})
+                    wl_data = wl_resp.json()
+                    container = wl_data.get('MediaContainer', {})
+                    items = container.get('Metadata', [])
+                    if total_size is None:
+                        total_size = container.get('totalSize', len(items))
+                    if not items:
+                        break
+                    all_items.extend(items)
+                    offset += len(items)
+                    if offset >= total_size:
+                        break
+                
+                matches = [i for i in all_items if query.lower() in i.get('title', '').lower()]
+                
+                if not matches:
+                    return jsonify({'reply': f'**{query}** isn\'t on your Plex watchlist.'})
+                
+                remove_items = []
+                for item in matches[:8]:
+                    thumb = item.get('thumb', '')
+                    poster_url = thumb if thumb and thumb.startswith('http') else None
+                    remove_items.append({
+                        'title': item.get('title', ''),
+                        'year': item.get('year', ''),
+                        'type': item.get('type', ''),
+                        'ratingKey': item.get('ratingKey', ''),
+                        'posterUrl': poster_url
+                    })
+                
+                return jsonify({
+                    'reply': reply,
+                    'cards': {
+                        'mediaType': 'watchlist_remove',
+                        'results': remove_items,
+                        'profiles': []
+                    }
+                })
+            except Exception as e:
+                print(f"[Plex Watchlist Remove Error] {str(e)}")
+                return jsonify({'reply': 'Could not search your Plex watchlist. Please try again.'})
+        
+        elif intent == 'plex_recently_added':
+            if not plex_url or not plex_token:
+                return jsonify({'reply': 'Plex is not configured.'})
+            
+            try:
+                recent_resp = requests.get(
+                    f"{plex_url}/library/recentlyAdded",
+                    params={'X-Plex-Token': plex_token, 'X-Plex-Container-Size': 20},
+                    headers={'Accept': 'application/json'},
+                    timeout=15
+                )
+                recent_resp.raise_for_status()
+                recent_data = recent_resp.json()
+                items = recent_data.get('MediaContainer', {}).get('Metadata', [])
+                
+                if not items:
+                    return jsonify({'reply': 'No recently added items found in Plex.'})
+                
+                lines = [f"🆕 **Recently Added to Plex ({len(items)} items)**:"]
+                for item in items:
+                    media_type = item.get('type', '')
+                    if media_type == 'movie':
+                        icon = "🎬"
+                        year = f" ({item.get('year', '')})" if item.get('year') else ""
+                        lines.append(f"{icon} **{item.get('title', '')}**{year}")
+                    elif media_type == 'season':
+                        icon = "📺"
+                        show_title = item.get('parentTitle', item.get('title', ''))
+                        season = item.get('title', '')
+                        lines.append(f"{icon} **{show_title}** — {season}")
+                    elif media_type == 'episode':
+                        icon = "📺"
+                        show_title = item.get('grandparentTitle', '')
+                        ep_title = item.get('title', '')
+                        s = item.get('parentIndex', '')
+                        e = item.get('index', '')
+                        lines.append(f"{icon} **{show_title}** — S{s:02d}E{e:02d} {ep_title}" if isinstance(s, int) and isinstance(e, int) else f"{icon} **{show_title}** — {ep_title}")
+                    else:
+                        lines.append(f"**{item.get('title', '')}**")
+                
+                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except Exception as e:
+                print(f"[Plex Recently Added Error] {str(e)}")
+                return jsonify({'reply': 'Could not fetch recently added items from Plex.'})
+        
+        elif intent == 'missing_episodes':
+            if not sonarr_url or not sonarr_key:
+                return jsonify({'reply': 'Sonarr is not configured.'})
+            
+            try:
+                if query:
+                    all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
+                    matches = [s for s in all_series if query.lower() in s.get('title', '').lower()]
+                    
+                    if matches:
+                        lines = []
+                        for s in matches:
+                            stats = s.get('statistics', {})
+                            total = stats.get('totalEpisodeCount', 0)
+                            have = stats.get('episodeFileCount', 0)
+                            missing = total - have
+                            pct = round(have / total * 100) if total else 0
+                            if missing > 0:
+                                lines.append(f"📺 **{s['title']}** — {have}/{total} episodes ({pct}%) — **{missing} missing**")
+                            else:
+                                lines.append(f"✅ **{s['title']}** — All {total} episodes downloaded!")
+                        return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+                
+                wanted = requests.get(
+                    f"{sonarr_url}/api/v3/wanted/missing",
+                    params={'apikey': sonarr_key, 'pageSize': 30, 'sortKey': 'airDateUtc', 'sortDirection': 'descending'},
+                    timeout=15
+                ).json()
+                records = wanted.get('records', [])
+                total_missing = wanted.get('totalRecords', 0)
+                
+                if not records:
+                    return jsonify({'reply': 'No missing episodes found. Your library is fully up to date!'})
+                
+                lines = [f"⚠️ **Missing Episodes ({total_missing} total)**:"]
+                for ep in records[:20]:
+                    show = ep.get('series', {}).get('title', 'Unknown')
+                    s_num = ep.get('seasonNumber', 0)
+                    e_num = ep.get('episodeNumber', 0)
+                    ep_title = ep.get('title', '')
+                    air_date = ep.get('airDate', '')
+                    lines.append(f"📺 **{show}** — S{s_num:02d}E{e_num:02d} {ep_title} ({air_date})")
+                if total_missing > 20:
+                    lines.append(f"\n*Showing 20 of {total_missing} missing episodes.*")
+                
+                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except Exception as e:
+                print(f"[Missing Episodes Error] {str(e)}")
+                return jsonify({'reply': 'Could not check for missing episodes. Please try again.'})
+        
+        elif intent == 'disk_space':
+            try:
+                lines = ["💾 **Storage Overview**:"]
+                
+                if sonarr_url and sonarr_key:
+                    try:
+                        roots = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=10).json()
+                        for r in roots:
+                            free_gb = round(r.get('freeSpace', 0) / (1024**3), 1)
+                            path = r.get('path', 'Unknown')
+                            lines.append(f"📺 **Sonarr** ({path}) — {free_gb} GB free")
+                    except Exception:
+                        lines.append("📺 Sonarr — Could not fetch")
+                
+                if radarr_url and radarr_key:
+                    try:
+                        roots = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=10).json()
+                        for r in roots:
+                            free_gb = round(r.get('freeSpace', 0) / (1024**3), 1)
+                            path = r.get('path', 'Unknown')
+                            lines.append(f"🎬 **Radarr** ({path}) — {free_gb} GB free")
+                    except Exception:
+                        lines.append("🎬 Radarr — Could not fetch")
+                
+                if sonarr_url and sonarr_key:
+                    try:
+                        all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
+                        total_shows = len(all_series)
+                        total_size = sum(s.get('statistics', {}).get('sizeOnDisk', 0) for s in all_series)
+                        total_eps = sum(s.get('statistics', {}).get('episodeFileCount', 0) for s in all_series)
+                        lines.append(f"\n📺 **TV Library**: {total_shows} shows, {total_eps} episodes, {round(total_size / (1024**3), 1)} GB")
+                    except Exception:
+                        pass
+                
+                if radarr_url and radarr_key:
+                    try:
+                        all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json()
+                        total_movies = len(all_movies)
+                        downloaded = sum(1 for m in all_movies if m.get('hasFile'))
+                        total_size = sum(m.get('sizeOnDisk', 0) for m in all_movies)
+                        lines.append(f"🎬 **Movie Library**: {total_movies} movies ({downloaded} downloaded), {round(total_size / (1024**3), 1)} GB")
+                    except Exception:
+                        pass
+                
+                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except Exception as e:
+                print(f"[Disk Space Error] {str(e)}")
+                return jsonify({'reply': 'Could not retrieve storage information.'})
+        
+        elif intent == 'ombi_requests':
+            ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+            ombi_key = get_setting('OMBI_API_KEY', '').strip()
+            
+            if not ombi_url or not ombi_key:
+                return jsonify({'reply': 'Ombi is not configured. Add your Ombi URL and API key in Settings.'})
+            
+            try:
+                ombi_headers = {'ApiKey': ombi_key, 'Accept': 'application/json'}
+                
+                tv_resp = requests.get(f"{ombi_url}/api/v1/Request/tv", headers=ombi_headers, timeout=15)
+                movie_resp = requests.get(f"{ombi_url}/api/v1/Request/movie", headers=ombi_headers, timeout=15)
+                
+                if tv_resp.status_code == 401 or movie_resp.status_code == 401:
+                    return jsonify({'reply': 'Ombi authentication failed. Please check your Ombi API key in Settings.'})
+                
+                tv_requests = tv_resp.json() if tv_resp.ok else []
+                movie_requests = movie_resp.json() if movie_resp.ok else []
+                
+                lines = []
+                
+                pending_tv = []
+                if isinstance(tv_requests, list):
+                    for r in tv_requests:
+                        child_reqs = r.get('childRequests', [])
+                        if child_reqs and not child_reqs[0].get('approved', True):
+                            pending_tv.append(r)
+                pending_movies = [r for r in movie_requests if not r.get('approved', True)] if isinstance(movie_requests, list) else []
+                
+                if pending_movies or pending_tv:
+                    lines.append(f"⏳ **Pending Requests ({len(pending_movies) + len(pending_tv)})**:")
+                    for m in pending_movies[:10]:
+                        lines.append(f"🎬 **{m.get('title', '')}** ({m.get('releaseDate', '')[:4]}) — requested by {m.get('requestedUser', {}).get('userAlias', m.get('requestedUser', {}).get('userName', 'Unknown'))}")
+                    for t in pending_tv[:10]:
+                        requester = 'Unknown'
+                        if t.get('childRequests'):
+                            req_user = t['childRequests'][0].get('requestedUser', {})
+                            requester = req_user.get('userAlias', req_user.get('userName', 'Unknown'))
+                        lines.append(f"📺 **{t.get('title', '')}** — requested by {requester}")
+                
+                recent_approved_movies = [r for r in movie_requests if r.get('approved') and r.get('available')] if isinstance(movie_requests, list) else []
+                recent_approved_tv = []
+                if isinstance(tv_requests, list):
+                    for t in tv_requests:
+                        for cr in t.get('childRequests', []):
+                            if cr.get('approved') and cr.get('available'):
+                                recent_approved_tv.append(t)
+                                break
+                
+                if recent_approved_movies or recent_approved_tv:
+                    lines.append(f"\n✅ **Fulfilled Requests ({len(recent_approved_movies) + len(recent_approved_tv)})**:")
+                    for m in recent_approved_movies[:10]:
+                        lines.append(f"🎬 **{m.get('title', '')}** — Available")
+                    for t in recent_approved_tv[:10]:
+                        lines.append(f"📺 **{t.get('title', '')}** — Available")
+                
+                if not lines:
+                    return jsonify({'reply': 'No media requests found in Ombi.'})
+                
+                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except Exception as e:
+                print(f"[Ombi Requests Error] {str(e)}")
+                return jsonify({'reply': 'Could not fetch requests from Ombi. Please check your Ombi settings.'})
+        
+        elif intent == 'calendar':
+            try:
+                from datetime import datetime, timedelta
+                today = datetime.now().strftime('%Y-%m-%d')
+                week_later = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+                
+                lines = [f"📅 **Upcoming This Week** ({today} to {week_later}):"]
+                
+                if sonarr_url and sonarr_key:
+                    try:
+                        cal = requests.get(
+                            f"{sonarr_url}/api/v3/calendar",
+                            params={'apikey': sonarr_key, 'start': today, 'end': week_later},
+                            timeout=15
+                        ).json()
+                        
+                        if cal and isinstance(cal, list):
+                            lines.append(f"\n📺 **TV Episodes ({len(cal)})**:")
+                            for ep in cal[:15]:
+                                show = ep.get('series', {}).get('title', 'Unknown')
+                                s_num = ep.get('seasonNumber', 0)
+                                e_num = ep.get('episodeNumber', 0)
+                                ep_title = ep.get('title', '')
+                                air_date = ep.get('airDate', '')
+                                has_file = "✅" if ep.get('hasFile') else "⏳"
+                                lines.append(f"{has_file} **{show}** — S{s_num:02d}E{e_num:02d} {ep_title} ({air_date})")
+                            if len(cal) > 15:
+                                lines.append(f"*...and {len(cal) - 15} more*")
+                        else:
+                            lines.append("\n📺 No upcoming TV episodes this week.")
+                    except Exception:
+                        lines.append("\n📺 Could not fetch Sonarr calendar.")
+                
+                if radarr_url and radarr_key:
+                    try:
+                        cal = requests.get(
+                            f"{radarr_url}/api/v3/calendar",
+                            params={'apikey': radarr_key, 'start': today, 'end': week_later},
+                            timeout=15
+                        ).json()
+                        
+                        if cal and isinstance(cal, list):
+                            lines.append(f"\n🎬 **Movies ({len(cal)})**:")
+                            for m in cal[:10]:
+                                title = m.get('title', 'Unknown')
+                                year = m.get('year', '')
+                                has_file = "✅" if m.get('hasFile') else "⏳"
+                                in_cinemas = m.get('inCinemas', '')[:10] if m.get('inCinemas') else ''
+                                digital = m.get('digitalRelease', '')[:10] if m.get('digitalRelease') else ''
+                                release = digital or in_cinemas
+                                lines.append(f"{has_file} **{title}** ({year}) — {release}")
+                        else:
+                            lines.append("\n🎬 No upcoming movies this week.")
+                    except Exception:
+                        lines.append("\n🎬 Could not fetch Radarr calendar.")
+                
+                return jsonify({'reply': reply, 'data': '\n'.join(lines)})
+            except Exception as e:
+                print(f"[Calendar Error] {str(e)}")
+                return jsonify({'reply': 'Could not fetch calendar data.'})
+        
         else:
             return jsonify({'reply': reply or raw})
     
@@ -2540,6 +2958,110 @@ def media_chat_add():
             return jsonify({'success': False, 'error': 'Failed to add to Plex watchlist. Please try again.'})
     
     return jsonify({'success': False, 'error': 'Invalid media type'})
+
+
+@app.route('/api/media-chat/delete', methods=['POST'])
+@login_required
+def media_chat_delete():
+    data = request.get_json()
+    media_type = data.get('type')
+    item = data.get('item', {})
+    
+    if media_type == 'delete_show':
+        sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+        sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+        
+        if not sonarr_url or not sonarr_key:
+            return jsonify({'success': False, 'error': 'Sonarr not configured'})
+        
+        series_id = item.get('id')
+        title = item.get('title', 'Unknown')
+        
+        if not series_id:
+            return jsonify({'success': False, 'error': 'Missing show ID'})
+        
+        try:
+            r = requests.delete(
+                f"{sonarr_url}/api/v3/series/{series_id}",
+                params={'apikey': sonarr_key, 'deleteFiles': 'true'},
+                timeout=15
+            )
+            
+            if r.ok:
+                return jsonify({'success': True, 'message': f'**{title}** has been deleted from Sonarr and files removed.'})
+            else:
+                print(f"[Media Chat Delete] Sonarr {r.status_code}: {r.text[:200]}")
+                return jsonify({'success': False, 'message': f'Sonarr returned status {r.status_code}.'})
+        except Exception as e:
+            print(f"[Media Chat Delete Error] Sonarr: {str(e)}")
+            return jsonify({'success': False, 'error': 'Failed to delete show. Please try again.'})
+    
+    elif media_type == 'delete_movie':
+        radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+        radarr_key = get_setting('RADARR_API_KEY', '').strip()
+        
+        if not radarr_url or not radarr_key:
+            return jsonify({'success': False, 'error': 'Radarr not configured'})
+        
+        movie_id = item.get('id')
+        title = item.get('title', 'Unknown')
+        
+        if not movie_id:
+            return jsonify({'success': False, 'error': 'Missing movie ID'})
+        
+        try:
+            r = requests.delete(
+                f"{radarr_url}/api/v3/movie/{movie_id}",
+                params={'apikey': radarr_key, 'deleteFiles': 'true'},
+                timeout=15
+            )
+            
+            if r.ok:
+                return jsonify({'success': True, 'message': f'**{title}** has been deleted from Radarr and files removed.'})
+            else:
+                print(f"[Media Chat Delete] Radarr {r.status_code}: {r.text[:200]}")
+                return jsonify({'success': False, 'message': f'Radarr returned status {r.status_code}.'})
+        except Exception as e:
+            print(f"[Media Chat Delete Error] Radarr: {str(e)}")
+            return jsonify({'success': False, 'error': 'Failed to delete movie. Please try again.'})
+    
+    elif media_type == 'watchlist_remove':
+        plex_token = get_setting('PLEX_TOKEN', '').strip()
+        
+        if not plex_token:
+            return jsonify({'success': False, 'error': 'Plex not configured'})
+        
+        rating_key = item.get('ratingKey', '')
+        title = item.get('title', 'Unknown')
+        
+        if not rating_key:
+            return jsonify({'success': False, 'error': 'Missing item identifier'})
+        
+        try:
+            plex_headers = {
+                'X-Plex-Token': plex_token,
+                'X-Plex-Client-Identifier': 'media-scrubber-chat',
+                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Version': '1.0',
+                'Accept': 'application/json'
+            }
+            remove_resp = requests.put(
+                "https://discover.provider.plex.tv/actions/removeFromWatchlist",
+                params={'ratingKey': rating_key},
+                headers=plex_headers,
+                timeout=15
+            )
+            
+            if remove_resp.status_code in (200, 201, 204):
+                return jsonify({'success': True, 'message': f'**{title}** removed from your Plex watchlist.'})
+            else:
+                print(f"[Plex Watchlist Remove] Status {remove_resp.status_code}: {remove_resp.text[:200]}")
+                return jsonify({'success': False, 'message': f'Plex returned status {remove_resp.status_code}.'})
+        except Exception as e:
+            print(f"[Media Chat Delete Error] Plex watchlist: {str(e)}")
+            return jsonify({'success': False, 'error': 'Failed to remove from Plex watchlist. Please try again.'})
+    
+    return jsonify({'success': False, 'error': 'Invalid delete type'})
 
 
 if __name__ == '__main__':

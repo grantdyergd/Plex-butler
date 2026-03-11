@@ -132,11 +132,18 @@ For deployment, the following environment variables should be set:
 - Added **Media Chat** - AI-powered chat interface for managing media library (Mar 2026)
   - Full-screen mobile-optimized dark UI at `/media-chat`
   - Chat naturally to search/add shows (Sonarr) and movies (Radarr)
-  - **Plex Watchlist** - search and add movies/shows to Plex watchlist, view current watchlist
+  - **Plex Watchlist** - search, add, and remove items from Plex watchlist (full pagination)
+  - **Delete from library** - delete shows from Sonarr or movies from Radarr with confirmation
+  - **Recently Added** - see what's new in your Plex library
+  - **Missing Episodes** - check for missing/wanted episodes, optionally filtered by show
+  - **Disk Space** - view storage usage and free space across Sonarr/Radarr root folders
+  - **Ombi Requests** - view pending and fulfilled media requests
+  - **Calendar** - see upcoming TV episodes and movie releases for the week
   - Check library contents, download queues, and Plex libraries
   - Uses OpenAI (via Replit AI Integrations) for intent classification
   - Backend proxies all API calls (keys stay server-side)
   - Card-based results with poster images and quality profile selection
+  - Destructive actions (delete/remove) require confirmation dialog
   - Connection status dots for Sonarr, Radarr, Plex
   - Accessible from navbar "Media Chat" link
 - Added exclusion requester backfill from Ombi (Mar 2026)

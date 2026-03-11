@@ -296,6 +296,8 @@
         .add-btn:disabled { opacity: 0.6; cursor: default; }
         .add-btn.done { background: var(--green); color: #000; }
         .add-btn.err { background: var(--red); color: white; }
+        .delete-btn { background: #c0392b; }
+        .delete-btn:hover { background: #e74c3c; }
         
         .typing {
             display: flex;
@@ -399,15 +401,18 @@
             <div class="welcome-title">Media Chat</div>
             <div class="welcome-desc">
                 Chat naturally to manage your media library.<br>
-                <em>"Add Severance to Sonarr"</em> &middot; <em>"Search for Dune"</em><br>
-                <em>"What's downloading?"</em> &middot; <em>"Show my Plex libraries"</em>
+                <em>"Add Severance to Sonarr"</em> &middot; <em>"What's new?"</em><br>
+                <em>"What's coming up this week?"</em> &middot; <em>"Delete Landman"</em>
             </div>
             <div class="suggestions">
-                <button class="sugg-btn" onclick="fillInput('Is Severance in my library?')">📺 Check a show</button>
-                <button class="sugg-btn" onclick="fillInput('Search for Dune Part Two')">🎬 Find a movie</button>
+                <button class="sugg-btn" onclick="fillInput('Search for Dune Part Two')">🎬 Find media</button>
+                <button class="sugg-btn" onclick="fillInput('What\\'s new in my library?')">🆕 What's new</button>
+                <button class="sugg-btn" onclick="fillInput('What\\'s coming up this week?')">📅 Calendar</button>
                 <button class="sugg-btn" onclick="fillInput('What\\'s in my download queue?')">⬇ Downloads</button>
-                <button class="sugg-btn" onclick="fillInput('Add The Bear to my Plex watchlist')">🟡 Watchlist</button>
-                <button class="sugg-btn" onclick="fillInput('Show my Plex watchlist')">📋 My Watchlist</button>
+                <button class="sugg-btn" onclick="fillInput('Am I missing any episodes?')">⚠️ Missing</button>
+                <button class="sugg-btn" onclick="fillInput('How much disk space am I using?')">💾 Storage</button>
+                <button class="sugg-btn" onclick="fillInput('Show my media requests')">📋 Requests</button>
+                <button class="sugg-btn" onclick="fillInput('Show my Plex watchlist')">🟡 Watchlist</button>
             </div>
         </div>
     </div>
@@ -503,14 +508,24 @@
 
         function buildCardsHTML(extra) {
             const { mediaType, results, profiles } = extra;
-            const iconLabel = mediaType === 'show' ? '📺 Sonarr' : mediaType === 'movie' ? '🎬 Radarr' : '🟡 Plex Watchlist';
-            const placeholderIcon = mediaType === 'show' ? '📺' : mediaType === 'watchlist' ? '🟡' : '🎬';
-            const btnLabel = mediaType === 'watchlist' ? 'Watchlist' : 'Add';
+            const isDelete = mediaType.startsWith('delete_');
+            const isRemove = mediaType === 'watchlist_remove';
+            const isDestructive = isDelete || isRemove;
+            
+            const labels = {
+                'show': { icon: '📺 Sonarr', placeholder: '📺', btn: 'Add' },
+                'movie': { icon: '🎬 Radarr', placeholder: '🎬', btn: 'Add' },
+                'watchlist': { icon: '🟡 Plex Watchlist', placeholder: '🟡', btn: 'Watchlist' },
+                'delete_show': { icon: '📺 Delete from Sonarr', placeholder: '📺', btn: 'Delete' },
+                'delete_movie': { icon: '🎬 Delete from Radarr', placeholder: '🎬', btn: 'Delete' },
+                'watchlist_remove': { icon: '🟡 Remove from Watchlist', placeholder: '🟡', btn: 'Remove' }
+            };
+            const cfg = labels[mediaType] || labels['movie'];
             const containerId = `cards-group-${Date.now()}`;
             const defaultProfile = profiles.length > 0 ? profiles[0].id : null;
             selectedProfiles[containerId] = defaultProfile;
 
-            let html = `<div class="cards-header">${iconLabel} — ${results.length} results</div>`;
+            let html = `<div class="cards-header">${cfg.icon} — ${results.length} results</div>`;
             
             if (profiles.length > 0) {
                 html += `<div class="profiles-row">`;
@@ -525,11 +540,21 @@
             results.forEach((item, idx) => {
                 let poster = item.remotePoster || item.posterUrl || (item.images && item.images.find(i => i.coverType === 'poster')?.remoteUrl);
                 const posterHTML = poster 
-                    ? `<img src="${poster}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-placeholder" style="display:none">${placeholderIcon}</div>`
-                    : `<div class="poster-placeholder">${placeholderIcon}</div>`;
-                const network = item.network ? ` &middot; ${escapeHtml(item.network)}` : '';
-                const typeLabel = item.type ? ` &middot; ${escapeHtml(item.type)}` : '';
-                const meta = mediaType === 'watchlist' ? `${item.year || ''}${typeLabel}` : `${item.year || ''}${network}`;
+                    ? `<img src="${poster}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"><div class="poster-placeholder" style="display:none">${cfg.placeholder}</div>`
+                    : `<div class="poster-placeholder">${cfg.placeholder}</div>`;
+                
+                let metaParts = [item.year || ''];
+                if (item.network) metaParts.push(escapeHtml(item.network));
+                if (item.type && (mediaType === 'watchlist' || isRemove)) metaParts.push(escapeHtml(item.type));
+                if (item.sizeGb !== undefined) metaParts.push(`${item.sizeGb} GB`);
+                if (item.episodeCount !== undefined) metaParts.push(`${item.episodeCount} eps`);
+                if (item.hasFile === false && mediaType === 'delete_movie') metaParts.push('No file');
+                const meta = metaParts.filter(Boolean).join(' &middot; ');
+
+                const btnClass = isDestructive ? 'add-btn delete-btn' : 'add-btn';
+                const action = isDestructive
+                    ? `deleteMedia('${mediaType}', ${JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;')}, '${containerId}', ${idx})`
+                    : `addMedia('${mediaType}', ${JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;')}, '${containerId}', ${idx})`;
 
                 html += `
                     <div class="media-card">
@@ -539,9 +564,8 @@
                             <div class="meta">${meta}</div>
                         </div>
                         <div class="actions">
-                            <button class="add-btn" id="add-${containerId}-${idx}" 
-                                onclick="addMedia('${mediaType}', ${JSON.stringify(item).replace(/'/g, "\\'").replace(/"/g, '&quot;')}, '${containerId}', ${idx})">
-                                ${btnLabel}
+                            <button class="${btnClass}" id="add-${containerId}-${idx}" onclick="${action}">
+                                ${cfg.btn}
                             </button>
                         </div>
                     </div>`;
@@ -603,6 +627,45 @@
                 btn.classList.add('err');
                 addMessage('assistant', `Error: ${err.message}`);
                 setTimeout(() => { btn.textContent = 'Add'; btn.classList.remove('err'); btn.disabled = false; }, 3000);
+            }
+        }
+
+        async function deleteMedia(mediaType, item, containerId, idx) {
+            const btn = document.getElementById(`add-${containerId}-${idx}`);
+            if (!btn || btn.classList.contains('done')) return;
+            
+            const confirmMsg = mediaType === 'watchlist_remove' 
+                ? `Remove "${item.title}" from your watchlist?`
+                : `Delete "${item.title}" and its files? This cannot be undone.`;
+            if (!confirm(confirmMsg)) return;
+            
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                const response = await fetch('/api/media-chat/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: mediaType, item: item })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    btn.textContent = mediaType === 'watchlist_remove' ? '✓ Removed' : '✓ Deleted';
+                    btn.classList.add('done');
+                    addMessage('assistant', result.message);
+                } else {
+                    btn.textContent = 'Error';
+                    btn.classList.add('err');
+                    addMessage('assistant', result.message || result.error);
+                    const originalLabel = mediaType === 'watchlist_remove' ? 'Remove' : 'Delete';
+                    setTimeout(() => { btn.textContent = originalLabel; btn.classList.remove('err'); btn.disabled = false; }, 3000);
+                }
+            } catch (err) {
+                btn.textContent = 'Error';
+                btn.classList.add('err');
+                const originalLabel = mediaType === 'watchlist_remove' ? 'Remove' : 'Delete';
+                setTimeout(() => { btn.textContent = originalLabel; btn.classList.remove('err'); btn.disabled = false; }, 3000);
             }
         }
 
