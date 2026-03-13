@@ -468,6 +468,7 @@
                 <div class="status-dot"><div class="dot" id="dot-radarr"></div>radarr</div>
                 <div class="status-dot"><div class="dot" id="dot-plex"></div>plex</div>
             </div>
+            <button class="back-btn" onclick="clearChat()" title="Clear conversation history" style="background:none;border:1px solid var(--border-light);cursor:pointer;margin-right:6px;opacity:0.7;">↺ Clear</button>
             <a href="/" class="back-btn">&#8592; Back</a>
         </div>
     </div>
@@ -964,6 +965,17 @@
                 bulkBtn.classList.add('done');
             }
             updateBulkBar(recId);
+        }
+
+        async function clearChat() {
+            try {
+                await fetch('/api/media-chat/clear-history', { method: 'POST' });
+            } catch(e) {}
+            const chatArea = document.getElementById('chat-area');
+            const msgs = chatArea.querySelectorAll('.msg-row, .typing-row');
+            msgs.forEach(m => m.remove());
+            const welcome = document.getElementById('welcome');
+            if (welcome) welcome.style.display = '';
         }
 
         async function sendMessage() {

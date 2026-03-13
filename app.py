@@ -2053,6 +2053,12 @@ def media_chat_status():
     return jsonify(status)
 
 
+@app.route('/api/media-chat/clear-history', methods=['POST'])
+@login_required
+def media_chat_clear_history():
+    session.pop('chat_history', None)
+    return jsonify({'ok': True})
+
 @app.route('/api/media-chat/send', methods=['POST'])
 @login_required
 def media_chat_send():
@@ -2069,11 +2075,11 @@ def media_chat_send():
     plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
     plex_token = get_setting('PLEX_TOKEN', '').strip()
     
+    # Load conversation history from session (last 6 turns = 12 messages)
+    chat_history = session.get('chat_history', [])
+    
     try:
-        intent_response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": """You control Sonarr (TV shows), Radarr (movies), Plex, and Ombi (requests). Return ONLY valid JSON, no markdown fences:
+        system_prompt = """You control Sonarr (TV shows), Radarr (movies), Plex, and Ombi (requests). Return ONLY valid JSON, no markdown fences:
 {"intent":"<intent>","query":"title or search term","reply":"one sentence saying what you are doing","filter":{}}
 
 The "filter" field is optional. Use it for bulk/conditional operations:
@@ -2106,6 +2112,13 @@ Intent guide:
 - recommend: user wants recommendations for popular/trending/upcoming shows or movies. Use query for specifics like "comedy", "sci-fi", "upcoming movies", etc.
 - chitchat: general conversation, greetings, or questions you can answer directly
 
+CONTEXT AWARENESS — use conversation history to handle follow-ups:
+- If the user previously searched for a movie and now says "it's a show" or "it's a TV show" → use search_show with the SAME title from the prior query
+- If the user says "the TV show" or "the movie" without a title → reuse the most recent title from history
+- If the user says "add it" or "add that" → figure out what "it" refers to from history and search for it
+- If the user corrects a previous search (e.g. "no, the 2019 version") → search again with that context
+- If the user just says a title with no other context → infer add intent (search_show or search_movie) based on context
+
 IMPORTANT: Understand complex requests. Examples:
 - "Delete everything on the watchlist before 2025" → intent: plex_watchlist_remove, filter: {"before_year": 2025}
 - "Remove all movies from my watchlist" → intent: plex_watchlist_remove, filter: {"type": "movie"}
@@ -2115,9 +2128,16 @@ IMPORTANT: Understand complex requests. Examples:
 - "Delete Severance and The Bear from Sonarr" → intent: delete_show, query: "Severance, The Bear"
 
 When the user lists multiple titles, put them ALL in the query field as a comma-separated list. Do NOT paraphrase or reword titles.
-"""},
-                {"role": "user", "content": user_message}
-            ],
+"""
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        # Add last 6 turns of history for context
+        messages.extend(chat_history[-12:])
+        messages.append({"role": "user", "content": user_message})
+        
+        intent_response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
             temperature=0.1,
             max_tokens=300
         )
@@ -2134,6 +2154,16 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
         query = parsed.get('query', '')
         reply = parsed.get('reply', '')
         filters = parsed.get('filter', {})
+        
+        # Save conversation turn to session history
+        try:
+            history_entry_user = {"role": "user", "content": user_message}
+            history_entry_asst = {"role": "assistant", "content": reply or f"Performing {intent} for: {query}"}
+            chat_history = chat_history + [history_entry_user, history_entry_asst]
+            session['chat_history'] = chat_history[-12:]  # keep last 6 turns
+            session.modified = True
+        except Exception:
+            pass
         
         def multi_title_match(items, query_str, title_key='title'):
             if not query_str:
@@ -2198,7 +2228,15 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
             if not sonarr_url or not sonarr_key:
                 return jsonify({'reply': 'Sonarr is not configured.'})
             
-            all_series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
+            try:
+                resp = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15)
+                resp.raise_for_status()
+                all_series = resp.json()
+                if not isinstance(all_series, list):
+                    return jsonify({'reply': f'Unexpected response from Sonarr. Please check your Sonarr settings.'})
+            except Exception as e:
+                return jsonify({'reply': f'Could not reach Sonarr: {str(e)}'})
+            
             matches = multi_title_match(all_series, query)
             
             if not matches:
@@ -2219,7 +2257,15 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
             if not radarr_url or not radarr_key:
                 return jsonify({'reply': 'Radarr is not configured.'})
             
-            all_movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json()
+            try:
+                resp = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15)
+                resp.raise_for_status()
+                all_movies = resp.json()
+                if not isinstance(all_movies, list):
+                    return jsonify({'reply': f'Unexpected response from Radarr. Please check your Radarr settings.'})
+            except Exception as e:
+                return jsonify({'reply': f'Could not reach Radarr: {str(e)}'})
+            
             matches = multi_title_match(all_movies, query)
             
             if not matches:
