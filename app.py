@@ -2136,10 +2136,10 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
         messages.append({"role": "user", "content": user_message})
         
         intent_response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=messages,
             temperature=0.1,
-            max_tokens=300
+            max_tokens=400
         )
         
         raw = intent_response.choices[0].message.content.strip()
@@ -3205,7 +3205,40 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                 return jsonify({'reply': 'Could not generate recommendations. Please try again.'})
         
         else:
-            return jsonify({'reply': reply or raw})
+            # Chitchat — make a dedicated conversational call with full context
+            services = []
+            if sonarr_url and sonarr_key: services.append("Sonarr (TV shows)")
+            if radarr_url and radarr_key: services.append("Radarr (movies)")
+            if plex_url and plex_token: services.append("Plex (media server)")
+            services_str = ", ".join(services) if services else "no media services configured yet"
+            
+            conv_messages = [
+                {"role": "system", "content": f"""You are a knowledgeable, friendly media assistant helping manage a personal media library. You have access to {services_str}.
+
+You can help with TV shows, movies, recommendations, media management, and general conversation. Be natural, warm, and genuinely helpful — like a knowledgeable friend who loves media. Give thorough, thoughtful answers. If asked about a show or movie, share real details. If asked for an opinion or recommendation, give one confidently.
+
+Keep responses conversational and appropriately concise — not too short, not a wall of text."""}
+            ]
+            # Include conversation history for context
+            conv_messages.extend(chat_history[-12:])
+            conv_messages.append({"role": "user", "content": user_message})
+            
+            conv_response = openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=conv_messages,
+                temperature=0.7,
+                max_tokens=800
+            )
+            conv_reply = conv_response.choices[0].message.content.strip()
+            
+            # Update history with the actual conversational reply
+            try:
+                session['chat_history'][-1] = {"role": "assistant", "content": conv_reply}
+                session.modified = True
+            except Exception:
+                pass
+            
+            return jsonify({'reply': conv_reply})
     
     except Exception as e:
         print(f"[Media Chat Error] {str(e)}")
