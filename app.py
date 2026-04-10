@@ -163,9 +163,7 @@ def load_user(user_id):
 
 
 def is_setup_complete():
-    user_exists = User.query.first() is not None
-    sonarr_url = Settings.query.filter_by(key='SONARR_URL').first()
-    return user_exists and sonarr_url is not None
+    return User.query.first() is not None
 
 
 def get_setting(key, default=''):
