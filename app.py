@@ -1996,14 +1996,6 @@ def run_cleanup_api():
 def init_db():
     with app.app_context():
         db.create_all()
-        # One-time password reset — remove after next deploy
-        try:
-            u = User.query.filter_by(username='Grant').first()
-            if u:
-                u.password_hash = generate_password_hash('Gadgad77!!grantsplex')
-                db.session.commit()
-        except Exception:
-            pass
 
 init_db()
 
