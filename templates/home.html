@@ -151,6 +151,13 @@
                                 <option value="60">Under 60%</option>
                                 <option value="70">Under 70%</option>
                             </select>
+                            <select id="tv-filter-popularity" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">Any Popularity</option>
+                                <option value="100">Under 100</option>
+                                <option value="50">Under 50</option>
+                                <option value="20">Under 20</option>
+                                <option value="10">Under 10</option>
+                            </select>
                             <select id="tv-filter-size" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
                                 <option value="">Any Size</option>
                                 <option value="50">50+ GB</option>
@@ -187,6 +194,7 @@
                                         <th style="cursor:pointer" onclick="sortTV('title')">Title <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('status')">Status <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('rating_pct')">Rating <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortTV('popularity')">Popularity <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('size_bytes')">Size <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('view_count')">Views <i class="bi bi-arrow-down-up"></i></th>
                                         <th>Requester</th>
@@ -363,6 +371,13 @@
                                 <option value="60">Under 60%</option>
                                 <option value="70">Under 70%</option>
                             </select>
+                            <select id="movie-filter-popularity" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
+                                <option value="">Any Popularity</option>
+                                <option value="100">Under 100</option>
+                                <option value="50">Under 50</option>
+                                <option value="20">Under 20</option>
+                                <option value="10">Under 10</option>
+                            </select>
                             <select id="movie-filter-size" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
                                 <option value="">Any Size</option>
                                 <option value="50">50+ GB</option>
@@ -399,6 +414,7 @@
                                         <th style="cursor:pointer" onclick="sortMovies('title')">Title <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('year')">Year <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('rating_pct')">Rating <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortMovies('popularity')">Popularity <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('size_bytes')">Size <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('view_count')">Views <i class="bi bi-arrow-down-up"></i></th>
                                         <th>Requester</th>
@@ -663,6 +679,7 @@ function getFilteredTV() {
     const priorityFilter = document.getElementById('tv-filter-priority')?.value || '';
     const statusFilter = document.getElementById('tv-filter-status')?.value || '';
     const ratingMaxFilter = document.getElementById('tv-filter-rating')?.value || '';
+    const popularityMaxFilter = document.getElementById('tv-filter-popularity')?.value || '';
     const sizeFilter = document.getElementById('tv-filter-size')?.value || '';
     const viewsFilter = document.getElementById('tv-filter-views')?.value || '';
     const requesterFilter = document.getElementById('tv-filter-requester')?.value || '';
@@ -677,6 +694,10 @@ function getFilteredTV() {
         if (ratingMaxFilter) {
             const maxPct = parseInt(ratingMaxFilter);
             if (show.rating_pct !== null && show.rating_pct !== undefined && show.rating_pct >= maxPct) match = false;
+        }
+        if (popularityMaxFilter) {
+            const maxPop = parseFloat(popularityMaxFilter);
+            if (show.popularity !== null && show.popularity !== undefined && show.popularity >= maxPop) match = false;
         }
         if (sizeFilter) {
             const sizeGB = (show.size_bytes || 0) / (1024 * 1024 * 1024);
@@ -717,6 +738,7 @@ function clearTVFilters() {
     document.getElementById('tv-filter-priority').value = '';
     document.getElementById('tv-filter-status').value = '';
     document.getElementById('tv-filter-rating').value = '';
+    document.getElementById('tv-filter-popularity').value = '';
     document.getElementById('tv-filter-size').value = '';
     document.getElementById('tv-filter-views').value = '';
     document.getElementById('tv-filter-requester').value = '';
@@ -758,6 +780,12 @@ function formatRating(pct, source) {
     return `<span class="${cls}">${icon} ${pct}%</span>`;
 }
 
+function formatPopularity(pop) {
+    if (pop === null || pop === undefined) return '<span class="text-muted">—</span>';
+    const cls = pop >= 50 ? 'text-success' : pop >= 15 ? 'text-warning' : 'text-danger';
+    return `<span class="${cls}" title="TMDb popularity score">${pop}</span>`;
+}
+
 function renderTVCandidates() {
     const tbody = document.getElementById('tv-candidates-table');
     let totalSize = 0;
@@ -780,6 +808,7 @@ function renderTVCandidates() {
             <td><strong class="text-white">${escapeHtml(show.title)}</strong>${warnings}</td>
             <td class="${statusClass}">${show.status || 'N/A'}</td>
             <td>${formatRating(show.rating_pct, show.rating_source)}</td>
+            <td>${formatPopularity(show.popularity)}</td>
             <td class="text-light">${formatSize(show.size_bytes)}</td>
             <td class="text-light">${show.view_count || 0}</td>
             <td>${requester ? '<span class="text-info">' + escapeHtml(requester) + '</span>' : '<span class="text-muted">None</span>'}</td>
@@ -994,6 +1023,7 @@ function getFilteredMovies() {
     const yearFromFilter = document.getElementById('movie-filter-year-from')?.value || '';
     const yearToFilter = document.getElementById('movie-filter-year-to')?.value || '';
     const ratingMaxFilter = document.getElementById('movie-filter-rating')?.value || '';
+    const popularityMaxFilter = document.getElementById('movie-filter-popularity')?.value || '';
     const sizeFilter = document.getElementById('movie-filter-size')?.value || '';
     const viewsFilter = document.getElementById('movie-filter-views')?.value || '';
     const requesterFilter = document.getElementById('movie-filter-requester')?.value || '';
@@ -1009,6 +1039,10 @@ function getFilteredMovies() {
         if (ratingMaxFilter) {
             const maxPct = parseInt(ratingMaxFilter);
             if (movie.rating_pct !== null && movie.rating_pct !== undefined && movie.rating_pct >= maxPct) match = false;
+        }
+        if (popularityMaxFilter) {
+            const maxPop = parseFloat(popularityMaxFilter);
+            if (movie.popularity !== null && movie.popularity !== undefined && movie.popularity >= maxPop) match = false;
         }
         if (sizeFilter) {
             const sizeGB = (movie.size_bytes || 0) / (1024 * 1024 * 1024);
@@ -1050,6 +1084,7 @@ function clearMovieFilters() {
     document.getElementById('movie-filter-year-from').value = '';
     document.getElementById('movie-filter-year-to').value = '';
     document.getElementById('movie-filter-rating').value = '';
+    document.getElementById('movie-filter-popularity').value = '';
     document.getElementById('movie-filter-size').value = '';
     document.getElementById('movie-filter-views').value = '';
     document.getElementById('movie-filter-requester').value = '';
@@ -1105,6 +1140,7 @@ function renderMovieCandidates() {
             <td><strong class="text-white">${escapeHtml(movie.title)}</strong>${warnings}</td>
             <td class="text-light">${movie.year || 'N/A'}</td>
             <td>${formatRating(movie.rating_pct, movie.rating_source)}</td>
+            <td>${formatPopularity(movie.popularity)}</td>
             <td class="text-light">${formatSize(movie.size_bytes)}</td>
             <td class="text-light">${movie.view_count || 0}</td>
             <td>${requester ? '<span class="text-info">' + escapeHtml(requester) + '</span>' : '<span class="text-muted">None</span>'}</td>

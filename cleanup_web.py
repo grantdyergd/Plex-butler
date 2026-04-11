@@ -505,6 +505,7 @@ def analyze_show(
         "path": series.get("path", ""),
         "rating_pct": rating_pct,
         "rating_source": "tvdb" if rating_pct is not None else None,
+        "popularity": round(float(series.get('popularity') or 0), 1) or None,
     }
     
     added_str = series.get("added", "")

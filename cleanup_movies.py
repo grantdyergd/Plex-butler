@@ -589,6 +589,7 @@ def scan_movies_for_cleanup(config: dict, log: Callable) -> list:
             'priority_reasons': priority_reasons,
             'rating_pct': rating_pct,
             'rating_source': rating_source,
+            'popularity': round(float(movie.get('popularity') or 0), 1) or None,
         })
     
     candidates.sort(key=lambda x: (-x['priority_score'], x['title']))
