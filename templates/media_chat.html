@@ -281,6 +281,49 @@
         }
         .wl-btn-add { background: var(--accent2); color: #000; }
         .wl-btn-remove { background: rgba(248,81,73,0.15); color: var(--red); }
+        .wl-btn-watchlist { background: rgba(130,80,255,0.15); color: var(--accent); }
+        .wl-btn-watchlist-done { background: rgba(63,185,80,0.15); color: var(--green); cursor: default; }
+
+        /* ── Watchlist search ── */
+        .wl-search-bar {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .wl-search-input {
+            flex: 1;
+            padding: 9px 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 13px;
+            font-family: inherit;
+        }
+        .wl-search-input:focus { outline: none; border-color: var(--accent); }
+        .wl-search-btn {
+            padding: 9px 16px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            white-space: nowrap;
+        }
+        .wl-search-results-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .wl-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 12px 0;
+        }
 
         /* ── Calendar ── */
         .cal-item {
@@ -1064,6 +1107,98 @@
 
         if (!html) html = `<div class="state-msg">No activity data available.</div>`;
         el.innerHTML = html;
+    }
+
+    // ── Watchlist search ───────────────────────────────────────────────────
+    document.getElementById('wlSearchInput').addEventListener('keydown', e => {
+        if (e.key === 'Enter') wlSearch();
+    });
+
+    async function wlSearch() {
+        const q = document.getElementById('wlSearchInput').value.trim();
+        if (!q) return;
+        const btn = document.getElementById('wlSearchBtn');
+        const resultsEl = document.getElementById('wl-search-results');
+        const divider = document.getElementById('wlDivider');
+        btn.disabled = true;
+        btn.textContent = '…';
+        resultsEl.innerHTML = '<div class="state-msg" style="padding:10px 0"><div class="spinner"></div>Searching…</div>';
+        divider.style.display = '';
+
+        try {
+            const r = await fetch(`/api/media/search?q=${encodeURIComponent(q)}&type=all`);
+            const data = await r.json();
+            btn.disabled = false;
+            btn.textContent = 'Search';
+            if (data.error) { resultsEl.innerHTML = `<div class="state-msg">${esc(data.error)}</div>`; return; }
+            if (!data.results || data.results.length === 0) {
+                resultsEl.innerHTML = `<div class="state-msg" style="padding:10px 0">No results for "<strong>${esc(q)}</strong>"</div>`;
+                return;
+            }
+            renderWlSearchResults(data.results, resultsEl);
+        } catch(e) {
+            btn.disabled = false;
+            btn.textContent = 'Search';
+            resultsEl.innerHTML = `<div class="state-msg">Search failed. Please try again.</div>`;
+        }
+    }
+
+    function renderWlSearchResults(results, container) {
+        const grid = document.createElement('div');
+        grid.className = 'wl-search-results-grid';
+        results.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'wl-item';
+            const icon = item.mediaType === 'movie' ? '🎬' : '📺';
+            const posterHtml = item.poster
+                ? `<img class="wl-poster" src="${esc(item.poster)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;wl-poster-ph&quot;>${icon}</div>'">`
+                : `<div class="wl-poster-ph">${icon}</div>`;
+            const inLibBadge = item.inLibrary ? '<span class="badge badge-green" style="font-size:10px">In Library</span>' : '';
+            div.innerHTML = `
+                ${posterHtml}
+                <div class="wl-info">
+                    <div class="wl-title">${esc(item.title)}</div>
+                    <div class="wl-meta">${esc(item.mediaType || '')} ${item.year ? '· ' + item.year : ''}</div>
+                    <div style="margin-top:3px">${inLibBadge}</div>
+                </div>
+                <div class="wl-actions">
+                    <button class="wl-btn wl-btn-watchlist" id="wlsr-btn-${i}" onclick="addToWatchlistFromSearch(${i}, '${esc(item.title).replace(/'/g, "\\'")}')">+ Watchlist</button>
+                </div>`;
+            div.dataset.title = item.title;
+            grid.appendChild(div);
+        });
+        container.innerHTML = '';
+        container.appendChild(grid);
+    }
+
+    async function addToWatchlistFromSearch(i, title) {
+        const btn = document.getElementById(`wlsr-btn-${i}`);
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+            const r = await fetch('/api/media/plex-watchlist-add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title })
+            });
+            const data = await r.json();
+            if (data.success) {
+                btn.textContent = '✓ Added';
+                btn.className = 'wl-btn wl-btn-watchlist-done';
+                toast(`"${title}" added to Plex watchlist!`, 'success');
+                // Refresh the watchlist below so it shows immediately
+                loaded.watchlist = false;
+                loadWatchlist();
+            } else {
+                btn.textContent = '+ Watchlist';
+                btn.disabled = false;
+                toast(data.error || 'Could not add to watchlist.', 'error');
+            }
+        } catch(e) {
+            btn.textContent = '+ Watchlist';
+            btn.disabled = false;
+            toast('Failed to reach server.', 'error');
+        }
     }
 
     // ── Toast ──────────────────────────────────────────────────────────────
