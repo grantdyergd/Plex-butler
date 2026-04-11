@@ -3515,5 +3515,372 @@ def media_chat_delete():
     return jsonify({'success': False, 'error': 'Invalid delete type'})
 
 
+
+# ─── Direct Media Browser API (no AI) ────────────────────────────────────────
+
+def _plex_headers(token):
+    return {
+        'X-Plex-Token': token,
+        'X-Plex-Client-Identifier': 'media-scrubber-browser',
+        'X-Plex-Product': 'Media Scrubber',
+        'X-Plex-Version': '1.0',
+        'Accept': 'application/json'
+    }
+
+def _library_sets():
+    """Return (sonarr_titles_lower, radarr_titles_lower) for library status checks."""
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+    sonarr_set, radarr_set = set(), set()
+    if sonarr_url and sonarr_key:
+        try:
+            data = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=10).json()
+            if isinstance(data, list):
+                sonarr_set = {s.get('title', '').lower() for s in data}
+        except Exception:
+            pass
+    if radarr_url and radarr_key:
+        try:
+            data = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=10).json()
+            if isinstance(data, list):
+                radarr_set = {m.get('title', '').lower() for m in data}
+        except Exception:
+            pass
+    return sonarr_set, radarr_set
+
+def _in_lib(title, sonarr_set, radarr_set):
+    t = title.lower()
+    return t in sonarr_set or t in radarr_set
+
+
+@app.route('/api/media/search')
+@login_required
+def media_search():
+    q = request.args.get('q', '').strip()
+    media_type = request.args.get('type', 'all')  # movie | show | all
+    if not q:
+        return jsonify({'results': []})
+
+    tmdb_key = os.environ.get('TMDB_API_KEY', '')
+    if not tmdb_key:
+        return jsonify({'error': 'TMDb API key not configured.', 'results': []})
+
+    sonarr_set, radarr_set = _library_sets()
+    results = []
+
+    def fetch_tmdb(endpoint, params):
+        try:
+            r = requests.get(f"https://api.themoviedb.org/3{endpoint}",
+                             params={**params, 'api_key': tmdb_key, 'language': 'en-US'},
+                             timeout=10)
+            return r.json().get('results', [])
+        except Exception:
+            return []
+
+    def enrich(items, mtype):
+        out = []
+        for item in items[:6]:
+            title = item.get('title') or item.get('name', '')
+            year = (item.get('release_date') or item.get('first_air_date') or '')[:4]
+            in_library = _in_lib(title, sonarr_set, radarr_set)
+            out.append({
+                'tmdbId': item.get('id'),
+                'title': title,
+                'year': year,
+                'overview': item.get('overview', ''),
+                'poster': f"https://image.tmdb.org/t/p/w185{item['poster_path']}" if item.get('poster_path') else None,
+                'rating': round(item.get('vote_average', 0), 1),
+                'mediaType': mtype,
+                'inLibrary': in_library,
+            })
+        return out
+
+    if media_type in ('movie', 'all'):
+        items = fetch_tmdb('/search/movie', {'query': q})
+        results.extend(enrich(items, 'movie'))
+    if media_type in ('show', 'all'):
+        items = fetch_tmdb('/search/tv', {'query': q})
+        results.extend(enrich(items, 'show'))
+
+    # Sort: in-library last so new results are prominent
+    results.sort(key=lambda x: (x['inLibrary'], -float(x['rating'] or 0)))
+    return jsonify({'results': results})
+
+
+@app.route('/api/media/watchlist')
+@login_required
+def media_watchlist():
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    if not plex_token:
+        return jsonify({'error': 'Plex token not configured.', 'items': []})
+
+    headers = _plex_headers(plex_token)
+    sonarr_set, radarr_set = _library_sets()
+
+    try:
+        all_items = []
+        offset = 0
+        page_size = 100
+        total_size = None
+
+        while True:
+            resp = requests.get(
+                "https://discover.provider.plex.tv/library/sections/watchlist/all",
+                params={'X-Plex-Container-Start': offset, 'X-Plex-Container-Size': page_size},
+                headers=headers, timeout=15
+            )
+            if resp.status_code == 401:
+                return jsonify({'error': 'Plex authentication failed. Check your Plex token in Settings.', 'items': []})
+            if not resp.ok:
+                return jsonify({'error': f'Plex error (status {resp.status_code}).', 'items': []})
+
+            data = resp.json()
+            container = data.get('MediaContainer', {})
+            items = container.get('Metadata', [])
+            if total_size is None:
+                total_size = container.get('totalSize', len(items))
+            if not items:
+                break
+            all_items.extend(items)
+            offset += len(items)
+            if offset >= total_size:
+                break
+
+        result = []
+        for item in all_items:
+            title = item.get('title', '')
+            thumb = item.get('thumb', '')
+            poster = thumb if thumb and thumb.startswith('http') else None
+            result.append({
+                'title': title,
+                'year': item.get('year', ''),
+                'mediaType': item.get('type', ''),
+                'ratingKey': item.get('ratingKey', ''),
+                'guid': item.get('guid', ''),
+                'poster': poster,
+                'inLibrary': _in_lib(title, sonarr_set, radarr_set),
+            })
+
+        return jsonify({'items': result, 'total': total_size})
+    except Exception as e:
+        print(f"[Watchlist Error] {e}")
+        return jsonify({'error': 'Could not fetch watchlist. Check your Plex token.', 'items': []})
+
+
+@app.route('/api/media/queue')
+@login_required
+def media_queue():
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+
+    sonarr_queue, radarr_queue = [], []
+
+    if sonarr_url and sonarr_key:
+        try:
+            data = requests.get(f"{sonarr_url}/api/v3/queue", params={'apikey': sonarr_key, 'pageSize': 50}, timeout=10).json()
+            for item in data.get('records', []):
+                size = item.get('size', 0)
+                sizeleft = item.get('sizeleft', 0)
+                pct = round((1 - sizeleft / size) * 100) if size else 0
+                sonarr_queue.append({
+                    'title': item.get('series', {}).get('title', 'Unknown'),
+                    'episode': f"S{item.get('seasonNumber',0):02d}E{item.get('episodeNumbers',[0])[0]:02d}" if item.get('episodeNumbers') else '',
+                    'status': item.get('status', ''),
+                    'pct': pct,
+                    'size': round((size - sizeleft) / (1024**3), 2),
+                    'total': round(size / (1024**3), 2),
+                })
+        except Exception as e:
+            print(f"[Queue Sonarr] {e}")
+
+    if radarr_url and radarr_key:
+        try:
+            data = requests.get(f"{radarr_url}/api/v3/queue", params={'apikey': radarr_key, 'pageSize': 50}, timeout=10).json()
+            for item in data.get('records', []):
+                size = item.get('size', 0)
+                sizeleft = item.get('sizeleft', 0)
+                pct = round((1 - sizeleft / size) * 100) if size else 0
+                radarr_queue.append({
+                    'title': item.get('movie', {}).get('title', 'Unknown'),
+                    'episode': '',
+                    'status': item.get('status', ''),
+                    'pct': pct,
+                    'size': round((size - sizeleft) / (1024**3), 2),
+                    'total': round(size / (1024**3), 2),
+                })
+        except Exception as e:
+            print(f"[Queue Radarr] {e}")
+
+    return jsonify({'sonarr': sonarr_queue, 'radarr': radarr_queue})
+
+
+@app.route('/api/media/recent')
+@login_required
+def media_recent():
+    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    if not plex_url or not plex_token:
+        return jsonify({'error': 'Plex not configured.', 'items': []})
+
+    try:
+        resp = requests.get(
+            f"{plex_url}/library/recentlyAdded",
+            params={'X-Plex-Token': plex_token, 'X-Plex-Container-Size': 40},
+            headers={'Accept': 'application/json'}, timeout=10
+        )
+        resp.raise_for_status()
+        items_raw = resp.json().get('MediaContainer', {}).get('Metadata', [])
+        items = []
+        for item in items_raw:
+            mtype = item.get('type', '')
+            if mtype == 'movie':
+                label = item.get('title', '')
+                sub = str(item.get('year', ''))
+            elif mtype == 'season':
+                label = item.get('parentTitle', item.get('title', ''))
+                sub = item.get('title', '')
+            elif mtype == 'episode':
+                label = item.get('grandparentTitle', '')
+                s, e = item.get('parentIndex', ''), item.get('index', '')
+                sub = f"S{s:02d}E{e:02d} {item.get('title','')}" if isinstance(s, int) and isinstance(e, int) else item.get('title', '')
+            else:
+                label = item.get('title', '')
+                sub = ''
+            thumb = item.get('thumb') or item.get('parentThumb') or item.get('grandparentThumb') or ''
+            poster = f"{plex_url}{thumb}?X-Plex-Token={plex_token}" if thumb and not thumb.startswith('http') else thumb
+            items.append({'label': label, 'sub': sub, 'type': mtype, 'poster': poster})
+        return jsonify({'items': items})
+    except Exception as e:
+        print(f"[Recent Error] {e}")
+        return jsonify({'error': 'Could not fetch recently added.', 'items': []})
+
+
+@app.route('/api/media/calendar')
+@login_required
+def media_calendar():
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+
+    today = datetime.now().strftime('%Y-%m-%d')
+    end = (datetime.now() + timedelta(days=14)).strftime('%Y-%m-%d')
+    episodes, movies = [], []
+
+    if sonarr_url and sonarr_key:
+        try:
+            cal = requests.get(f"{sonarr_url}/api/v3/calendar",
+                               params={'apikey': sonarr_key, 'start': today, 'end': end}, timeout=10).json()
+            for ep in (cal if isinstance(cal, list) else []):
+                episodes.append({
+                    'show': ep.get('series', {}).get('title', 'Unknown'),
+                    'episode': f"S{ep.get('seasonNumber',0):02d}E{ep.get('episodeNumber',0):02d}",
+                    'title': ep.get('title', ''),
+                    'airDate': ep.get('airDate', ''),
+                    'hasFile': ep.get('hasFile', False),
+                })
+        except Exception as e:
+            print(f"[Calendar Sonarr] {e}")
+
+    if radarr_url and radarr_key:
+        try:
+            cal = requests.get(f"{radarr_url}/api/v3/calendar",
+                               params={'apikey': radarr_key, 'start': today, 'end': end}, timeout=10).json()
+            for m in (cal if isinstance(cal, list) else []):
+                movies.append({
+                    'title': m.get('title', 'Unknown'),
+                    'year': m.get('year', ''),
+                    'date': (m.get('digitalRelease') or m.get('inCinemas') or '')[:10],
+                    'hasFile': m.get('hasFile', False),
+                })
+        except Exception as e:
+            print(f"[Calendar Radarr] {e}")
+
+    return jsonify({'episodes': episodes, 'movies': movies, 'from': today, 'to': end})
+
+
+@app.route('/api/media/disk')
+@login_required
+def media_disk():
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+
+    info = {}
+
+    if sonarr_url and sonarr_key:
+        try:
+            roots = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=8).json()
+            series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=10).json()
+            free = sum(r.get('freeSpace', 0) for r in roots) if isinstance(roots, list) else 0
+            used = sum(s.get('statistics', {}).get('sizeOnDisk', 0) for s in series) if isinstance(series, list) else 0
+            info['sonarr'] = {
+                'freeGB': round(free / 1024**3, 1),
+                'usedGB': round(used / 1024**3, 1),
+                'shows': len(series) if isinstance(series, list) else 0,
+                'episodes': sum(s.get('statistics', {}).get('episodeFileCount', 0) for s in series) if isinstance(series, list) else 0,
+            }
+        except Exception as e:
+            print(f"[Disk Sonarr] {e}")
+
+    if radarr_url and radarr_key:
+        try:
+            roots = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=8).json()
+            movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=10).json()
+            free = sum(r.get('freeSpace', 0) for r in roots) if isinstance(roots, list) else 0
+            used = sum(m.get('sizeOnDisk', 0) for m in movies) if isinstance(movies, list) else 0
+            info['radarr'] = {
+                'freeGB': round(free / 1024**3, 1),
+                'usedGB': round(used / 1024**3, 1),
+                'movies': len(movies) if isinstance(movies, list) else 0,
+                'downloaded': sum(1 for m in movies if m.get('hasFile')) if isinstance(movies, list) else 0,
+            }
+        except Exception as e:
+            print(f"[Disk Radarr] {e}")
+
+    return jsonify(info)
+
+
+@app.route('/api/media/sonarr-search')
+@login_required
+def media_sonarr_search():
+    q = request.args.get('q', '').strip()
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    if not sonarr_url or not sonarr_key:
+        return jsonify({'error': 'Sonarr not configured.', 'results': [], 'profiles': []})
+    try:
+        results = requests.get(f"{sonarr_url}/api/v3/series/lookup", params={'term': q, 'apikey': sonarr_key}, timeout=15).json()
+        profiles = requests.get(f"{sonarr_url}/api/v3/qualityprofile", params={'apikey': sonarr_key}, timeout=10).json()
+        results = results[:8] if isinstance(results, list) else []
+        profiles = [{'id': p['id'], 'name': p['name']} for p in profiles] if isinstance(profiles, list) else []
+        return jsonify({'results': results, 'profiles': profiles})
+    except Exception as e:
+        return jsonify({'error': str(e), 'results': [], 'profiles': []})
+
+
+@app.route('/api/media/radarr-search')
+@login_required
+def media_radarr_search():
+    q = request.args.get('q', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+    if not radarr_url or not radarr_key:
+        return jsonify({'error': 'Radarr not configured.', 'results': [], 'profiles': []})
+    try:
+        results = requests.get(f"{radarr_url}/api/v3/movie/lookup", params={'term': q, 'apikey': radarr_key}, timeout=15).json()
+        profiles = requests.get(f"{radarr_url}/api/v3/qualityprofile", params={'apikey': radarr_key}, timeout=10).json()
+        results = results[:8] if isinstance(results, list) else []
+        profiles = [{'id': p['id'], 'name': p['name']} for p in profiles] if isinstance(profiles, list) else []
+        return jsonify({'results': results, 'profiles': profiles})
+    except Exception as e:
+        return jsonify({'error': str(e), 'results': [], 'profiles': []})
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
