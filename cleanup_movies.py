@@ -548,6 +548,25 @@ def scan_movies_for_cleanup(config: dict, log: Callable) -> list:
             movie, watch_info, requester, config
         )
         
+        # Extract ratings: prefer Rotten Tomatoes, then IMDB×10, then TMDb×10
+        ratings_data = movie.get('ratings', {}) or {}
+        rating_pct = None
+        rating_source = None
+        rt = ratings_data.get('rottenTomatoes', {}) or {}
+        if rt.get('value') is not None and rt.get('value', 0) > 0:
+            rating_pct = int(rt['value'])
+            rating_source = 'rt'
+        else:
+            imdb_r = ratings_data.get('imdb', {}) or {}
+            if imdb_r.get('value') is not None and imdb_r.get('value', 0) > 0:
+                rating_pct = int(round(imdb_r['value'] * 10))
+                rating_source = 'imdb'
+            else:
+                tmdb_r = ratings_data.get('tmdb', {}) or {}
+                if tmdb_r.get('value') is not None and tmdb_r.get('value', 0) > 0:
+                    rating_pct = int(round(tmdb_r['value'] * 10))
+                    rating_source = 'tmdb'
+
         candidates.append({
             'id': movie.get('id'),
             'title': title,
@@ -567,7 +586,9 @@ def scan_movies_for_cleanup(config: dict, log: Callable) -> list:
             'requester_email': requester.get('email', ''),
             'priority_score': priority_score,
             'priority_label': priority_label,
-            'priority_reasons': priority_reasons
+            'priority_reasons': priority_reasons,
+            'rating_pct': rating_pct,
+            'rating_source': rating_source,
         })
     
     candidates.sort(key=lambda x: (-x['priority_score'], x['title']))

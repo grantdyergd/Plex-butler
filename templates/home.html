@@ -124,68 +124,57 @@
                         <div id="tv-ai-content" class="small"></div>
                     </div>
                     <div class="card-body p-2 border-bottom">
-                        <div class="row g-2 align-items-center">
-                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Filters:</label></div>
-                            <div class="col-auto">
-                                <select id="tv-filter-priority" class="form-select form-select-sm" onchange="applyTVFilters()">
-                                    <option value="">All Priorities</option>
-                                    <option value="High">High</option>
-                                    <option value="Medium">Medium</option>
-                                    <option value="Low">Low</option>
-                                </select>
+                        <div class="d-flex gap-2 align-items-center mb-2">
+                            <div class="flex-grow-1 position-relative">
+                                <i class="bi bi-search position-absolute text-muted" style="top:50%;left:.6rem;transform:translateY(-50%);pointer-events:none;font-size:.8rem"></i>
+                                <input type="text" id="tv-filter-title" class="form-control form-control-sm ps-4" placeholder="Search title..." oninput="applyTVFilters()">
                             </div>
-                            <div class="col-auto">
-                                <select id="tv-filter-status" class="form-select form-select-sm" onchange="applyTVFilters()">
-                                    <option value="">All Status</option>
-                                    <option value="Ended">Ended</option>
-                                    <option value="Continuing">Continuing</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <select id="tv-filter-size" class="form-select form-select-sm" onchange="applyTVFilters()">
-                                    <option value="">Any Size</option>
-                                    <option value="50">50+ GB</option>
-                                    <option value="20">20+ GB</option>
-                                    <option value="10">10+ GB</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <select id="tv-filter-views" class="form-select form-select-sm" onchange="applyTVFilters()">
-                                    <option value="">Any Views</option>
-                                    <option value="0">Never Watched</option>
-                                    <option value="1+">1+ Views</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <select id="tv-filter-requester" class="form-select form-select-sm" onchange="applyTVFilters()">
-                                    <option value="">Any Requester</option>
-                                    <option value="none">No Requester</option>
-                                    <option value="has">Has Requester</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <select id="tv-filter-location" class="form-select form-select-sm" onchange="applyTVFilters()">
-                                    <option value="">All Locations</option>
-                                </select>
-                            </div>
-                            <div class="col">
-                                <input type="text" id="tv-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyTVFilters()">
-                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="clearTVFilters()"><i class="bi bi-x-circle me-1"></i>Clear</button>
+                            <span class="badge bg-info" id="tv-filtered-count">0 shown</span>
                         </div>
-                        <div class="row g-2 align-items-center mt-1">
-                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Added:</label></div>
-                            <div class="col-auto">
-                                <input type="date" id="tv-filter-added-from" class="form-control form-control-sm" onchange="applyTVFilters()" title="Added from">
-                            </div>
-                            <div class="col-auto"><span class="text-muted small">to</span></div>
-                            <div class="col-auto">
-                                <input type="date" id="tv-filter-added-to" class="form-control form-control-sm" onchange="applyTVFilters()" title="Added to">
-                            </div>
-                            <div class="col-auto">
-                                <button class="btn btn-sm btn-outline-secondary" onclick="clearTVFilters()"><i class="bi bi-x-circle me-1"></i>Clear</button>
-                            </div>
-                            <div class="col-auto">
-                                <span class="badge bg-info" id="tv-filtered-count">0 shown</span>
+                        <div class="d-flex flex-wrap gap-2">
+                            <select id="tv-filter-priority" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">All Priorities</option>
+                                <option value="High">High</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Low">Low</option>
+                            </select>
+                            <select id="tv-filter-status" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">Any Status</option>
+                                <option value="Ended">Ended</option>
+                                <option value="Continuing">Continuing</option>
+                            </select>
+                            <select id="tv-filter-rating" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">Any Rating</option>
+                                <option value="40">Under 40%</option>
+                                <option value="50">Under 50%</option>
+                                <option value="60">Under 60%</option>
+                                <option value="70">Under 70%</option>
+                            </select>
+                            <select id="tv-filter-size" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">Any Size</option>
+                                <option value="50">50+ GB</option>
+                                <option value="20">20+ GB</option>
+                                <option value="10">10+ GB</option>
+                            </select>
+                            <select id="tv-filter-views" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">Any Watches</option>
+                                <option value="0">Never Watched</option>
+                                <option value="1+">Watched 1+</option>
+                            </select>
+                            <select id="tv-filter-requester" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">Any Requester</option>
+                                <option value="none">No Requester</option>
+                                <option value="has">Has Requester</option>
+                            </select>
+                            <select id="tv-filter-location" class="form-select form-select-sm" style="width:auto" onchange="applyTVFilters()">
+                                <option value="">All Locations</option>
+                            </select>
+                            <div class="d-flex gap-1 align-items-center">
+                                <span class="text-muted small">Added:</span>
+                                <input type="date" id="tv-filter-added-from" class="form-control form-control-sm" style="width:130px" onchange="applyTVFilters()">
+                                <span class="text-muted small">–</span>
+                                <input type="date" id="tv-filter-added-to" class="form-control form-control-sm" style="width:130px" onchange="applyTVFilters()">
                             </div>
                         </div>
                     </div>
@@ -197,6 +186,7 @@
                                         <th style="cursor:pointer" onclick="sortTV('priority_score')">Priority <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('title')">Title <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('status')">Status <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortTV('rating_pct')">Rating <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('size_bytes')">Size <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortTV('view_count')">Views <i class="bi bi-arrow-down-up"></i></th>
                                         <th>Requester</th>
@@ -346,61 +336,57 @@
                         <div id="movie-ai-content" class="small"></div>
                     </div>
                     <div class="card-body p-2 border-bottom">
-                        <div class="row g-2 align-items-center">
-                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Filters:</label></div>
-                            <div class="col-auto">
-                                <select id="movie-filter-priority" class="form-select form-select-sm" onchange="applyMovieFilters()">
-                                    <option value="">All Priorities</option>
-                                    <option value="High">High</option>
-                                    <option value="Medium">Medium</option>
-                                    <option value="Low">Low</option>
-                                </select>
+                        <div class="d-flex gap-2 align-items-center mb-2">
+                            <div class="flex-grow-1 position-relative">
+                                <i class="bi bi-search position-absolute text-muted" style="top:50%;left:.6rem;transform:translateY(-50%);pointer-events:none;font-size:.8rem"></i>
+                                <input type="text" id="movie-filter-title" class="form-control form-control-sm ps-4" placeholder="Search title..." oninput="applyMovieFilters()">
                             </div>
-                            <div class="col-auto">
-                                <select id="movie-filter-size" class="form-select form-select-sm" onchange="applyMovieFilters()">
-                                    <option value="">Any Size</option>
-                                    <option value="50">50+ GB</option>
-                                    <option value="20">20+ GB</option>
-                                    <option value="10">10+ GB</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <select id="movie-filter-views" class="form-select form-select-sm" onchange="applyMovieFilters()">
-                                    <option value="">Any Views</option>
-                                    <option value="0">Never Watched</option>
-                                    <option value="1+">1+ Views</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <select id="movie-filter-requester" class="form-select form-select-sm" onchange="applyMovieFilters()">
-                                    <option value="">Any Requester</option>
-                                    <option value="none">No Requester</option>
-                                    <option value="has">Has Requester</option>
-                                </select>
-                            </div>
-                            <div class="col-auto">
-                                <select id="movie-filter-location" class="form-select form-select-sm" onchange="applyMovieFilters()">
-                                    <option value="">All Locations</option>
-                                </select>
-                            </div>
-                            <div class="col">
-                                <input type="text" id="movie-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyMovieFilters()">
-                            </div>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="clearMovieFilters()"><i class="bi bi-x-circle me-1"></i>Clear</button>
+                            <span class="badge bg-info" id="movie-filtered-count">0 shown</span>
                         </div>
-                        <div class="row g-2 align-items-center mt-1">
-                            <div class="col-auto"><label class="form-label mb-0 small fw-bold">Added:</label></div>
-                            <div class="col-auto">
-                                <input type="date" id="movie-filter-added-from" class="form-control form-control-sm" onchange="applyMovieFilters()" title="Added from">
+                        <div class="d-flex flex-wrap gap-2">
+                            <select id="movie-filter-priority" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
+                                <option value="">All Priorities</option>
+                                <option value="High">High</option>
+                                <option value="Medium">Medium</option>
+                                <option value="Low">Low</option>
+                            </select>
+                            <div class="d-flex gap-1 align-items-center">
+                                <input type="number" id="movie-filter-year-from" class="form-control form-control-sm" placeholder="Year from" min="1900" max="2030" style="width:100px" oninput="applyMovieFilters()">
+                                <span class="text-muted small">–</span>
+                                <input type="number" id="movie-filter-year-to" class="form-control form-control-sm" placeholder="to" min="1900" max="2030" style="width:75px" oninput="applyMovieFilters()">
                             </div>
-                            <div class="col-auto"><span class="text-muted small">to</span></div>
-                            <div class="col-auto">
-                                <input type="date" id="movie-filter-added-to" class="form-control form-control-sm" onchange="applyMovieFilters()" title="Added to">
-                            </div>
-                            <div class="col-auto">
-                                <button class="btn btn-sm btn-outline-secondary" onclick="clearMovieFilters()"><i class="bi bi-x-circle me-1"></i>Clear</button>
-                            </div>
-                            <div class="col-auto">
-                                <span class="badge bg-info" id="movie-filtered-count">0 shown</span>
+                            <select id="movie-filter-rating" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
+                                <option value="">Any Rating</option>
+                                <option value="40">🍅 Under 40%</option>
+                                <option value="50">🍅 Under 50%</option>
+                                <option value="60">Under 60%</option>
+                                <option value="70">Under 70%</option>
+                            </select>
+                            <select id="movie-filter-size" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
+                                <option value="">Any Size</option>
+                                <option value="50">50+ GB</option>
+                                <option value="20">20+ GB</option>
+                                <option value="10">10+ GB</option>
+                            </select>
+                            <select id="movie-filter-views" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
+                                <option value="">Any Watches</option>
+                                <option value="0">Never Watched</option>
+                                <option value="1+">Watched 1+</option>
+                            </select>
+                            <select id="movie-filter-requester" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
+                                <option value="">Any Requester</option>
+                                <option value="none">No Requester</option>
+                                <option value="has">Has Requester</option>
+                            </select>
+                            <select id="movie-filter-location" class="form-select form-select-sm" style="width:auto" onchange="applyMovieFilters()">
+                                <option value="">All Locations</option>
+                            </select>
+                            <div class="d-flex gap-1 align-items-center">
+                                <span class="text-muted small">Added:</span>
+                                <input type="date" id="movie-filter-added-from" class="form-control form-control-sm" style="width:130px" onchange="applyMovieFilters()">
+                                <span class="text-muted small">–</span>
+                                <input type="date" id="movie-filter-added-to" class="form-control form-control-sm" style="width:130px" onchange="applyMovieFilters()">
                             </div>
                         </div>
                     </div>
@@ -412,6 +398,7 @@
                                         <th style="cursor:pointer" onclick="sortMovies('priority_score')">Priority <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('title')">Title <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('year')">Year <i class="bi bi-arrow-down-up"></i></th>
+                                        <th style="cursor:pointer" onclick="sortMovies('rating_pct')">Rating <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('size_bytes')">Size <i class="bi bi-arrow-down-up"></i></th>
                                         <th style="cursor:pointer" onclick="sortMovies('view_count')">Views <i class="bi bi-arrow-down-up"></i></th>
                                         <th>Requester</th>
@@ -675,6 +662,7 @@ function getFilteredTV() {
     }
     const priorityFilter = document.getElementById('tv-filter-priority')?.value || '';
     const statusFilter = document.getElementById('tv-filter-status')?.value || '';
+    const ratingMaxFilter = document.getElementById('tv-filter-rating')?.value || '';
     const sizeFilter = document.getElementById('tv-filter-size')?.value || '';
     const viewsFilter = document.getElementById('tv-filter-views')?.value || '';
     const requesterFilter = document.getElementById('tv-filter-requester')?.value || '';
@@ -686,6 +674,10 @@ function getFilteredTV() {
         let match = true;
         if (priorityFilter && show.priority_label !== priorityFilter) match = false;
         if (statusFilter && show.status !== statusFilter) match = false;
+        if (ratingMaxFilter) {
+            const maxPct = parseInt(ratingMaxFilter);
+            if (show.rating_pct !== null && show.rating_pct !== undefined && show.rating_pct >= maxPct) match = false;
+        }
         if (sizeFilter) {
             const sizeGB = (show.size_bytes || 0) / (1024 * 1024 * 1024);
             if (sizeGB < parseInt(sizeFilter)) match = false;
@@ -724,6 +716,7 @@ function applyTVFilters() {
 function clearTVFilters() {
     document.getElementById('tv-filter-priority').value = '';
     document.getElementById('tv-filter-status').value = '';
+    document.getElementById('tv-filter-rating').value = '';
     document.getElementById('tv-filter-size').value = '';
     document.getElementById('tv-filter-views').value = '';
     document.getElementById('tv-filter-requester').value = '';
@@ -758,6 +751,13 @@ function sortTVIndices() {
     });
 }
 
+function formatRating(pct, source) {
+    if (pct === null || pct === undefined) return '<span class="text-muted">—</span>';
+    const cls = pct >= 60 ? 'text-success' : pct >= 40 ? 'text-warning' : 'text-danger';
+    const icon = source === 'rt' ? '🍅' : source === 'imdb' ? '⭐' : '★';
+    return `<span class="${cls}">${icon} ${pct}%</span>`;
+}
+
 function renderTVCandidates() {
     const tbody = document.getElementById('tv-candidates-table');
     let totalSize = 0;
@@ -779,6 +779,7 @@ function renderTVCandidates() {
             <td><span class="badge ${priorityClass}">${show.priority_score}</span><br><small class="text-light">${show.priority_label}</small></td>
             <td><strong class="text-white">${escapeHtml(show.title)}</strong>${warnings}</td>
             <td class="${statusClass}">${show.status || 'N/A'}</td>
+            <td>${formatRating(show.rating_pct, show.rating_source)}</td>
             <td class="text-light">${formatSize(show.size_bytes)}</td>
             <td class="text-light">${show.view_count || 0}</td>
             <td>${requester ? '<span class="text-info">' + escapeHtml(requester) + '</span>' : '<span class="text-muted">None</span>'}</td>
@@ -990,6 +991,9 @@ function getFilteredMovies() {
         console.warn('Date filter read error:', e);
     }
     const priorityFilter = document.getElementById('movie-filter-priority')?.value || '';
+    const yearFromFilter = document.getElementById('movie-filter-year-from')?.value || '';
+    const yearToFilter = document.getElementById('movie-filter-year-to')?.value || '';
+    const ratingMaxFilter = document.getElementById('movie-filter-rating')?.value || '';
     const sizeFilter = document.getElementById('movie-filter-size')?.value || '';
     const viewsFilter = document.getElementById('movie-filter-views')?.value || '';
     const requesterFilter = document.getElementById('movie-filter-requester')?.value || '';
@@ -1000,6 +1004,12 @@ function getFilteredMovies() {
     movieCandidates.forEach((movie, index) => {
         let match = true;
         if (priorityFilter && movie.priority_label !== priorityFilter) match = false;
+        if (yearFromFilter && movie.year && movie.year < parseInt(yearFromFilter)) match = false;
+        if (yearToFilter && movie.year && movie.year > parseInt(yearToFilter)) match = false;
+        if (ratingMaxFilter) {
+            const maxPct = parseInt(ratingMaxFilter);
+            if (movie.rating_pct !== null && movie.rating_pct !== undefined && movie.rating_pct >= maxPct) match = false;
+        }
         if (sizeFilter) {
             const sizeGB = (movie.size_bytes || 0) / (1024 * 1024 * 1024);
             if (sizeGB < parseInt(sizeFilter)) match = false;
@@ -1037,6 +1047,9 @@ function applyMovieFilters() {
 
 function clearMovieFilters() {
     document.getElementById('movie-filter-priority').value = '';
+    document.getElementById('movie-filter-year-from').value = '';
+    document.getElementById('movie-filter-year-to').value = '';
+    document.getElementById('movie-filter-rating').value = '';
     document.getElementById('movie-filter-size').value = '';
     document.getElementById('movie-filter-views').value = '';
     document.getElementById('movie-filter-requester').value = '';
@@ -1091,6 +1104,7 @@ function renderMovieCandidates() {
             <td><span class="badge ${priorityClass}">${movie.priority_score}</span><br><small class="text-light">${movie.priority_label}</small></td>
             <td><strong class="text-white">${escapeHtml(movie.title)}</strong>${warnings}</td>
             <td class="text-light">${movie.year || 'N/A'}</td>
+            <td>${formatRating(movie.rating_pct, movie.rating_source)}</td>
             <td class="text-light">${formatSize(movie.size_bytes)}</td>
             <td class="text-light">${movie.view_count || 0}</td>
             <td>${requester ? '<span class="text-info">' + escapeHtml(requester) + '</span>' : '<span class="text-muted">None</span>'}</td>

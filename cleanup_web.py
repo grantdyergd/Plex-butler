@@ -481,6 +481,11 @@ def analyze_show(
     episode_count = statistics.get("episodeFileCount", 0)
     season_count = statistics.get("seasonCount", 0)
     
+    # Extract Sonarr rating (TVdb score 0-10, convert to 0-100 pct)
+    ratings_data = series.get('ratings', {}) or {}
+    raw_rating = ratings_data.get('value')
+    rating_pct = int(round(raw_rating * 10)) if raw_rating and raw_rating > 0 else None
+
     result = {
         "id": series_id,
         "title": title,
@@ -497,7 +502,9 @@ def analyze_show(
         "season_count": season_count,
         "monitored": series.get("monitored", False),
         "quality_profile": series.get("qualityProfileId", 0),
-        "path": series.get("path", "")
+        "path": series.get("path", ""),
+        "rating_pct": rating_pct,
+        "rating_source": "tvdb" if rating_pct is not None else None,
     }
     
     added_str = series.get("added", "")
