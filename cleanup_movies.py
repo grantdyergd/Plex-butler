@@ -201,45 +201,70 @@ def get_plex_movie_watch_history(config: dict, log: Callable, limit: int = 0, fo
         movie_tmdb_ids = {}
         movie_titles = {}
         
-        log("[INFO] Fetching server-level movie watch history...")
+        log("[INFO] Fetching movie watch history for ALL server accounts (admin + shared users)...")
         try:
-            history = plex.history(maxresults=50000)
-            log(f"[INFO] Processing {len(history)} total history entries...")
-            
-            for item in history:
-                try:
-                    if item.type != 'movie':
+            all_accounts = plex.systemAccounts()
+            log(f"[INFO] Found {len(all_accounts)} accounts on server — fetching history for each...")
+        except Exception as e:
+            log(f"[WARNING] Could not enumerate accounts ({e}), falling back to server-level history")
+            all_accounts = [None]
+
+        total_entries = 0
+        for account in all_accounts:
+            try:
+                if account is None:
+                    account_history = plex.history(maxresults=50000)
+                    label = "server"
+                else:
+                    account_id = getattr(account, 'accountID', getattr(account, 'id', None))
+                    account_name = getattr(account, 'name', str(account_id))
+                    if account_id is None:
                         continue
-                    
-                    movie_key = item.ratingKey
-                    movie_title = item.title
-                    watched_at = item.viewedAt if hasattr(item, 'viewedAt') else None
-                    
-                    movie_titles[movie_key] = movie_title
-                    movie_view_counts[movie_key] = movie_view_counts.get(movie_key, 0) + 1
-                    
-                    if watched_at:
-                        if movie_key not in movie_last_watched or watched_at > movie_last_watched[movie_key]:
-                            movie_last_watched[movie_key] = watched_at
-                    
-                    if hasattr(item, 'guids'):
-                        for guid in item.guids:
-                            guid_str = str(guid.id) if hasattr(guid, 'id') else str(guid)
-                            tmdb_id = extract_tmdb_id_from_guid(guid_str)
+                    account_history = plex.history(maxresults=50000, accountID=account_id)
+                    label = account_name
+
+                user_entries = 0
+                for item in account_history:
+                    try:
+                        if item.type != 'movie':
+                            continue
+
+                        movie_key = item.ratingKey
+                        movie_title = item.title
+                        watched_at = item.viewedAt if hasattr(item, 'viewedAt') else None
+
+                        movie_titles[movie_key] = movie_title
+                        movie_view_counts[movie_key] = movie_view_counts.get(movie_key, 0) + 1
+                        user_entries += 1
+
+                        if watched_at:
+                            if movie_key not in movie_last_watched or watched_at > movie_last_watched[movie_key]:
+                                movie_last_watched[movie_key] = watched_at
+
+                        if hasattr(item, 'guids'):
+                            for guid in item.guids:
+                                guid_str = str(guid.id) if hasattr(guid, 'id') else str(guid)
+                                tmdb_id = extract_tmdb_id_from_guid(guid_str)
+                                if tmdb_id:
+                                    movie_tmdb_ids[movie_key] = tmdb_id
+                                    break
+                        elif hasattr(item, 'guid'):
+                            tmdb_id = extract_tmdb_id_from_guid(str(item.guid))
                             if tmdb_id:
                                 movie_tmdb_ids[movie_key] = tmdb_id
-                                break
-                    elif hasattr(item, 'guid'):
-                        tmdb_id = extract_tmdb_id_from_guid(str(item.guid))
-                        if tmdb_id:
-                            movie_tmdb_ids[movie_key] = tmdb_id
-                
-                except Exception:
-                    continue
-            
-            log(f"[INFO] Found {len(movie_view_counts)} movies in history")
-        except Exception as e:
-            log(f"[WARNING] Could not fetch server history: {e}")
+
+                    except Exception:
+                        continue
+
+                total_entries += user_entries
+                if user_entries > 0:
+                    log(f"[INFO] {label}: {user_entries} movie plays")
+            except Exception as e:
+                label = getattr(account, 'name', str(account)) if account is not None else 'server'
+                log(f"[WARNING] Could not get history for {label}: {e}")
+                continue
+
+        log(f"[INFO] Merged {total_entries} total movie plays across all users — {len(movie_view_counts)} unique movies watched")
         
         for movie_key in movie_view_counts:
             tmdb_id = movie_tmdb_ids.get(movie_key)

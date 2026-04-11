@@ -181,38 +181,62 @@ def get_plex_watch_history(config: dict, log: Callable, limit: int = 0, force_re
         show_tvdb_ids = {}
         show_titles = {}
         
-        log("[INFO] Fetching server-level watch history (includes all users)...")
+        log("[INFO] Fetching watch history for ALL server accounts (admin + shared users)...")
         try:
-            history = plex.history(maxresults=50000)
-            log(f"[INFO] Processing {len(history)} total history entries...")
-            
-            for item in history:
-                try:
-                    if item.type != 'episode':
-                        continue
-                    
-                    if hasattr(item, 'grandparentTitle') and item.grandparentTitle:
-                        show_title = item.grandparentTitle
-                        show_key = item.grandparentRatingKey if hasattr(item, 'grandparentRatingKey') else show_title
-                    else:
-                        continue
-                    
-                    viewed_at = item.viewedAt if hasattr(item, 'viewedAt') else None
-                    if not viewed_at:
-                        continue
-                    
-                    show_view_counts[show_key] = show_view_counts.get(show_key, 0) + 1
-                    
-                    if show_key not in show_last_watched or viewed_at > show_last_watched[show_key]:
-                        show_last_watched[show_key] = viewed_at
-                        show_titles[show_key] = show_title
-                except Exception:
-                    continue
-            
-            log(f"[SUCCESS] Found history for {len(show_last_watched)} unique shows")
-            
+            all_accounts = plex.systemAccounts()
+            log(f"[INFO] Found {len(all_accounts)} accounts on server — fetching history for each...")
         except Exception as e:
-            log(f"[WARNING] Server history failed: {e}, trying per-show scan...")
+            log(f"[WARNING] Could not enumerate accounts ({e}), falling back to server-level history")
+            all_accounts = [None]
+
+        total_entries = 0
+        for account in all_accounts:
+            try:
+                if account is None:
+                    account_history = plex.history(maxresults=50000)
+                    label = "server"
+                else:
+                    account_id = getattr(account, 'accountID', getattr(account, 'id', None))
+                    account_name = getattr(account, 'name', str(account_id))
+                    if account_id is None:
+                        continue
+                    account_history = plex.history(maxresults=50000, accountID=account_id)
+                    label = account_name
+
+                user_entries = 0
+                for item in account_history:
+                    try:
+                        if item.type != 'episode':
+                            continue
+
+                        if hasattr(item, 'grandparentTitle') and item.grandparentTitle:
+                            show_title = item.grandparentTitle
+                            show_key = item.grandparentRatingKey if hasattr(item, 'grandparentRatingKey') else show_title
+                        else:
+                            continue
+
+                        viewed_at = item.viewedAt if hasattr(item, 'viewedAt') else None
+                        if not viewed_at:
+                            continue
+
+                        show_view_counts[show_key] = show_view_counts.get(show_key, 0) + 1
+                        user_entries += 1
+
+                        if show_key not in show_last_watched or viewed_at > show_last_watched[show_key]:
+                            show_last_watched[show_key] = viewed_at
+                            show_titles[show_key] = show_title
+                    except Exception:
+                        continue
+
+                total_entries += user_entries
+                if user_entries > 0:
+                    log(f"[INFO] {label}: {user_entries} TV episode plays")
+            except Exception as e:
+                label = getattr(account, 'name', str(account)) if account is not None else 'server'
+                log(f"[WARNING] Could not get history for {label}: {e}")
+                continue
+
+        log(f"[SUCCESS] Merged {total_entries} total TV plays across all users — {len(show_last_watched)} unique shows watched")
         
         for section in plex.library.sections():
             if section.type == "show":

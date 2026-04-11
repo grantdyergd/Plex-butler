@@ -58,6 +58,11 @@
                         <button id="btn-scan-tv" class="btn btn-primary w-100" onclick="startTVScan()">
                             <i class="bi bi-search me-2"></i>Scan for TV Candidates
                         </button>
+                        <div class="mt-2 text-center">
+                            <a href="#" class="small text-muted" onclick="clearWatchHistoryCache('tv'); return false;" id="tv-cache-clear-link">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Refresh watch history data (all users)
+                            </a>
+                        </div>
                         <div id="tv-status-badge" class="mt-3" style="display: none;">
                             <span class="badge bg-info">
                                 <i class="bi bi-hourglass-split me-1"></i>
@@ -288,6 +293,11 @@
                         <button id="btn-scan-movies" class="btn btn-primary w-100" onclick="startMovieScan()">
                             <i class="bi bi-search me-2"></i>Scan for Movie Candidates
                         </button>
+                        <div class="mt-2 text-center">
+                            <a href="#" class="small text-muted" onclick="clearWatchHistoryCache('movie'); return false;" id="movie-cache-clear-link">
+                                <i class="bi bi-arrow-clockwise me-1"></i>Refresh watch history data (all users)
+                            </a>
+                        </div>
                         <div id="movie-status-badge" class="mt-3" style="display: none;">
                             <span class="badge bg-info">
                                 <i class="bi bi-hourglass-split me-1"></i>
@@ -541,6 +551,26 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function clearWatchHistoryCache(type) {
+    const link = document.getElementById(type === 'tv' ? 'tv-cache-clear-link' : 'movie-cache-clear-link');
+    const orig = link.innerHTML;
+    link.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Clearing...';
+    fetch('/api/watch-history-cache/clear', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_type: type })
+    })
+    .then(r => r.json())
+    .then(data => {
+        link.innerHTML = '<i class="bi bi-check-circle me-1 text-success"></i>Watch history cleared — run a new scan to refresh';
+        setTimeout(() => { link.innerHTML = orig; }, 4000);
+    })
+    .catch(err => {
+        link.innerHTML = orig;
+        alert('Failed to clear cache: ' + err.message);
+    });
 }
 
 function startTVScan() {
