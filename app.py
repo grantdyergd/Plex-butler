@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import secrets
 import smtplib
@@ -3532,8 +3533,19 @@ def _plex_headers(token):
         'Accept': 'application/json'
     }
 
+def _normalize_title(title):
+    """Normalize a title for fuzzy library matching: lowercase, strip year suffixes, strip punctuation."""
+    t = (title or '').lower().strip()
+    t = re.sub(r'\s*\(\d{4}\)\s*$', '', t)   # remove trailing (year)
+    t = re.sub(r'\s*:\s*', ' ', t)             # normalize colons
+    t = re.sub(r"[''`]", "'", t)              # normalize apostrophes
+    t = re.sub(r'[^a-z0-9\' ]', ' ', t)       # strip remaining punctuation
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
 def _library_sets():
-    """Return (sonarr_titles_lower, radarr_titles_lower) for library status checks."""
+    """Return (sonarr_normalized, radarr_normalized) sets for library status checks."""
     sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
     sonarr_key = get_setting('SONARR_API_KEY', '').strip()
     radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
@@ -3543,20 +3555,21 @@ def _library_sets():
         try:
             data = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=10).json()
             if isinstance(data, list):
-                sonarr_set = {s.get('title', '').lower() for s in data}
+                sonarr_set = {_normalize_title(s.get('title', '')) for s in data}
         except Exception:
             pass
     if radarr_url and radarr_key:
         try:
             data = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=10).json()
             if isinstance(data, list):
-                radarr_set = {m.get('title', '').lower() for m in data}
+                radarr_set = {_normalize_title(m.get('title', '')) for m in data}
         except Exception:
             pass
     return sonarr_set, radarr_set
 
+
 def _in_lib(title, sonarr_set, radarr_set):
-    t = title.lower()
+    t = _normalize_title(title)
     return t in sonarr_set or t in radarr_set
 
 
