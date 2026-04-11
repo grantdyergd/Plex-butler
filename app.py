@@ -669,6 +669,95 @@ def history():
     return render_template('history.html', deletions=deletions, sonarr_url=sonarr_url, radarr_url=radarr_url)
 
 
+@app.route('/user-analytics')
+@login_required
+def user_analytics_page():
+    """User analytics dashboard."""
+    return render_template('user_analytics.html')
+
+
+@app.route('/api/user-analytics')
+@login_required
+def get_user_analytics_data():
+    """Return per-user watch + request analytics from Plex and Ombi."""
+    from plexapi.server import PlexServer
+    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+
+    users = {}
+    errors = []
+
+    if not plex_url or not plex_token:
+        return jsonify({'users': [], 'errors': ['Plex not configured']})
+
+    try:
+        plex = PlexServer(plex_url, plex_token, timeout=60)
+
+        for acc in plex.systemAccounts():
+            aid = str(getattr(acc, 'accountID', '') or '')
+            if not aid or aid == '0':
+                continue
+            users[aid] = {
+                'account_id': aid,
+                'name': getattr(acc, 'name', '') or f'User {aid}',
+                'thumb': getattr(acc, 'thumb', '') or '',
+                'type': 'Admin' if aid == '1' else 'User',
+                'tv_plays': 0,
+                'movie_plays': 0,
+                'last_active': None,
+                'tv_requested': 0,
+                'movies_requested': 0,
+            }
+    except Exception as e:
+        errors.append(f'Plex accounts error: {str(e)}')
+
+    if users:
+        try:
+            plex = PlexServer(plex_url, plex_token, timeout=120)
+            history = plex.history(maxresults=100000)
+            for item in history:
+                aid = str(getattr(item, 'accountID', '') or '')
+                if aid not in users:
+                    continue
+                viewed_at = getattr(item, 'viewedAt', None)
+                if item.type == 'episode':
+                    users[aid]['tv_plays'] += 1
+                elif item.type == 'movie':
+                    users[aid]['movie_plays'] += 1
+                if viewed_at:
+                    cur = users[aid]['last_active']
+                    if cur is None or viewed_at > cur:
+                        users[aid]['last_active'] = viewed_at
+        except Exception as e:
+            errors.append(f'Plex history error: {str(e)}')
+
+    for user in users.values():
+        la = user['last_active']
+        if la and hasattr(la, 'isoformat'):
+            user['last_active'] = la.isoformat()
+
+    if ombi_url and ombi_key:
+        headers = {'ApiKey': ombi_key}
+        name_index = {u['name'].lower(): uid for uid, u in users.items()}
+        for media_type, field in [('tv', 'tv_requested'), ('movie', 'movies_requested')]:
+            try:
+                resp = requests.get(f'{ombi_url}/api/v1/Request/{media_type}', headers=headers, timeout=15)
+                if resp.ok:
+                    for req in resp.json():
+                        ru = req.get('requestedUser') or {}
+                        uname = (ru.get('userName') or ru.get('alias') or '').lower().strip()
+                        uid = name_index.get(uname)
+                        if uid:
+                            users[uid][field] += 1
+            except Exception as e:
+                errors.append(f'Ombi {media_type} error: {str(e)}')
+
+    user_list = sorted(users.values(), key=lambda u: u['tv_plays'] + u['movie_plays'], reverse=True)
+    return jsonify({'users': user_list, 'errors': errors})
+
+
 movie_cleanup_status = {
     'running': False,
     'candidates': [],

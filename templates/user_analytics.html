@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}User Analytics — Media Scrubber{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-people me-2" style="color:var(--primary)"></i>User Analytics</h2>
+        <p class="text-muted mb-0">Watch activity and request stats across all your Plex users</p>
+    </div>
+    <button class="btn btn-outline-secondary" onclick="loadAnalytics()" id="refresh-btn">
+        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+    </button>
+</div>
+
+<div id="loading-state" class="text-center py-5">
+    <div class="spinner-border text-primary mb-3" role="status" style="width:3rem;height:3rem;"></div>
+    <p class="text-muted">Fetching data from Plex &amp; Ombi — this may take up to a minute for large servers...</p>
+</div>
+
+<div id="error-banner" class="alert alert-warning d-none mb-3"></div>
+
+<div id="analytics-content" style="display:none">
+
+    <!-- Summary cards -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card text-center p-3">
+                <div class="display-6 fw-bold" style="color:var(--primary)" id="stat-users">—</div>
+                <div class="text-muted small mt-1"><i class="bi bi-people me-1"></i>Total Users</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card text-center p-3">
+                <div class="display-6 fw-bold" style="color:var(--success)" id="stat-plays">—</div>
+                <div class="text-muted small mt-1"><i class="bi bi-play-circle me-1"></i>Total Plays</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card text-center p-3">
+                <div class="display-6 fw-bold" style="color:var(--warning)" id="stat-top-user-plays">—</div>
+                <div class="text-muted small mt-1"><i class="bi bi-trophy me-1"></i>Top User Plays</div>
+                <div class="text-muted" style="font-size:.75rem" id="stat-top-user-name"></div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card text-center p-3">
+                <div class="display-6 fw-bold" style="color:#0ea5e9" id="stat-requests">—</div>
+                <div class="text-muted small mt-1"><i class="bi bi-send me-1"></i>Total Requests</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Activity leaderboard chart -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>Activity Leaderboard <span class="text-muted fw-normal" style="font-size:.85rem">(top 15 by total plays)</span></h5>
+            <div class="d-flex gap-2 align-items-center">
+                <span class="badge bg-primary"><i class="bi bi-tv me-1"></i>TV</span>
+                <span class="badge bg-info"><i class="bi bi-film me-1"></i>Movies</span>
+            </div>
+        </div>
+        <div class="card-body">
+            <div id="chart-container"></div>
+        </div>
+    </div>
+
+    <!-- User table -->
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-0"><i class="bi bi-table me-2"></i>All Users <span class="text-muted fw-normal" style="font-size:.85rem" id="table-count"></span></h5>
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <input type="text" id="search-filter" class="form-control form-control-sm" placeholder="Search name..." style="width:160px" oninput="renderTable()">
+                <select id="sort-select" class="form-select form-select-sm" style="width:auto" onchange="renderTable()">
+                    <option value="total_plays">Sort: Most Active</option>
+                    <option value="tv_plays">Sort: TV Plays</option>
+                    <option value="movie_plays">Sort: Movie Plays</option>
+                    <option value="requests">Sort: Requests</option>
+                    <option value="last_active">Sort: Recently Active</option>
+                    <option value="name">Sort: Name</option>
+                </select>
+            </div>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th style="min-width:180px">User</th>
+                            <th class="text-center" style="cursor:pointer" onclick="setSortAndRender('tv_plays')">TV Plays <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                            <th class="text-center" style="cursor:pointer" onclick="setSortAndRender('movie_plays')">Movie Plays <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                            <th class="text-center" style="cursor:pointer" onclick="setSortAndRender('total_plays')">Total <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                            <th class="text-center" style="cursor:pointer" onclick="setSortAndRender('requests')">Requests <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                            <th class="text-center" style="cursor:pointer" onclick="setSortAndRender('last_active')">Last Active <i class="bi bi-arrow-down-up text-muted" style="font-size:.7rem"></i></th>
+                            <th class="text-center">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="user-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /analytics-content -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allUsers = [];
+
+function fmtDate(iso) {
+    if (!iso) return 'Never';
+    try {
+        const d = new Date(iso);
+        if (isNaN(d)) return 'Never';
+        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    } catch(e) { return 'Never'; }
+}
+
+function daysAgo(iso) {
+    if (!iso) return null;
+    try {
+        const d = new Date(iso);
+        if (isNaN(d)) return null;
+        return Math.floor((Date.now() - d.getTime()) / 86400000);
+    } catch(e) { return null; }
+}
+
+function statusBadge(iso) {
+    const days = daysAgo(iso);
+    if (days === null) return '<span class="badge bg-secondary">Never watched</span>';
+    if (days <= 7)  return '<span class="badge bg-success">Active this week</span>';
+    if (days <= 30) return '<span class="badge bg-success">Active this month</span>';
+    if (days <= 90) return '<span class="badge bg-warning">Active (90d)</span>';
+    return '<span class="badge bg-secondary">Inactive</span>';
+}
+
+function avatar(user) {
+    if (user.thumb) {
+        return `<img src="${user.thumb}" class="rounded-circle me-2" width="32" height="32" style="object-fit:cover;background:#e2e8f0" onerror="this.style.display='none'">`;
+    }
+    const initials = (user.name || '?').substring(0, 2).toUpperCase();
+    const colors = ['#6366f1','#10b981','#f59e0b','#0ea5e9','#ef4444','#8b5cf6','#ec4899'];
+    const color = colors[(user.name || '').charCodeAt(0) % colors.length];
+    return `<span class="rounded-circle d-inline-flex align-items-center justify-content-center me-2 text-white fw-bold" style="width:32px;height:32px;background:${color};font-size:.75rem;flex-shrink:0">${initials}</span>`;
+}
+
+function renderChart(users) {
+    const top = users.slice(0, 15);
+    if (top.length === 0) { document.getElementById('chart-container').innerHTML = '<p class="text-muted">No data</p>'; return; }
+    const maxPlays = Math.max(...top.map(u => u.tv_plays + u.movie_plays), 1);
+
+    const bars = top.map(u => {
+        const total = u.tv_plays + u.movie_plays;
+        const tvPct = (u.tv_plays / maxPlays * 100).toFixed(1);
+        const movPct = (u.movie_plays / maxPlays * 100).toFixed(1);
+        const initials = (u.name || '?').substring(0, 2).toUpperCase();
+        const colors = ['#6366f1','#10b981','#f59e0b','#0ea5e9','#ef4444','#8b5cf6','#ec4899'];
+        const color = colors[(u.name || '').charCodeAt(0) % colors.length];
+        return `
+        <div class="d-flex align-items-center mb-2" style="gap:.75rem">
+            <span class="rounded-circle d-inline-flex align-items-center justify-content-center text-white fw-bold flex-shrink-0" style="width:28px;height:28px;background:${color};font-size:.65rem">${initials}</span>
+            <div style="width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.875rem;color:var(--text-primary)" title="${u.name}">${u.name}</div>
+            <div style="flex:1;position:relative;height:20px;background:var(--surface-tertiary);border-radius:4px;overflow:hidden">
+                <div style="position:absolute;left:0;top:0;height:100%;width:${tvPct}%;background:rgba(99,102,241,.75);border-radius:4px;transition:width .4s ease"></div>
+                <div style="position:absolute;left:${tvPct}%;top:0;height:100%;width:${movPct}%;background:rgba(14,165,233,.65);border-radius:4px;transition:width .4s ease"></div>
+            </div>
+            <div style="width:60px;text-align:right;font-size:.8125rem;color:var(--text-secondary);font-weight:500">${total.toLocaleString()}</div>
+        </div>`;
+    }).join('');
+    document.getElementById('chart-container').innerHTML = bars;
+}
+
+function setSortAndRender(field) {
+    document.getElementById('sort-select').value = field;
+    renderTable();
+}
+
+function renderTable() {
+    const sort = document.getElementById('sort-select').value;
+    const search = (document.getElementById('search-filter').value || '').toLowerCase().trim();
+
+    let filtered = allUsers.filter(u => !search || u.name.toLowerCase().includes(search));
+
+    filtered.sort((a, b) => {
+        if (sort === 'name') return a.name.localeCompare(b.name);
+        if (sort === 'tv_plays') return b.tv_plays - a.tv_plays;
+        if (sort === 'movie_plays') return b.movie_plays - a.movie_plays;
+        if (sort === 'requests') return (b.tv_requested + b.movies_requested) - (a.tv_requested + a.movies_requested);
+        if (sort === 'last_active') {
+            const da = a.last_active ? new Date(a.last_active).getTime() : 0;
+            const db2 = b.last_active ? new Date(b.last_active).getTime() : 0;
+            return db2 - da;
+        }
+        return (b.tv_plays + b.movie_plays) - (a.tv_plays + a.movie_plays);
+    });
+
+    document.getElementById('table-count').textContent = `(${filtered.length} of ${allUsers.length})`;
+
+    const rows = filtered.map(u => {
+        const total = u.tv_plays + u.movie_plays;
+        const requests = u.tv_requested + u.movies_requested;
+        const typeBadge = u.type === 'Admin'
+            ? '<span class="badge bg-primary" style="font-size:.65rem">Admin</span>'
+            : '<span class="badge bg-secondary" style="font-size:.65rem">User</span>';
+        return `<tr>
+            <td>
+                <div class="d-flex align-items-center">
+                    ${avatar(u)}
+                    <div>
+                        <div class="fw-medium" style="font-size:.9rem">${u.name}</div>
+                        <div>${typeBadge}</div>
+                    </div>
+                </div>
+            </td>
+            <td class="text-center">
+                ${u.tv_plays > 0 ? `<span class="fw-medium">${u.tv_plays.toLocaleString()}</span> <small class="text-muted">ep</small>` : '<span class="text-muted">—</span>'}
+            </td>
+            <td class="text-center">
+                ${u.movie_plays > 0 ? `<span class="fw-medium">${u.movie_plays.toLocaleString()}</span>` : '<span class="text-muted">—</span>'}
+            </td>
+            <td class="text-center fw-bold" style="color:var(--primary)">
+                ${total > 0 ? total.toLocaleString() : '<span class="text-muted fw-normal">—</span>'}
+            </td>
+            <td class="text-center">
+                ${requests > 0
+                    ? `<span title="${u.tv_requested} TV · ${u.movies_requested} movies">
+                        <i class="bi bi-send text-info me-1"></i>${requests}
+                       </span>`
+                    : '<span class="text-muted">—</span>'}
+            </td>
+            <td class="text-center" style="font-size:.875rem">${fmtDate(u.last_active)}</td>
+            <td class="text-center">${statusBadge(u.last_active)}</td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('user-table-body').innerHTML = rows || '<tr><td colspan="7" class="text-center text-muted py-4">No users found</td></tr>';
+}
+
+function loadAnalytics() {
+    document.getElementById('loading-state').style.display = 'block';
+    document.getElementById('analytics-content').style.display = 'none';
+    document.getElementById('error-banner').classList.add('d-none');
+    document.getElementById('refresh-btn').disabled = true;
+
+    fetch('/api/user-analytics')
+        .then(r => r.json())
+        .then(data => {
+            allUsers = data.users || [];
+
+            if (data.errors && data.errors.length > 0) {
+                const banner = document.getElementById('error-banner');
+                banner.innerHTML = '<i class="bi bi-exclamation-triangle me-2"></i>' + data.errors.join('<br>');
+                banner.classList.remove('d-none');
+            }
+
+            const totalPlays = allUsers.reduce((s, u) => s + u.tv_plays + u.movie_plays, 0);
+            const totalRequests = allUsers.reduce((s, u) => s + u.tv_requested + u.movies_requested, 0);
+            const topUser = allUsers.length > 0 ? allUsers[0] : null;
+
+            document.getElementById('stat-users').textContent = allUsers.length;
+            document.getElementById('stat-plays').textContent = totalPlays.toLocaleString();
+            document.getElementById('stat-requests').textContent = totalRequests;
+            if (topUser) {
+                document.getElementById('stat-top-user-plays').textContent = (topUser.tv_plays + topUser.movie_plays).toLocaleString();
+                document.getElementById('stat-top-user-name').textContent = topUser.name;
+            }
+
+            renderChart(allUsers);
+            renderTable();
+
+            document.getElementById('loading-state').style.display = 'none';
+            document.getElementById('analytics-content').style.display = 'block';
+        })
+        .catch(err => {
+            const banner = document.getElementById('error-banner');
+            banner.innerHTML = '<i class="bi bi-x-circle me-2"></i>Failed to load analytics: ' + err.message;
+            banner.classList.remove('d-none');
+            document.getElementById('loading-state').style.display = 'none';
+        })
+        .finally(() => {
+            document.getElementById('refresh-btn').disabled = false;
+        });
+}
+
+document.addEventListener('DOMContentLoaded', loadAnalytics);
+</script>
+{% endblock %}
