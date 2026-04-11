@@ -524,6 +524,15 @@
 
     <!-- Watchlist Tab -->
     <div class="tab-panel" id="tab-watchlist">
+
+        <!-- Search bar for adding to watchlist -->
+        <div class="wl-search-bar">
+            <input id="wlSearchInput" type="text" class="wl-search-input" placeholder="Search to add to watchlist…" autocomplete="off">
+            <button class="wl-search-btn" id="wlSearchBtn" onclick="wlSearch()">Search</button>
+        </div>
+        <div id="wl-search-results"></div>
+        <div class="wl-divider" id="wlDivider" style="display:none"></div>
+
         <div id="wl-content">
             <div class="state-msg"><div class="spinner"></div>Loading watchlist…</div>
         </div>
