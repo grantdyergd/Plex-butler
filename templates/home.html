@@ -158,6 +158,11 @@
                                     <option value="has">Has Requester</option>
                                 </select>
                             </div>
+                            <div class="col-auto">
+                                <select id="tv-filter-location" class="form-select form-select-sm" onchange="applyTVFilters()">
+                                    <option value="">All Locations</option>
+                                </select>
+                            </div>
                             <div class="col">
                                 <input type="text" id="tv-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyTVFilters()">
                             </div>
@@ -363,6 +368,11 @@
                                     <option value="has">Has Requester</option>
                                 </select>
                             </div>
+                            <div class="col-auto">
+                                <select id="movie-filter-location" class="form-select form-select-sm" onchange="applyMovieFilters()">
+                                    <option value="">All Locations</option>
+                                </select>
+                            </div>
                             <div class="col">
                                 <input type="text" id="movie-filter-title" class="form-control form-control-sm" placeholder="Search title..." oninput="applyMovieFilters()">
                             </div>
@@ -565,6 +575,7 @@ function pollTVStatus() {
             }
             if (data.candidates && data.candidates.length > 0) {
                 tvCandidates = data.candidates;
+                populateTVLocationFilter();
                 document.getElementById('tv-candidates-section').style.display = 'block';
                 renderTVCandidates();
             }
@@ -596,6 +607,33 @@ let tvFilteredIndices = [];
 let tvSortField = 'priority_score';
 let tvSortAsc = false;
 
+function getStorageLocation(path) {
+    if (!path) return '';
+    const sep = path.includes('/') ? '/' : '\\';
+    const parts = path.split(sep).filter(p => p.length > 0);
+    if (parts.length <= 1) return sep + (parts[0] || '');
+    parts.pop();
+    return sep + parts.join(sep);
+}
+
+function populateTVLocationFilter() {
+    const sel = document.getElementById('tv-filter-location');
+    const current = sel.value;
+    const locs = [...new Set(tvCandidates.map(s => getStorageLocation(s.path)).filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">All Locations</option>' +
+        locs.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+    if (locs.includes(current)) sel.value = current;
+}
+
+function populateMovieLocationFilter() {
+    const sel = document.getElementById('movie-filter-location');
+    const current = sel.value;
+    const locs = [...new Set(movieCandidates.map(m => getStorageLocation(m.path)).filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">All Locations</option>' +
+        locs.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('');
+    if (locs.includes(current)) sel.value = current;
+}
+
 function getFilteredTV() {
     let addedFromFilter = '';
     let addedToFilter = '';
@@ -610,6 +648,7 @@ function getFilteredTV() {
     const sizeFilter = document.getElementById('tv-filter-size')?.value || '';
     const viewsFilter = document.getElementById('tv-filter-views')?.value || '';
     const requesterFilter = document.getElementById('tv-filter-requester')?.value || '';
+    const locationFilter = document.getElementById('tv-filter-location')?.value || '';
     const titleFilter = (document.getElementById('tv-filter-title')?.value || '').toLowerCase().trim();
     
     tvFilteredIndices = [];
@@ -631,6 +670,7 @@ function getFilteredTV() {
             if (requesterFilter === 'none' && hasRequester) match = false;
             else if (requesterFilter === 'has' && !hasRequester) match = false;
         }
+        if (locationFilter && getStorageLocation(show.path) !== locationFilter) match = false;
         if (titleFilter && !show.title.toLowerCase().includes(titleFilter)) match = false;
         if (addedFromFilter && show.added_date) {
             const addedDate = show.added_date.substring(0, 10);
@@ -657,6 +697,7 @@ function clearTVFilters() {
     document.getElementById('tv-filter-size').value = '';
     document.getElementById('tv-filter-views').value = '';
     document.getElementById('tv-filter-requester').value = '';
+    document.getElementById('tv-filter-location').value = '';
     document.getElementById('tv-filter-title').value = '';
     try {
         document.getElementById('tv-filter-added-from').valueAsDate = null;
@@ -877,6 +918,7 @@ function pollMovieStatus() {
             }
             if (data.candidates && data.candidates.length > 0) {
                 movieCandidates = data.candidates;
+                populateMovieLocationFilter();
                 document.getElementById('movie-candidates-section').style.display = 'block';
                 renderMovieCandidates();
             }
@@ -921,6 +963,7 @@ function getFilteredMovies() {
     const sizeFilter = document.getElementById('movie-filter-size')?.value || '';
     const viewsFilter = document.getElementById('movie-filter-views')?.value || '';
     const requesterFilter = document.getElementById('movie-filter-requester')?.value || '';
+    const locationFilter = document.getElementById('movie-filter-location')?.value || '';
     const titleFilter = (document.getElementById('movie-filter-title')?.value || '').toLowerCase().trim();
     
     movieFilteredIndices = [];
@@ -941,6 +984,7 @@ function getFilteredMovies() {
             if (requesterFilter === 'none' && hasRequester) match = false;
             else if (requesterFilter === 'has' && !hasRequester) match = false;
         }
+        if (locationFilter && getStorageLocation(movie.path) !== locationFilter) match = false;
         if (titleFilter && !movie.title.toLowerCase().includes(titleFilter)) match = false;
         if (addedFromFilter && movie.added_date) {
             const addedDate = movie.added_date.substring(0, 10);
@@ -966,6 +1010,7 @@ function clearMovieFilters() {
     document.getElementById('movie-filter-size').value = '';
     document.getElementById('movie-filter-views').value = '';
     document.getElementById('movie-filter-requester').value = '';
+    document.getElementById('movie-filter-location').value = '';
     document.getElementById('movie-filter-title').value = '';
     try {
         document.getElementById('movie-filter-added-from').valueAsDate = null;
@@ -1166,6 +1211,7 @@ async function loadCachedScans() {
         
         if (tvCache.cached && tvCache.candidates.length > 0) {
             tvCandidates = tvCache.candidates;
+            populateTVLocationFilter();
             tvFilteredIndices = tvCandidates.map((_, i) => i);
             document.getElementById('tv-candidates-section').style.display = 'block';
             applyTVFilters();
@@ -1175,6 +1221,7 @@ async function loadCachedScans() {
         
         if (movieCache.cached && movieCache.candidates.length > 0) {
             movieCandidates = movieCache.candidates;
+            populateMovieLocationFilter();
             movieFilteredIndices = movieCandidates.map((_, i) => i);
             document.getElementById('movie-candidates-section').style.display = 'block';
             applyMovieFilters();
