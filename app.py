@@ -3250,6 +3250,7 @@ def media_chat_add():
     media_type = data.get('type')
     item = data.get('item', {})
     profile_id = data.get('profileId')
+    custom_root = data.get('rootFolderPath', '').strip()
     
     if media_type == 'show':
         sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
@@ -3260,7 +3261,7 @@ def media_chat_add():
         
         try:
             roots = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=10).json()
-            root_path = roots[0]['path'] if roots else '/tv'
+            root_path = custom_root if custom_root else (roots[0]['path'] if roots else '/tv')
             
             tvdb_id = item.get('tvdbId')
             try:
@@ -3316,7 +3317,7 @@ def media_chat_add():
         
         try:
             roots = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=10).json()
-            root_path = roots[0]['path'] if roots else '/movies'
+            root_path = custom_root if custom_root else (roots[0]['path'] if roots else '/movies')
             
             tmdb_id = item.get('tmdbId')
             try:
@@ -3853,15 +3854,17 @@ def media_sonarr_search():
     sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
     sonarr_key = get_setting('SONARR_API_KEY', '').strip()
     if not sonarr_url or not sonarr_key:
-        return jsonify({'error': 'Sonarr not configured.', 'results': [], 'profiles': []})
+        return jsonify({'error': 'Sonarr not configured.', 'results': [], 'profiles': [], 'rootFolders': []})
     try:
         results = requests.get(f"{sonarr_url}/api/v3/series/lookup", params={'term': q, 'apikey': sonarr_key}, timeout=15).json()
         profiles = requests.get(f"{sonarr_url}/api/v3/qualityprofile", params={'apikey': sonarr_key}, timeout=10).json()
+        roots_raw = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=10).json()
         results = results[:8] if isinstance(results, list) else []
         profiles = [{'id': p['id'], 'name': p['name']} for p in profiles] if isinstance(profiles, list) else []
-        return jsonify({'results': results, 'profiles': profiles})
+        roots = [{'path': r['path'], 'freeGB': round(r.get('freeSpace', 0) / 1024**3, 1)} for r in roots_raw] if isinstance(roots_raw, list) else []
+        return jsonify({'results': results, 'profiles': profiles, 'rootFolders': roots})
     except Exception as e:
-        return jsonify({'error': str(e), 'results': [], 'profiles': []})
+        return jsonify({'error': str(e), 'results': [], 'profiles': [], 'rootFolders': []})
 
 
 @app.route('/api/media/radarr-search')
@@ -3871,15 +3874,86 @@ def media_radarr_search():
     radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
     radarr_key = get_setting('RADARR_API_KEY', '').strip()
     if not radarr_url or not radarr_key:
-        return jsonify({'error': 'Radarr not configured.', 'results': [], 'profiles': []})
+        return jsonify({'error': 'Radarr not configured.', 'results': [], 'profiles': [], 'rootFolders': []})
     try:
         results = requests.get(f"{radarr_url}/api/v3/movie/lookup", params={'term': q, 'apikey': radarr_key}, timeout=15).json()
         profiles = requests.get(f"{radarr_url}/api/v3/qualityprofile", params={'apikey': radarr_key}, timeout=10).json()
+        roots_raw = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=10).json()
         results = results[:8] if isinstance(results, list) else []
         profiles = [{'id': p['id'], 'name': p['name']} for p in profiles] if isinstance(profiles, list) else []
-        return jsonify({'results': results, 'profiles': profiles})
+        roots = [{'path': r['path'], 'freeGB': round(r.get('freeSpace', 0) / 1024**3, 1)} for r in roots_raw] if isinstance(roots_raw, list) else []
+        return jsonify({'results': results, 'profiles': profiles, 'rootFolders': roots})
     except Exception as e:
-        return jsonify({'error': str(e), 'results': [], 'profiles': []})
+        return jsonify({'error': str(e), 'results': [], 'profiles': [], 'rootFolders': []})
+
+
+@app.route('/api/media/plex-watchlist-add', methods=['POST'])
+@login_required
+def media_plex_watchlist_add():
+    """Search Plex Discover and add a title to the Plex watchlist."""
+    data = request.get_json()
+    title = data.get('title', '').strip()
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+
+    if not plex_token:
+        return jsonify({'success': False, 'error': 'Plex token not configured.'})
+    if not title:
+        return jsonify({'success': False, 'error': 'No title provided.'})
+
+    headers = {
+        'X-Plex-Token': plex_token,
+        'X-Plex-Client-Identifier': 'media-scrubber-browser',
+        'X-Plex-Product': 'Media Scrubber',
+        'X-Plex-Version': '1.0',
+        'Accept': 'application/json'
+    }
+
+    try:
+        # Search Plex Discover for the title
+        found = None
+        for search_type in ('movie', 'tv'):
+            resp = requests.get(
+                "https://discover.provider.plex.tv/library/search",
+                params={'query': title, 'limit': 5, 'searchTypes': search_type, 'searchProviders': 'discover'},
+                headers=headers, timeout=12
+            )
+            if not resp.ok:
+                continue
+            container = resp.json().get('MediaContainer', {})
+            groups = container.get('SearchResult', [])
+            if isinstance(groups, dict):
+                groups = [groups]
+            for group in groups:
+                for sr in group.get('SearchResult', []):
+                    m = sr.get('Metadata', sr)
+                    if m.get('title', '').lower() == title.lower() or title.lower() in m.get('title', '').lower():
+                        found = m
+                        break
+                if found:
+                    break
+            if found:
+                break
+
+        if not found:
+            return jsonify({'success': False, 'error': f'Could not find "{title}" on Plex Discover.'})
+
+        rating_key = found.get('ratingKey', '')
+        if not rating_key:
+            return jsonify({'success': False, 'error': 'Could not get Plex ID for this title.'})
+
+        # Add to watchlist
+        add_resp = requests.get(
+            "https://discover.provider.plex.tv/actions/addToWatchlist",
+            params={'ratingKey': rating_key},
+            headers=headers, timeout=12
+        )
+        if add_resp.status_code in (200, 201, 204):
+            return jsonify({'success': True, 'message': f'"{title}" added to your Plex watchlist.'})
+        else:
+            return jsonify({'success': False, 'error': f'Plex returned status {add_resp.status_code}.'})
+    except Exception as e:
+        print(f"[Plex Watchlist Add] {e}")
+        return jsonify({'success': False, 'error': 'Could not add to Plex watchlist. Check your Plex token.'})
 
 
 if __name__ == '__main__':

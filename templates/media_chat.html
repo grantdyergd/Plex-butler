@@ -381,9 +381,61 @@
             transition: background 0.15s;
         }
         .modal-item:hover { background: var(--card); }
-        .modal-cancel {
+        .modal-item.selected {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
+        .modal-section-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 6px;
+        }
+        .modal-select {
             width: 100%;
-            margin-top: 8px;
+            padding: 9px 12px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .modal-watchlist-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 14px;
+            font-size: 13px;
+            color: var(--text);
+        }
+        .modal-watchlist-row input[type=checkbox] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+        .modal-watchlist-row label { cursor: pointer; }
+        .modal-confirm-btn {
+            flex: 1;
+            padding: 10px;
+            background: var(--accent);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: opacity 0.15s;
+        }
+        .modal-confirm-btn:hover { opacity: 0.88; }
+        .modal-cancel {
+            flex: 1;
             padding: 10px;
             background: transparent;
             border: 1px solid var(--border);
@@ -419,6 +471,7 @@
         }
         .toast.success { border-color: var(--green); color: var(--green); }
         .toast.error { border-color: var(--red); color: var(--red); }
+        .toast.info { border-color: var(--accent); color: var(--accent); }
         @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toastOut { to { opacity: 0; transform: translateY(10px); } }
     </style>
@@ -495,9 +548,27 @@
 <!-- Profile picker modal -->
 <div class="modal-overlay" id="profileModal">
     <div class="modal">
-        <div class="modal-title" id="modalTitle">Select Quality Profile</div>
-        <div id="modalProfiles"></div>
-        <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+        <div class="modal-title" id="modalTitle">Add to Library</div>
+
+        <div id="modalProfileSection">
+            <div class="modal-section-label">Quality Profile</div>
+            <div id="modalProfiles"></div>
+        </div>
+
+        <div id="modalFolderSection" style="margin-top:14px">
+            <div class="modal-section-label">Destination Folder</div>
+            <select id="modalFolderSelect" class="modal-select"></select>
+        </div>
+
+        <div class="modal-watchlist-row">
+            <input type="checkbox" id="modalWatchlistCheck">
+            <label for="modalWatchlistCheck">Also add to Plex watchlist</label>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:16px">
+            <button class="modal-confirm-btn" onclick="confirmAdd()">Add</button>
+            <button class="modal-cancel" onclick="closeModal()">Cancel</button>
+        </div>
     </div>
 </div>
 
@@ -505,7 +576,7 @@
 
 <script>
     let currentType = 'all';
-    let pendingAdd = null; // { type, item, profiles }
+    let pendingAdd = null; // { type, item, profiles, rootFolders, btn }
 
     // ── Status check ──────────────────────────────────────────────────────
     fetch('/api/media-chat/status').then(r => r.json()).then(data => {
@@ -629,14 +700,9 @@
             if (data.error) { btn.textContent = 'Error'; setTimeout(() => { btn.textContent = '+ Add'; btn.disabled = false; }, 2500); toast(data.error, 'error'); return; }
             if (!data.results || data.results.length === 0) { btn.textContent = 'Not found'; setTimeout(() => { btn.textContent = '+ Add'; btn.disabled = false; }, 2500); return; }
 
-            if (data.profiles && data.profiles.length > 1) {
-                // Show profile picker
-                pendingAdd = { btn, item: data.results[0], profiles: data.profiles, type: mediaType };
-                openModal(data.profiles, item.title);
-            } else {
-                const profileId = data.profiles && data.profiles.length ? data.profiles[0].id : null;
-                await doAdd(mediaType, data.results[0], profileId, btn);
-            }
+            // Always open modal so user can choose folder, profile, and Plex watchlist
+            pendingAdd = { btn, item: data.results[0], profiles: data.profiles || [], rootFolders: data.rootFolders || [], type: mediaType };
+            openModal(data.profiles || [], data.rootFolders || [], item.title);
         } catch(e) {
             btn.textContent = '+ Add';
             btn.disabled = false;
@@ -644,56 +710,118 @@
         }
     }
 
-    async function doAdd(mediaType, item, profileId, btn) {
+    async function doAdd(mediaType, item, profileId, rootFolderPath, btn) {
         try {
             const r = await fetch('/api/media-chat/add', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: mediaType === 'movie' ? 'movie' : 'show', item, profileId })
+                body: JSON.stringify({ type: mediaType === 'movie' ? 'movie' : 'show', item, profileId, rootFolderPath })
             });
             const result = await r.json();
             if (result.success || result.already_exists) {
                 btn.textContent = '✓ Added';
                 btn.className = 'card-btn card-btn-done';
                 btn.disabled = true;
-                toast(result.already_exists ? 'Already in library!' : `Added successfully!`, 'success');
+                toast(result.already_exists ? 'Already in library!' : 'Added successfully!', 'success');
+                return true;
             } else {
                 btn.textContent = '+ Add';
                 btn.disabled = false;
                 toast(result.message || 'Failed to add.', 'error');
+                return false;
             }
         } catch(e) {
             btn.textContent = '+ Add';
             btn.disabled = false;
             toast('Failed to add.', 'error');
+            return false;
         }
     }
 
-    // ── Profile modal ──────────────────────────────────────────────────────
-    function openModal(profiles, title) {
-        document.getElementById('modalTitle').textContent = `Quality for "${title}"`;
-        const el = document.getElementById('modalProfiles');
-        el.innerHTML = profiles.map(p =>
-            `<div class="modal-item" onclick="pickProfile(${p.id})">${esc(p.name)}</div>`
-        ).join('');
+    // ── Add modal ──────────────────────────────────────────────────────────
+    function openModal(profiles, rootFolders, title) {
+        document.getElementById('modalTitle').textContent = `Add "${title}"`;
+
+        // Profile section
+        const profSection = document.getElementById('modalProfileSection');
+        const profEl = document.getElementById('modalProfiles');
+        if (profiles.length <= 1) {
+            profSection.style.display = 'none';
+        } else {
+            profSection.style.display = '';
+            let selected = profiles[0].id;
+            profEl.innerHTML = profiles.map(p =>
+                `<div class="modal-item${p === profiles[0] ? ' selected' : ''}" data-profile-id="${p.id}" onclick="selectProfile(this,${p.id})">${esc(p.name)}</div>`
+            ).join('');
+            profEl.dataset.selected = profiles[0].id;
+        }
+
+        // Folder section
+        const folderSection = document.getElementById('modalFolderSection');
+        const folderSelect = document.getElementById('modalFolderSelect');
+        if (rootFolders.length === 0) {
+            folderSection.style.display = 'none';
+        } else {
+            folderSection.style.display = '';
+            folderSelect.innerHTML = rootFolders.map(f =>
+                `<option value="${esc(f.path)}">${esc(f.path)} (${f.freeGB} GB free)</option>`
+            ).join('');
+        }
+
+        // Reset watchlist checkbox
+        document.getElementById('modalWatchlistCheck').checked = false;
+
         document.getElementById('profileModal').classList.add('open');
     }
 
-    async function pickProfile(profileId) {
-        closeModal();
-        if (!pendingAdd) return;
-        const { btn, item, type } = pendingAdd;
-        pendingAdd = null;
-        await doAdd(type, item, profileId, btn);
+    function selectProfile(el, profileId) {
+        document.querySelectorAll('#modalProfiles .modal-item').forEach(e => e.classList.remove('selected'));
+        el.classList.add('selected');
+        document.getElementById('modalProfiles').dataset.selected = profileId;
     }
 
-    function closeModal() {
+    async function confirmAdd() {
+        if (!pendingAdd) return;
+        const { btn, item, type, profiles, rootFolders } = pendingAdd;
+
+        // Read selected profile
+        const profEl = document.getElementById('modalProfiles');
+        const profileId = profiles.length > 1 ? parseInt(profEl.dataset.selected) : (profiles.length ? profiles[0].id : null);
+
+        // Read selected folder
+        const folderSelect = document.getElementById('modalFolderSelect');
+        const rootFolderPath = rootFolders.length ? folderSelect.value : '';
+
+        // Plex watchlist flag
+        const addToWatchlist = document.getElementById('modalWatchlistCheck').checked;
+
+        closeModal(false); // close without resetting btn
+
+        const succeeded = await doAdd(type, item, profileId, rootFolderPath, btn);
+
+        if (succeeded && addToWatchlist) {
+            toast('Adding to Plex watchlist…', 'info');
+            try {
+                const wr = await fetch('/api/media/plex-watchlist-add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: item.title })
+                });
+                const wdata = await wr.json();
+                toast(wdata.success ? `"${item.title}" added to Plex watchlist!` : (wdata.error || 'Could not add to Plex watchlist.'), wdata.success ? 'success' : 'error');
+            } catch(e) {
+                toast('Could not reach Plex watchlist.', 'error');
+            }
+        }
+    }
+
+    function closeModal(resetBtn = true) {
         document.getElementById('profileModal').classList.remove('open');
-        if (pendingAdd) {
+        if (resetBtn && pendingAdd) {
             pendingAdd.btn.textContent = '+ Add';
             pendingAdd.btn.disabled = false;
-            pendingAdd = null;
         }
+        pendingAdd = null;
     }
 
     // ── Watchlist ──────────────────────────────────────────────────────────
