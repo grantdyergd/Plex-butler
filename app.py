@@ -3987,9 +3987,11 @@ def media_radarr_search():
 
 
 def _parse_plex_discover_results(container):
-    """Flatten Plex Discover SearchResult regardless of whether it's a flat list or nested groups."""
+    """Flatten Plex Discover search results regardless of format.
+    Handles both 'SearchResult' (singular) and 'SearchResults' (plural) keys,
+    flat lists, and nested groups."""
     items = []
-    raw = container.get('SearchResult', [])
+    raw = container.get('SearchResult') or container.get('SearchResults') or []
     if isinstance(raw, dict):
         raw = [raw]
     for entry in raw:
@@ -3999,7 +4001,7 @@ def _parse_plex_discover_results(container):
             items.append(meta)
             continue
         # Nested format: entry = {"SearchResult": [...], "hub": ...}
-        nested = entry.get('SearchResult', [])
+        nested = entry.get('SearchResult') or entry.get('SearchResults') or []
         if isinstance(nested, dict):
             nested = [nested]
         for sr in nested:
