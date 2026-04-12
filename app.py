@@ -4164,19 +4164,82 @@ def media_plex_watchlist_add():
         else:
             search_types = ('tv', 'movie')
 
-        # Try each title variant until we get candidates
+        found = None
         all_candidates = []
         used_query = title
-        for variant in _title_variants(title):
-            candidates = _plex_discover_search(variant, search_types, headers)
-            if candidates:
-                all_candidates = candidates
-                used_query = variant
-                break
 
-        found = _find_plex_match(all_candidates, title, tmdb_id=tmdb_id, year=year)
+        # ── Step 0: Direct TMDb-ID lookup on Plex Discover (bypasses text search) ──
+        if tmdb_id and not found:
+            plex_type = 1 if media_type == 'movie' else 2  # 1=movie, 2=show
+            plex_agent = 'tv.plex.agents.movie' if media_type == 'movie' else 'tv.plex.agents.series'
 
-        # Last-resort: if only one result came back and year matches, trust it
+            # 0a. metadata/matches endpoint
+            for agent_fmt in (f"tmdb://{tmdb_id}", f"com.plexapp.agents.themoviedb://{tmdb_id}"):
+                try:
+                    r = requests.get(
+                        "https://discover.provider.plex.tv/library/metadata/matches",
+                        params={'guid': agent_fmt, 'agent': plex_agent,
+                                'language': 'en', 'type': plex_type},
+                        headers=headers, timeout=10
+                    )
+                    print(f"[Plex Discover] GUID lookup {agent_fmt} → {r.status_code}")
+                    if r.ok:
+                        container = r.json().get('MediaContainer', {})
+                        candidates = _parse_plex_discover_results(container)
+                        if not candidates:
+                            meta_list = container.get('Metadata', [])
+                            if isinstance(meta_list, list):
+                                candidates = meta_list
+                        print(f"[Plex Discover] GUID match returned {len(candidates)} result(s)")
+                        if candidates:
+                            found = candidates[0]
+                            print(f"[Plex Discover] GUID direct match: {found.get('title')!r}")
+                            break
+                except Exception as e:
+                    print(f"[Plex Discover] GUID lookup exception: {e}")
+                if found:
+                    break
+
+            # 0b. Search with guid as query string (alternate Plex Discover approach)
+            if not found:
+                for search_type in search_types[:1]:
+                    try:
+                        guid_query = f"tmdb://{tmdb_id}"
+                        r = requests.get(
+                            "https://discover.provider.plex.tv/library/search",
+                            params={'query': guid_query, 'limit': 5, 'searchTypes': search_type,
+                                    'searchProviders': 'discover', 'includeGuids': 1},
+                            headers=headers, timeout=10
+                        )
+                        print(f"[Plex Discover] GUID-query search {guid_query} → {r.status_code}")
+                        if r.ok:
+                            container = r.json().get('MediaContainer', {})
+                            candidates = _parse_plex_discover_results(container)
+                            if candidates:
+                                found = candidates[0]
+                                print(f"[Plex Discover] GUID-query match: {found.get('title')!r}")
+                                break
+                    except Exception as e:
+                        print(f"[Plex Discover] GUID-query exception: {e}")
+
+        # ── Step 1: Text-search each title variant; keep going until we get a MATCH ──
+        if not found:
+            all_seen_candidates = []
+            for variant in _title_variants(title):
+                candidates = _plex_discover_search(variant, search_types, headers)
+                if candidates:
+                    all_seen_candidates.extend(candidates)
+                    used_query = variant
+                    match = _find_plex_match(candidates, title, tmdb_id=tmdb_id, year=year)
+                    if match:
+                        found = match
+                        break
+            # If no per-variant match, try matching across everything we found
+            if not found and all_seen_candidates:
+                all_candidates = all_seen_candidates
+                found = _find_plex_match(all_candidates, title, tmdb_id=tmdb_id, year=year)
+
+        # ── Step 2: Single-result fallback (year must match) ──
         if not found and len(all_candidates) == 1:
             candidate = all_candidates[0]
             candidate_year = str(candidate.get('year', ''))

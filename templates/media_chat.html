@@ -901,7 +901,12 @@
                 const wr = await fetch('/api/media/plex-watchlist-add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ title: item.title })
+                    body: JSON.stringify({
+                        title: item.title,
+                        tmdb_id: item.tmdbId || item.tmdb_id || null,
+                        year: item.year || null,
+                        media_type: type === 'movie' ? 'movie' : 'tv'
+                    })
                 });
                 const wdata = await wr.json();
                 toast(wdata.success ? `"${item.title}" added to Plex watchlist!` : (wdata.error || 'Could not add to Plex watchlist.'), wdata.success ? 'success' : 'error');
