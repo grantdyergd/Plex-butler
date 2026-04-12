@@ -567,15 +567,8 @@
 
     <!-- Watchlist Tab -->
     <div class="tab-panel" id="tab-watchlist">
-
-        <!-- Search bar for adding to watchlist -->
-        <div class="wl-search-bar">
-            <input id="wlSearchInput" type="text" class="wl-search-input" placeholder="Search to add to watchlist…" autocomplete="off">
-            <button class="wl-search-btn" id="wlSearchBtn" onclick="wlSearch()">Search</button>
-        </div>
         <div id="wl-search-results"></div>
         <div class="wl-divider" id="wlDivider" style="display:none"></div>
-
         <div id="wl-content">
             <div class="state-msg"><div class="spinner"></div>Loading watchlist…</div>
         </div>
@@ -640,11 +633,27 @@
     // ── Tab nav ───────────────────────────────────────────────────────────
     const loaded = { watchlist: false, queue: false, activity: false };
 
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn   = document.getElementById('searchBtn');
+
     function showTab(name) {
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('tab-' + name).classList.add('active');
         event.currentTarget.classList.add('active');
+
+        // Update placeholder to match current context
+        if (name === 'watchlist') {
+            searchInput.placeholder = 'Search to add to watchlist…';
+        } else {
+            searchInput.placeholder = 'Search movies & TV shows…';
+        }
+
+        // Clear stale watchlist search results when leaving watchlist tab
+        if (name !== 'watchlist') {
+            document.getElementById('wl-search-results').innerHTML = '';
+            document.getElementById('wlDivider').style.display = 'none';
+        }
 
         if (name === 'watchlist' && !loaded.watchlist) loadWatchlist();
         if (name === 'queue'     && !loaded.queue)     loadQueue();
@@ -658,40 +667,66 @@
         currentType = type;
     }
 
-    document.getElementById('searchInput').addEventListener('keydown', e => {
+    searchInput.addEventListener('keydown', e => {
         if (e.key === 'Enter') doSearch();
     });
 
     async function doSearch() {
-        const q = document.getElementById('searchInput').value.trim();
+        const q = searchInput.value.trim();
         if (!q) return;
-        const btn = document.getElementById('searchBtn');
-        btn.disabled = true;
-        btn.textContent = '…';
-        const el = document.getElementById('search-results');
-        el.innerHTML = '<div class="state-msg"><div class="spinner"></div>Searching…</div>';
 
-        // Make sure search tab is visible
-        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('tab-search').classList.add('active');
-        document.querySelector('.tab-btn').classList.add('active');
+        const activeTab = document.querySelector('.tab-panel.active')?.id;
+        const onWatchlist = activeTab === 'tab-watchlist';
 
-        try {
-            const r = await fetch(`/api/media/search?q=${encodeURIComponent(q)}&type=${currentType}`);
-            const data = await r.json();
-            btn.disabled = false;
-            btn.textContent = 'Search';
-            if (data.error) { el.innerHTML = `<div class="state-msg">${esc(data.error)}</div>`; return; }
-            if (!data.results || data.results.length === 0) {
-                el.innerHTML = `<div class="state-msg"><div class="icon">🤷</div>No results found for "<strong>${esc(q)}</strong>"</div>`;
-                return;
+        searchBtn.disabled = true;
+        searchBtn.textContent = '…';
+
+        if (onWatchlist) {
+            // Watchlist context — search TMDb and show results as "+ Watchlist" items
+            const resultsEl = document.getElementById('wl-search-results');
+            const divider   = document.getElementById('wlDivider');
+            resultsEl.innerHTML = '<div class="state-msg" style="padding:10px 0"><div class="spinner"></div>Searching…</div>';
+            divider.style.display = '';
+            try {
+                const r = await fetch(`/api/media/search?q=${encodeURIComponent(q)}&type=all`);
+                const data = await r.json();
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search';
+                if (data.error) { resultsEl.innerHTML = `<div class="state-msg">${esc(data.error)}</div>`; return; }
+                if (!data.results || data.results.length === 0) {
+                    resultsEl.innerHTML = `<div class="state-msg" style="padding:10px 0">No results for "<strong>${esc(q)}</strong>"</div>`;
+                    return;
+                }
+                renderWlSearchResults(data.results, resultsEl);
+            } catch(e) {
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search';
+                resultsEl.innerHTML = `<div class="state-msg">Search failed. Please try again.</div>`;
             }
-            renderSearchResults(data.results, el);
-        } catch(e) {
-            btn.disabled = false;
-            btn.textContent = 'Search';
-            el.innerHTML = `<div class="state-msg">Search failed. Please try again.</div>`;
+        } else {
+            // Normal search context — switch to Search tab and show TMDb cards
+            const el = document.getElementById('search-results');
+            el.innerHTML = '<div class="state-msg"><div class="spinner"></div>Searching…</div>';
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('tab-search').classList.add('active');
+            document.querySelector('.tab-btn').classList.add('active');
+            try {
+                const r = await fetch(`/api/media/search?q=${encodeURIComponent(q)}&type=${currentType}`);
+                const data = await r.json();
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search';
+                if (data.error) { el.innerHTML = `<div class="state-msg">${esc(data.error)}</div>`; return; }
+                if (!data.results || data.results.length === 0) {
+                    el.innerHTML = `<div class="state-msg"><div class="icon">🤷</div>No results found for "<strong>${esc(q)}</strong>"</div>`;
+                    return;
+                }
+                renderSearchResults(data.results, el);
+            } catch(e) {
+                searchBtn.disabled = false;
+                searchBtn.textContent = 'Search';
+                el.innerHTML = `<div class="state-msg">Search failed. Please try again.</div>`;
+            }
         }
     }
 
@@ -1109,40 +1144,7 @@
         el.innerHTML = html;
     }
 
-    // ── Watchlist search ───────────────────────────────────────────────────
-    document.getElementById('wlSearchInput').addEventListener('keydown', e => {
-        if (e.key === 'Enter') wlSearch();
-    });
-
-    async function wlSearch() {
-        const q = document.getElementById('wlSearchInput').value.trim();
-        if (!q) return;
-        const btn = document.getElementById('wlSearchBtn');
-        const resultsEl = document.getElementById('wl-search-results');
-        const divider = document.getElementById('wlDivider');
-        btn.disabled = true;
-        btn.textContent = '…';
-        resultsEl.innerHTML = '<div class="state-msg" style="padding:10px 0"><div class="spinner"></div>Searching…</div>';
-        divider.style.display = '';
-
-        try {
-            const r = await fetch(`/api/media/search?q=${encodeURIComponent(q)}&type=all`);
-            const data = await r.json();
-            btn.disabled = false;
-            btn.textContent = 'Search';
-            if (data.error) { resultsEl.innerHTML = `<div class="state-msg">${esc(data.error)}</div>`; return; }
-            if (!data.results || data.results.length === 0) {
-                resultsEl.innerHTML = `<div class="state-msg" style="padding:10px 0">No results for "<strong>${esc(q)}</strong>"</div>`;
-                return;
-            }
-            renderWlSearchResults(data.results, resultsEl);
-        } catch(e) {
-            btn.disabled = false;
-            btn.textContent = 'Search';
-            resultsEl.innerHTML = `<div class="state-msg">Search failed. Please try again.</div>`;
-        }
-    }
-
+    // ── Watchlist search results rendering ─────────────────────────────────
     let wlSearchResultsData = [];
 
     function renderWlSearchResults(results, container) {
