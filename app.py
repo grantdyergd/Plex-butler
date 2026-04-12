@@ -4071,6 +4071,8 @@ def media_plex_watchlist_add():
         'Accept': 'application/json'
     }
 
+    diag_info = []
+
     def _plex_discover_search(query, search_types, headers):
         """Search Plex Discover for a query across given types. Returns flat list of candidates."""
         results = []
@@ -4089,14 +4091,21 @@ def media_plex_watchlist_add():
                 )
                 print(f"[Plex Discover] type={search_type} status={resp.status_code} query={query!r}")
                 if not resp.ok:
-                    print(f"[Plex Discover] Error body: {resp.text[:300]}")
+                    body_snip = resp.text[:200]
+                    print(f"[Plex Discover] Error body: {body_snip}")
+                    diag_info.append(f"API {resp.status_code} for q={query!r} t={search_type}")
                     continue
-                container = resp.json().get('MediaContainer', {})
+                raw_json = resp.json()
+                container = raw_json.get('MediaContainer', {})
                 parsed = _parse_plex_discover_results(container)
                 print(f"[Plex Discover] type={search_type} found {len(parsed)}: {[m.get('title') for m in parsed[:5]]}")
+                if not parsed:
+                    keys = list(container.keys())[:6]
+                    diag_info.append(f"q={query!r} t={search_type}: 200 OK but 0 parsed (keys={keys}, size={container.get('size', '?')})")
                 results.extend(parsed)
             except Exception as e:
                 print(f"[Plex Discover] Exception on type={search_type}: {e}")
+                diag_info.append(f"Exception for q={query!r}: {str(e)[:100]}")
         return results
 
     def _title_variants(t):
@@ -4149,10 +4158,13 @@ def media_plex_watchlist_add():
 
         if not found:
             candidate_titles = [m.get('title', '?') for m in all_candidates[:8]]
-            print(f"[Plex Discover] No match for {title!r} (query={used_query!r}, tmdb={tmdb_id}, year={year}). Candidates: {candidate_titles}")
-            hint = (f' Plex returned: {", ".join(candidate_titles)}'
-                    if candidate_titles
-                    else ' Plex returned no results — the title may not be indexed on Plex Discover.')
+            print(f"[Plex Discover] No match for {title!r} (query={used_query!r}, tmdb={tmdb_id}, year={year}). Candidates: {candidate_titles}. Diag: {diag_info}")
+            if candidate_titles:
+                hint = f' Plex returned: {", ".join(candidate_titles)}'
+            elif diag_info:
+                hint = ' Debug: ' + '; '.join(diag_info[:3])
+            else:
+                hint = ' Plex returned no results — the title may not be indexed on Plex Discover.'
             return jsonify({'success': False, 'error': f'Could not find "{title}" on Plex Discover.{hint}'})
 
         rating_key = found.get('ratingKey', '')
