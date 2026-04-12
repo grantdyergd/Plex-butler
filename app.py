@@ -4157,12 +4157,13 @@ def media_plex_watchlist_add():
 
     try:
         # Determine search order: try known type first if provided
+        # NOTE: Plex Discover uses 'movies' (plural) for films and 'tv' for shows
         if media_type == 'movie':
-            search_types = ('movie', 'tv')
+            search_types = ('movies', 'tv')
         elif media_type in ('tv', 'show'):
-            search_types = ('tv', 'movie')
+            search_types = ('tv', 'movies')
         else:
-            search_types = ('tv', 'movie')
+            search_types = ('movies', 'tv')
 
         found = None
         all_candidates = []
