@@ -505,7 +505,7 @@ def analyze_show(
         "path": series.get("path", ""),
         "rating_pct": rating_pct,
         "rating_source": "tvdb" if rating_pct is not None else None,
-        "popularity": round(float(series.get('popularity') or 0), 1) or None,
+        "popularity": (lambda p: round(float(p), 1) if p is not None else None)(series.get('popularity')),
     }
     
     added_str = series.get("added", "")
@@ -784,6 +784,9 @@ def execute_actions(
 
 
 def delete_from_plex(show_title: str, config: dict, log: Callable) -> bool:
+    if not config.get("PLEX_URL") or not config.get("PLEX_TOKEN"):
+        log("[WARNING] Plex not configured — skipping Plex deletion")
+        return False
     try:
         plex = PlexServer(config["PLEX_URL"], config["PLEX_TOKEN"])
         

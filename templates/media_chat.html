@@ -642,11 +642,14 @@
         document.getElementById('tab-' + name).classList.add('active');
         event.currentTarget.classList.add('active');
 
-        // Update placeholder to match current context
+        // Update placeholder and type-pill visibility based on context
+        const pills = document.querySelector('.type-pills');
         if (name === 'watchlist') {
             searchInput.placeholder = 'Search to add to watchlist…';
+            if (pills) pills.style.display = 'none';
         } else {
             searchInput.placeholder = 'Search movies & TV shows…';
+            if (pills) pills.style.display = '';
         }
 
         // Clear stale watchlist search results when leaving watchlist tab

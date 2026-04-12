@@ -488,9 +488,9 @@ def scan_movies_for_cleanup(config: dict, log: Callable) -> list:
         if (title.lower(), year) in exclusions:
             continue
         
-        for exc_title, exc_year in exclusions:
-            if title.lower() == exc_title and (exc_year is None or year == exc_year):
-                continue
+        if any(title.lower() == exc_title and (exc_year is None or year == exc_year)
+               for exc_title, exc_year in exclusions):
+            continue
         
         added_date = movie.get('added')
         if added_date:
@@ -589,7 +589,7 @@ def scan_movies_for_cleanup(config: dict, log: Callable) -> list:
             'priority_reasons': priority_reasons,
             'rating_pct': rating_pct,
             'rating_source': rating_source,
-            'popularity': round(float(movie.get('popularity') or 0), 1) or None,
+            'popularity': (lambda p: round(float(p), 1) if p is not None else None)(movie.get('popularity')),
         })
     
     candidates.sort(key=lambda x: (-x['priority_score'], x['title']))
