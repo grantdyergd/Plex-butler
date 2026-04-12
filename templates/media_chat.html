@@ -4,26 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Media Browser</title>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
         :root {
-            --bg: #0d1117;
-            --surface: #161b22;
-            --card: #1c2128;
-            --border: rgba(255,255,255,0.08);
-            --accent: #6EB3EC;
-            --accent2: #58a6ff;
-            --text: #e6edf3;
-            --muted: #7d8590;
-            --green: #3fb950;
-            --red: #f85149;
-            --yellow: #d29922;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --card: #ffffff;
+            --border: #e2e8f0;
+            --accent: #6366f1;
+            --accent2: #6366f1;
+            --text: #0f172a;
+            --muted: #94a3b8;
+            --green: #10b981;
+            --red: #ef4444;
+            --yellow: #f59e0b;
         }
 
         body {
-            font-family: 'DM Sans', sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
@@ -35,6 +35,7 @@
         .header {
             background: var(--surface);
             border-bottom: 1px solid var(--border);
+            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
             padding: 10px 16px;
             display: flex;
             align-items: center;
@@ -47,16 +48,18 @@
         .header-sub { font-size: 11px; color: var(--muted); }
         .back-btn {
             text-decoration: none;
-            color: var(--muted);
+            color: #475569;
             font-size: 13px;
             padding: 6px 12px;
-            border: 1px solid var(--border);
+            border: 1.5px solid var(--border);
             border-radius: 8px;
             white-space: nowrap;
+            transition: all 0.15s;
         }
+        .back-btn:hover { background: #f1f5f9; color: #0f172a; }
         .status-row { display: flex; gap: 12px; align-items: center; }
         .dot-wrap { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
-        .dot { width: 7px; height: 7px; border-radius: 50%; background: #444; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: #cbd5e1; }
         .dot.ok { background: var(--green); }
         .dot.err { background: var(--red); }
         @media (max-width: 480px) { .status-row { display: none; } }
@@ -89,7 +92,7 @@
         .search-input::placeholder { color: var(--muted); }
         .search-btn {
             background: var(--accent2);
-            color: #000;
+            color: #fff;
             border: none;
             border-radius: 10px;
             padding: 10px 18px;
@@ -119,7 +122,7 @@
             font-family: inherit;
             transition: all 0.15s;
         }
-        .pill.active { background: var(--accent2); color: #000; border-color: var(--accent2); font-weight: 600; }
+        .pill.active { background: var(--accent2); color: #fff; border-color: var(--accent2); font-weight: 600; }
 
         /* ── Tab nav ── */
         .tab-nav {
@@ -166,14 +169,15 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            transition: border-color 0.15s;
+            transition: border-color 0.15s, box-shadow 0.15s;
+            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
         }
-        .media-card:hover { border-color: rgba(255,255,255,0.18); }
+        .media-card:hover { border-color: #cbd5e1; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1); }
         .card-poster {
             width: 100%;
             aspect-ratio: 2/3;
             object-fit: cover;
-            background: #1c2128;
+            background: #f1f5f9;
         }
         .card-poster-placeholder {
             width: 100%;
@@ -194,9 +198,9 @@
             border-radius: 4px;
             font-weight: 600;
         }
-        .badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
-        .badge-blue { background: rgba(88,166,255,0.15); color: var(--accent2); }
-        .badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
+        .badge-green { background: #ecfdf5; color: #059669; }
+        .badge-blue { background: rgba(99,102,241,0.1); color: var(--accent2); }
+        .badge-red { background: #fef2f2; color: #dc2626; }
         .card-actions { display: flex; gap: 4px; margin-top: auto; padding-top: 4px; }
         .card-btn {
             flex: 1;
@@ -210,12 +214,12 @@
             transition: all 0.15s;
             text-align: center;
         }
-        .card-btn-add { background: var(--accent2); color: #000; }
-        .card-btn-add:hover { background: #79c0ff; }
+        .card-btn-add { background: var(--accent2); color: #fff; }
+        .card-btn-add:hover { background: #4f46e5; }
         .card-btn-add:disabled { opacity: 0.5; cursor: not-allowed; }
-        .card-btn-done { background: rgba(63,185,80,0.2); color: var(--green); cursor: default; }
-        .card-btn-remove { background: rgba(248,81,73,0.15); color: var(--red); }
-        .card-btn-remove:hover { background: rgba(248,81,73,0.25); }
+        .card-btn-done { background: #ecfdf5; color: #059669; cursor: default; }
+        .card-btn-remove { background: #fef2f2; color: #dc2626; }
+        .card-btn-remove:hover { background: #fee2e2; }
 
         /* ── Queue items ── */
         .queue-item {
@@ -279,10 +283,10 @@
             cursor: pointer;
             font-family: inherit;
         }
-        .wl-btn-add { background: var(--accent2); color: #000; }
-        .wl-btn-remove { background: rgba(248,81,73,0.15); color: var(--red); }
-        .wl-btn-watchlist { background: rgba(130,80,255,0.15); color: var(--accent); }
-        .wl-btn-watchlist-done { background: rgba(63,185,80,0.15); color: var(--green); cursor: default; }
+        .wl-btn-add { background: var(--accent2); color: #fff; }
+        .wl-btn-remove { background: #fef2f2; color: #dc2626; }
+        .wl-btn-watchlist { background: rgba(99,102,241,0.1); color: var(--accent); }
+        .wl-btn-watchlist-done { background: #ecfdf5; color: #059669; cursor: default; }
 
         /* ── Watchlist search ── */
         .wl-search-bar {
@@ -399,7 +403,7 @@
             display: none;
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.35);
             z-index: 200;
             align-items: center;
             justify-content: center;
@@ -412,6 +416,7 @@
             padding: 20px;
             width: 90%;
             max-width: 360px;
+            box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.15);
         }
         .modal-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
         .modal-item {
@@ -423,7 +428,7 @@
             font-size: 14px;
             transition: background 0.15s;
         }
-        .modal-item:hover { background: var(--card); }
+        .modal-item:hover { background: #f1f5f9; }
         .modal-item.selected {
             background: var(--accent);
             color: #fff;
@@ -469,7 +474,7 @@
             background: var(--accent);
             border: none;
             border-radius: 8px;
-            color: #fff;
+            color: white;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
@@ -510,10 +515,11 @@
             font-size: 13px;
             max-width: 320px;
             text-align: center;
+            box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
             animation: toastIn 0.2s ease, toastOut 0.3s ease 2.7s forwards;
         }
-        .toast.success { border-color: var(--green); color: var(--green); }
-        .toast.error { border-color: var(--red); color: var(--red); }
+        .toast.success { border-color: var(--green); color: #059669; }
+        .toast.error { border-color: var(--red); color: #dc2626; }
         .toast.info { border-color: var(--accent); color: var(--accent); }
         @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toastOut { to { opacity: 0; transform: translateY(10px); } }
