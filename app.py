@@ -4025,8 +4025,15 @@ def _parse_plex_discover_results(container):
 
 
 def _find_plex_match(candidates, title, tmdb_id=None, year=None):
-    """Return the best matching Plex metadata item. Priority: TMDb GUID > exact title+year > partial title+year."""
+    """Return the best matching Plex metadata item. Priority: TMDb GUID > exact title+year > substantial partial title+year."""
     title_lower = title.lower()
+
+    def _substantial_overlap(a, b):
+        """True only if the shorter string is a substring of the longer AND covers
+        at least 60% of the longer string's length — prevents 'Mary' matching
+        inside 'Project Hail Mary'."""
+        shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+        return shorter in longer and len(shorter) >= len(longer) * 0.6
 
     # 1. GUID match via TMDb ID (most reliable)
     if tmdb_id:
@@ -4045,18 +4052,24 @@ def _find_plex_match(candidates, title, tmdb_id=None, year=None):
             if not year or not m_year or abs(int(m_year) - int(year)) <= 1:
                 return m
 
-    # 3. Partial title + year
+    # 3. Exact title (any year) — catches year-off-by-one edge cases
+    for m in candidates:
+        m_title = m.get('title', '').lower()
+        if m_title == title_lower:
+            return m
+
+    # 4. Substantial partial title + year — the shorter must cover ≥60% of the longer
     for m in candidates:
         m_title = m.get('title', '').lower()
         m_year = m.get('year')
-        if title_lower in m_title or m_title in title_lower:
+        if _substantial_overlap(title_lower, m_title):
             if not year or not m_year or abs(int(m_year) - int(year)) <= 1:
                 return m
 
-    # 4. Any partial title match as last resort
+    # 5. Substantial partial title (no year constraint) — still requires ≥60% coverage
     for m in candidates:
         m_title = m.get('title', '').lower()
-        if title_lower in m_title or m_title in title_lower:
+        if _substantial_overlap(title_lower, m_title):
             return m
 
     return None
