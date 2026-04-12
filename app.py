@@ -2475,14 +2475,7 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
                 all_metadata = []
                 for data in [tv_data, movie_data]:
                     container = data.get('MediaContainer', {})
-                    search_result_groups = container.get('SearchResult', [])
-                    if isinstance(search_result_groups, dict):
-                        search_result_groups = [search_result_groups]
-                    for group in search_result_groups:
-                        for sr in group.get('SearchResult', []):
-                            m = sr.get('Metadata', sr)
-                            if m.get('title'):
-                                all_metadata.append(m)
+                    all_metadata.extend(_parse_plex_discover_results(container))
                 
                 if not all_metadata:
                     return jsonify({'reply': f'No results found on Plex for "{query}". Try a different search term.'})
@@ -3993,12 +3986,76 @@ def media_radarr_search():
         return jsonify({'error': str(e), 'results': [], 'profiles': [], 'rootFolders': []})
 
 
+def _parse_plex_discover_results(container):
+    """Flatten Plex Discover SearchResult regardless of whether it's a flat list or nested groups."""
+    items = []
+    raw = container.get('SearchResult', [])
+    if isinstance(raw, dict):
+        raw = [raw]
+    for entry in raw:
+        # Flat format: entry = {"Metadata": {...}, "score": ...}
+        meta = entry.get('Metadata')
+        if meta and meta.get('title'):
+            items.append(meta)
+            continue
+        # Nested format: entry = {"SearchResult": [...], "hub": ...}
+        nested = entry.get('SearchResult', [])
+        if isinstance(nested, dict):
+            nested = [nested]
+        for sr in nested:
+            m = sr.get('Metadata', sr)
+            if m and m.get('title'):
+                items.append(m)
+    return items
+
+
+def _find_plex_match(candidates, title, tmdb_id=None, year=None):
+    """Return the best matching Plex metadata item. Priority: TMDb GUID > exact title+year > partial title+year."""
+    title_lower = title.lower()
+
+    # 1. GUID match via TMDb ID (most reliable)
+    if tmdb_id:
+        tmdb_str = str(tmdb_id)
+        for m in candidates:
+            for g in (m.get('Guid') or []):
+                gid = g.get('id', '') if isinstance(g, dict) else str(g)
+                if tmdb_str in gid and ('themoviedb' in gid or 'tmdb' in gid):
+                    return m
+
+    # 2. Exact title + year
+    for m in candidates:
+        m_title = m.get('title', '').lower()
+        m_year = m.get('year')
+        if m_title == title_lower:
+            if not year or not m_year or abs(int(m_year) - int(year)) <= 1:
+                return m
+
+    # 3. Partial title + year
+    for m in candidates:
+        m_title = m.get('title', '').lower()
+        m_year = m.get('year')
+        if title_lower in m_title or m_title in title_lower:
+            if not year or not m_year or abs(int(m_year) - int(year)) <= 1:
+                return m
+
+    # 4. Any partial title match as last resort
+    for m in candidates:
+        m_title = m.get('title', '').lower()
+        if title_lower in m_title or m_title in title_lower:
+            return m
+
+    return None
+
+
 @app.route('/api/media/plex-watchlist-add', methods=['POST'])
 @login_required
 def media_plex_watchlist_add():
     """Search Plex Discover and add a title to the Plex watchlist."""
     data = request.get_json()
     title = data.get('title', '').strip()
+    tmdb_id = data.get('tmdb_id')
+    year = data.get('year')
+    media_type = data.get('media_type', '')  # 'movie' or 'tv'
     plex_token = get_setting('PLEX_TOKEN', '').strip()
 
     if not plex_token:
@@ -4015,30 +4072,27 @@ def media_plex_watchlist_add():
     }
 
     try:
-        # Search Plex Discover for the title
-        found = None
-        for search_type in ('movie', 'tv'):
+        # Determine search order: try known type first if provided
+        if media_type == 'movie':
+            search_types = ('movie', 'tv')
+        elif media_type in ('tv', 'show'):
+            search_types = ('tv', 'movie')
+        else:
+            search_types = ('tv', 'movie')
+
+        all_candidates = []
+        for search_type in search_types:
             resp = requests.get(
                 "https://discover.provider.plex.tv/library/search",
-                params={'query': title, 'limit': 5, 'searchTypes': search_type, 'searchProviders': 'discover'},
+                params={'query': title, 'limit': 20, 'searchTypes': search_type, 'searchProviders': 'discover'},
                 headers=headers, timeout=12
             )
             if not resp.ok:
                 continue
             container = resp.json().get('MediaContainer', {})
-            groups = container.get('SearchResult', [])
-            if isinstance(groups, dict):
-                groups = [groups]
-            for group in groups:
-                for sr in group.get('SearchResult', []):
-                    m = sr.get('Metadata', sr)
-                    if m.get('title', '').lower() == title.lower() or title.lower() in m.get('title', '').lower():
-                        found = m
-                        break
-                if found:
-                    break
-            if found:
-                break
+            all_candidates.extend(_parse_plex_discover_results(container))
+
+        found = _find_plex_match(all_candidates, title, tmdb_id=tmdb_id, year=year)
 
         if not found:
             return jsonify({'success': False, 'error': f'Could not find "{title}" on Plex Discover.'})
@@ -4048,13 +4102,15 @@ def media_plex_watchlist_add():
             return jsonify({'success': False, 'error': 'Could not get Plex ID for this title.'})
 
         # Add to watchlist
-        add_resp = requests.get(
+        add_resp = requests.put(
             "https://discover.provider.plex.tv/actions/addToWatchlist",
             params={'ratingKey': rating_key},
             headers=headers, timeout=12
         )
         if add_resp.status_code in (200, 201, 204):
             return jsonify({'success': True, 'message': f'"{title}" added to your Plex watchlist.'})
+        elif add_resp.status_code == 409:
+            return jsonify({'success': True, 'already_exists': True, 'message': f'"{title}" is already on your Plex watchlist.'})
         else:
             return jsonify({'success': False, 'error': f'Plex returned status {add_resp.status_code}.'})
     except Exception as e:

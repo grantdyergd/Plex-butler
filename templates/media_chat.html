@@ -1143,7 +1143,10 @@
         }
     }
 
+    let wlSearchResultsData = [];
+
     function renderWlSearchResults(results, container) {
+        wlSearchResultsData = results;
         const grid = document.createElement('div');
         grid.className = 'wl-search-results-grid';
         results.forEach((item, i) => {
@@ -1162,7 +1165,7 @@
                     <div style="margin-top:3px">${inLibBadge}</div>
                 </div>
                 <div class="wl-actions">
-                    <button class="wl-btn wl-btn-watchlist" id="wlsr-btn-${i}" onclick="addToWatchlistFromSearch(${i}, '${esc(item.title).replace(/'/g, "\\'")}')">+ Watchlist</button>
+                    <button class="wl-btn wl-btn-watchlist" id="wlsr-btn-${i}" onclick="addToWatchlistFromSearch(${i})">+ Watchlist</button>
                 </div>`;
             div.dataset.title = item.title;
             grid.appendChild(div);
@@ -1171,7 +1174,9 @@
         container.appendChild(grid);
     }
 
-    async function addToWatchlistFromSearch(i, title) {
+    async function addToWatchlistFromSearch(i) {
+        const item = wlSearchResultsData[i] || {};
+        const title = item.title || '';
         const btn = document.getElementById(`wlsr-btn-${i}`);
         btn.disabled = true;
         btn.textContent = '…';
@@ -1179,7 +1184,12 @@
             const r = await fetch('/api/media/plex-watchlist-add', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title })
+                body: JSON.stringify({
+                    title,
+                    tmdb_id: item.tmdb_id || null,
+                    year: item.year || null,
+                    media_type: item.mediaType || ''
+                })
             });
             const data = await r.json();
             if (data.success) {
