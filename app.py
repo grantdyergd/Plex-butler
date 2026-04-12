@@ -4084,18 +4084,31 @@ def media_plex_watchlist_add():
         for search_type in search_types:
             resp = requests.get(
                 "https://discover.provider.plex.tv/library/search",
-                params={'query': title, 'limit': 20, 'searchTypes': search_type, 'searchProviders': 'discover'},
+                params={
+                    'query': title,
+                    'limit': 30,
+                    'searchTypes': search_type,
+                    'searchProviders': 'discover',
+                    'includeGuids': 1,
+                },
                 headers=headers, timeout=12
             )
+            print(f"[Plex Discover] type={search_type} status={resp.status_code} query={title!r}")
             if not resp.ok:
+                print(f"[Plex Discover] Error body: {resp.text[:300]}")
                 continue
             container = resp.json().get('MediaContainer', {})
-            all_candidates.extend(_parse_plex_discover_results(container))
+            parsed = _parse_plex_discover_results(container)
+            print(f"[Plex Discover] type={search_type} found {len(parsed)} candidates: {[m.get('title') for m in parsed[:5]]}")
+            all_candidates.extend(parsed)
 
         found = _find_plex_match(all_candidates, title, tmdb_id=tmdb_id, year=year)
 
         if not found:
-            return jsonify({'success': False, 'error': f'Could not find "{title}" on Plex Discover.'})
+            candidate_titles = [m.get('title', '?') for m in all_candidates[:8]]
+            print(f"[Plex Discover] No match for {title!r} (tmdb={tmdb_id}, year={year}). Candidates: {candidate_titles}")
+            hint = f' Plex returned: {", ".join(candidate_titles)}' if candidate_titles else ' Plex returned no results — the title may not be on Plex Discover yet.'
+            return jsonify({'success': False, 'error': f'Could not find "{title}" on Plex Discover.{hint}'})
 
         rating_key = found.get('ratingKey', '')
         if not rating_key:

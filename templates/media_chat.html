@@ -1186,7 +1186,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title,
-                    tmdb_id: item.tmdb_id || null,
+                    tmdb_id: item.tmdbId || item.tmdb_id || null,
                     year: item.year || null,
                     media_type: item.mediaType || ''
                 })
