@@ -3781,14 +3781,22 @@ def media_queue():
 
     if sonarr_url and sonarr_key:
         try:
-            data = requests.get(f"{sonarr_url}/api/v3/queue", params={'apikey': sonarr_key, 'pageSize': 50}, timeout=10).json()
+            data = requests.get(f"{sonarr_url}/api/v3/queue",
+                                params={'apikey': sonarr_key, 'pageSize': 50,
+                                        'includeSeries': 'true', 'includeEpisode': 'true'},
+                                timeout=10).json()
             for item in data.get('records', []):
                 size = item.get('size', 0)
                 sizeleft = item.get('sizeleft', 0)
                 pct = round((1 - sizeleft / size) * 100) if size else 0
+                series_title = (item.get('series') or {}).get('title') or item.get('title', 'Unknown')
+                ep_obj = item.get('episode') or {}
+                season_num = ep_obj.get('seasonNumber', item.get('seasonNumber', 0))
+                ep_num = ep_obj.get('episodeNumber', 0)
+                episode_str = f"S{season_num:02d}E{ep_num:02d}" if ep_num else ''
                 sonarr_queue.append({
-                    'title': item.get('series', {}).get('title', 'Unknown'),
-                    'episode': f"S{item.get('seasonNumber',0):02d}E{item.get('episodeNumbers',[0])[0]:02d}" if item.get('episodeNumbers') else '',
+                    'title': series_title,
+                    'episode': episode_str,
                     'status': item.get('status', ''),
                     'pct': pct,
                     'size': round((size - sizeleft) / (1024**3), 2),
@@ -3799,13 +3807,16 @@ def media_queue():
 
     if radarr_url and radarr_key:
         try:
-            data = requests.get(f"{radarr_url}/api/v3/queue", params={'apikey': radarr_key, 'pageSize': 50}, timeout=10).json()
+            data = requests.get(f"{radarr_url}/api/v3/queue",
+                                params={'apikey': radarr_key, 'pageSize': 50, 'includeMovie': 'true'},
+                                timeout=10).json()
             for item in data.get('records', []):
                 size = item.get('size', 0)
                 sizeleft = item.get('sizeleft', 0)
                 pct = round((1 - sizeleft / size) * 100) if size else 0
+                movie_title = (item.get('movie') or {}).get('title') or item.get('title', 'Unknown')
                 radarr_queue.append({
-                    'title': item.get('movie', {}).get('title', 'Unknown'),
+                    'title': movie_title,
                     'episode': '',
                     'status': item.get('status', ''),
                     'pct': pct,
@@ -3874,10 +3885,12 @@ def media_calendar():
     if sonarr_url and sonarr_key:
         try:
             cal = requests.get(f"{sonarr_url}/api/v3/calendar",
-                               params={'apikey': sonarr_key, 'start': today, 'end': end}, timeout=10).json()
+                               params={'apikey': sonarr_key, 'start': today, 'end': end,
+                                       'includeSeries': 'true'}, timeout=10).json()
             for ep in (cal if isinstance(cal, list) else []):
+                show_title = (ep.get('series') or {}).get('title') or ep.get('seriesTitle', 'Unknown')
                 episodes.append({
-                    'show': ep.get('series', {}).get('title', 'Unknown'),
+                    'show': show_title,
                     'episode': f"S{ep.get('seasonNumber',0):02d}E{ep.get('episodeNumber',0):02d}",
                     'title': ep.get('title', ''),
                     'airDate': ep.get('airDate', ''),
