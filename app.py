@@ -3952,10 +3952,13 @@ def media_discover():
         date_str = raw.get('release_date') or raw.get('first_air_date') or ''
         year = int(date_str[:4]) if date_str[:4].isdigit() else None
         poster = (img_base + raw['poster_path']) if raw.get('poster_path') else None
+        tmdb_id = raw.get('id')
+        url_type = 'movie' if media_type == 'movie' else 'tv'
         return {
             'title': title,
             'year': year,
-            'tmdbId': raw.get('id'),
+            'tmdbId': tmdb_id,
+            'tmdbUrl': f'https://www.themoviedb.org/{url_type}/{tmdb_id}' if tmdb_id else None,
             'mediaType': media_type,
             'rating': round(raw.get('vote_average') or 0, 1),
             'voteCount': raw.get('vote_count', 0),
@@ -4018,6 +4021,40 @@ def media_discover():
         'streaming_now': streaming_now,
         'new_on_tv': new_on_tv,
     })
+
+
+@app.route('/api/radarr/profiles')
+@login_required
+def radarr_profiles():
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+    if not radarr_url or not radarr_key:
+        return jsonify({'profiles': [], 'folders': [], 'error': 'Radarr not configured'})
+    try:
+        profs = requests.get(f"{radarr_url}/api/v3/qualityprofile", params={'apikey': radarr_key}, timeout=10).json()
+        profiles = [{'id': p['id'], 'name': p['name']} for p in profs] if isinstance(profs, list) else []
+        roots = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=10).json()
+        folders = [{'path': r['path'], 'freeGB': round(r.get('freeSpace', 0) / 1e9, 1)} for r in roots] if isinstance(roots, list) else []
+        return jsonify({'profiles': profiles, 'folders': folders})
+    except Exception as e:
+        return jsonify({'profiles': [], 'folders': [], 'error': str(e)})
+
+
+@app.route('/api/sonarr/profiles')
+@login_required
+def sonarr_profiles():
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    if not sonarr_url or not sonarr_key:
+        return jsonify({'profiles': [], 'folders': [], 'error': 'Sonarr not configured'})
+    try:
+        profs = requests.get(f"{sonarr_url}/api/v3/qualityprofile", params={'apikey': sonarr_key}, timeout=10).json()
+        profiles = [{'id': p['id'], 'name': p['name']} for p in profs] if isinstance(profs, list) else []
+        roots = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=10).json()
+        folders = [{'path': r['path'], 'freeGB': round(r.get('freeSpace', 0) / 1e9, 1)} for r in roots] if isinstance(roots, list) else []
+        return jsonify({'profiles': profiles, 'folders': folders})
+    except Exception as e:
+        return jsonify({'profiles': [], 'folders': [], 'error': str(e)})
 
 
 @app.route('/api/media/disk')

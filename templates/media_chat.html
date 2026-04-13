@@ -587,6 +587,8 @@
         .disc-btn-wl { background: rgba(99,102,241,0.1); color: var(--accent); }
         .disc-btn-wl:hover { background: rgba(99,102,241,0.2); }
         .disc-btn-wl:disabled { opacity: 0.5; cursor: not-allowed; }
+        .disc-btn-info { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; border-radius: 6px; font-size: 12px; text-decoration: none; background: rgba(0,0,0,0.05); color: var(--text-secondary); transition: background 0.15s; }
+        .disc-btn-info:hover { background: rgba(0,0,0,0.12); }
 
         /* ── Toast ── */
         .toast-container {
@@ -1175,7 +1177,7 @@
                     ${upcoming && dateLabel ? `<div class="disc-date">📅 ${dateLabel}</div>` : ''}
                     ${isLib ? `<span class="disc-badge-lib">In Library</span>` : ''}
                     ${item.overview ? `<div class="disc-overview">${esc(item.overview)}</div>` : ''}
-                    <div class="disc-btn">${addBtnHtml}${wlBtnHtml}</div>
+                    <div class="disc-btn">${addBtnHtml}${wlBtnHtml}${item.tmdbUrl ? `<a class="disc-btn-info" href="${esc(item.tmdbUrl)}" target="_blank" rel="noopener" title="View on TMDb">ℹ️</a>` : ''}</div>
                 </div>
             </div>`;
         }
@@ -1215,18 +1217,18 @@
         addBtn.textContent = '…';
         const arr = item.mediaType === 'movie' ? 'radarr' : 'sonarr';
         try {
-            const [profRes, foldRes] = await Promise.all([
-                fetch(`/api/${arr}/profiles`).then(r => r.json()),
-                fetch(`/api/${arr}/rootfolders`).then(r => r.json()),
-            ]);
-            const profiles = profRes.profiles || [];
-            const rootFolders = foldRes.folders || [];
+            const res = await fetch(`/api/${arr}/profiles`).then(r => r.json());
+            const profiles = res.profiles || [];
+            const rootFolders = res.folders || [];
+            if (res.error && profiles.length === 0) {
+                throw new Error(res.error);
+            }
             pendingAdd = { btn: addBtn, item, type: item.mediaType, profiles, rootFolders };
             openModal(profiles, rootFolders, item.title);
         } catch(e) {
             addBtn.disabled = false;
             addBtn.textContent = '+ Add';
-            toast('Could not load profiles.', 'error');
+            toast(e.message || 'Could not load profiles.', 'error');
         }
     }
 
