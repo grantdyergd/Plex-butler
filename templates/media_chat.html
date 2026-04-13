@@ -494,6 +494,100 @@
             font-family: inherit;
         }
 
+        /* ── Discover rows ── */
+        .discover-section { margin-bottom: 24px; }
+        .discover-section:last-child { margin-bottom: 0; }
+        .discover-row {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+            scrollbar-width: none;
+            -webkit-overflow-scrolling: touch;
+        }
+        .discover-row::-webkit-scrollbar { display: none; }
+        .disc-card {
+            flex-shrink: 0;
+            width: 130px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .disc-card:hover { border-color: #cbd5e1; box-shadow: 0 2px 6px 0 rgb(0 0 0 / 0.1); }
+        .disc-poster {
+            width: 100%;
+            aspect-ratio: 2/3;
+            object-fit: cover;
+            background: #f1f5f9;
+            display: block;
+        }
+        .disc-poster-ph {
+            width: 100%;
+            aspect-ratio: 2/3;
+            background: #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+        }
+        .disc-body { padding: 7px 8px; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+        .disc-title { font-size: 11px; font-weight: 700; line-height: 1.3; color: var(--text); }
+        .disc-meta { font-size: 10px; color: var(--muted); }
+        .disc-rating {
+            font-size: 10px;
+            font-weight: 600;
+            color: #f59e0b;
+        }
+        .disc-date { font-size: 10px; color: #6366f1; font-weight: 600; }
+        .disc-badge-lib {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+            background: #ecfdf5;
+            color: #059669;
+        }
+        .disc-overview {
+            font-size: 10px;
+            color: var(--muted);
+            line-height: 1.4;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            margin-top: 2px;
+        }
+        .disc-btn {
+            margin-top: auto;
+            padding-top: 5px;
+            display: flex;
+            gap: 4px;
+        }
+        .disc-btn button {
+            flex: 1;
+            padding: 5px 2px;
+            font-size: 10px;
+            font-weight: 600;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.15s;
+        }
+        .disc-btn-add { background: var(--accent); color: #fff; }
+        .disc-btn-add:hover { background: #4f46e5; }
+        .disc-btn-add:disabled { opacity: 0.5; cursor: not-allowed; }
+        .disc-btn-done { background: #ecfdf5; color: #059669; cursor: default; }
+        .disc-btn-wl { background: rgba(99,102,241,0.1); color: var(--accent); }
+        .disc-btn-wl:hover { background: rgba(99,102,241,0.2); }
+        .disc-btn-wl:disabled { opacity: 0.5; cursor: not-allowed; }
+
         /* ── Toast ── */
         .toast-container {
             position: fixed;
@@ -554,6 +648,7 @@
 
 <div class="tab-nav">
     <button class="tab-btn active" onclick="showTab('search')">🔍 Search</button>
+    <button class="tab-btn" onclick="showTab('discover')">✨ Discover</button>
     <button class="tab-btn" onclick="showTab('watchlist')">🟡 Watchlist</button>
     <button class="tab-btn" onclick="showTab('queue')">⬇ Downloads</button>
     <button class="tab-btn" onclick="showTab('activity')">📅 Activity</button>
@@ -568,6 +663,13 @@
                 <div class="icon">🔍</div>
                 Search for any movie or TV show above.<br>Results will show what's already in your library.
             </div>
+        </div>
+    </div>
+
+    <!-- Discover Tab -->
+    <div class="tab-panel" id="tab-discover">
+        <div id="discover-content">
+            <div class="state-msg"><div class="spinner"></div>Loading recommendations…</div>
         </div>
     </div>
 
@@ -637,7 +739,7 @@
     }).catch(() => {});
 
     // ── Tab nav ───────────────────────────────────────────────────────────
-    const loaded = { watchlist: false, queue: false, activity: false };
+    const loaded = { watchlist: false, queue: false, activity: false, discover: false };
 
     const searchInput = document.getElementById('searchInput');
     const searchBtn   = document.getElementById('searchBtn');
@@ -665,6 +767,7 @@
         }
 
         if (name === 'watchlist' && !loaded.watchlist) loadWatchlist();
+        if (name === 'discover'  && !loaded.discover)  loadDiscover();
         if (name === 'queue'     && !loaded.queue)     loadQueue();
         if (name === 'activity'  && !loaded.activity)  loadActivity();
     }
@@ -1037,6 +1140,123 @@
         } catch(e) {
             removeBtn.textContent = 'Remove';
             removeBtn.disabled = false;
+        }
+    }
+
+    // ── Discover ───────────────────────────────────────────────────────────
+    let discoverData = [];  // flat list of all disc items keyed by global index
+
+    async function loadDiscover() {
+        loaded.discover = true;
+        const el = document.getElementById('discover-content');
+
+        function discCard(item) {
+            const gi = discoverData.length;  // global index
+            discoverData.push(item);
+            const isLib = item.inLibrary;
+            const rating = item.rating > 0 ? `⭐ ${item.rating}` : '';
+            const today = new Date().toISOString().slice(0, 10);
+            const upcoming = item.releaseDate && item.releaseDate > today;
+            const dateLabel = item.releaseDate
+                ? new Date(item.releaseDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                : '';
+            const typeLabel = item.mediaType === 'movie' ? 'Movie' : 'TV';
+            const addBtnHtml = isLib
+                ? `<button class="disc-btn-done" disabled>✓ Library</button>`
+                : `<button class="disc-btn-add" id="dc-add-${gi}" onclick="discAdd(${gi})">+ Add</button>`;
+            const wlBtnHtml = `<button class="disc-btn-wl" id="dc-wl-${gi}" onclick="discWatchlist(${gi})">👁 WL</button>`;
+            return `<div class="disc-card">
+                ${item.poster ? `<img class="disc-poster" src="${esc(item.poster)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">` : ''}
+                <div class="disc-poster-ph" style="${item.poster ? 'display:none' : ''}">${item.mediaType === 'movie' ? '🎬' : '📺'}</div>
+                <div class="disc-body">
+                    <div class="disc-title">${esc(item.title)}</div>
+                    <div class="disc-meta">${typeLabel}${item.year ? ' · ' + item.year : ''}</div>
+                    ${rating ? `<div class="disc-rating">${rating}</div>` : ''}
+                    ${upcoming && dateLabel ? `<div class="disc-date">📅 ${dateLabel}</div>` : ''}
+                    ${isLib ? `<span class="disc-badge-lib">In Library</span>` : ''}
+                    ${item.overview ? `<div class="disc-overview">${esc(item.overview)}</div>` : ''}
+                    <div class="disc-btn">${addBtnHtml}${wlBtnHtml}</div>
+                </div>
+            </div>`;
+        }
+
+        function discSection(label, items) {
+            if (!items || items.length === 0) return '';
+            return `<div class="discover-section">
+                <div class="section-title">${label}</div>
+                <div class="discover-row">${items.map(discCard).join('')}</div>
+            </div>`;
+        }
+
+        try {
+            el.innerHTML = '<div class="state-msg"><div class="spinner"></div>Fetching recommendations…</div>';
+            discoverData = [];
+            const r = await fetch('/api/media/discover');
+            const data = await r.json();
+            if (data.error) { el.innerHTML = `<div class="state-msg">${esc(data.error)}</div>`; return; }
+            let html = '';
+            html += discSection('🔥 Trending Movies This Week', data.trending_movies);
+            html += discSection('📺 Trending TV This Week', data.trending_tv);
+            html += discSection('🎬 Coming Soon', data.coming_soon);
+            html += discSection('🍿 Popular on Streaming', data.streaming_now);
+            html += discSection('📡 New on TV', data.new_on_tv);
+            el.innerHTML = html || '<div class="state-msg">No recommendations available.</div>';
+        } catch(e) {
+            el.innerHTML = '<div class="state-msg">Failed to load recommendations.</div>';
+        }
+    }
+
+    async function discAdd(gi) {
+        const item = discoverData[gi];
+        if (!item) return;
+        const addBtn = document.getElementById(`dc-add-${gi}`);
+        if (!addBtn || addBtn.disabled) return;
+        addBtn.disabled = true;
+        addBtn.textContent = '…';
+        const arr = item.mediaType === 'movie' ? 'radarr' : 'sonarr';
+        try {
+            const [profRes, foldRes] = await Promise.all([
+                fetch(`/api/${arr}/profiles`).then(r => r.json()),
+                fetch(`/api/${arr}/rootfolders`).then(r => r.json()),
+            ]);
+            const profiles = profRes.profiles || [];
+            const rootFolders = foldRes.folders || [];
+            pendingAdd = { btn: addBtn, item, type: item.mediaType, profiles, rootFolders };
+            openModal(profiles, rootFolders, item.title);
+        } catch(e) {
+            addBtn.disabled = false;
+            addBtn.textContent = '+ Add';
+            toast('Could not load profiles.', 'error');
+        }
+    }
+
+    async function discWatchlist(gi) {
+        const item = discoverData[gi];
+        if (!item) return;
+        const btn = document.getElementById(`dc-wl-${gi}`);
+        if (!btn || btn.disabled) return;
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+            const r = await fetch('/api/media/plex-watchlist-add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: item.title, tmdb_id: item.tmdbId, year: item.year, media_type: item.mediaType })
+            });
+            const data = await r.json();
+            if (data.success) {
+                btn.textContent = '✓ WL';
+                btn.className = 'disc-btn-done';
+                toast(`"${item.title}" added to Plex watchlist!`, 'success');
+            } else {
+                btn.disabled = false;
+                btn.textContent = '👁 WL';
+                toast(data.error || 'Could not add to watchlist.', 'error');
+            }
+        } catch(e) {
+            btn.disabled = false;
+            btn.textContent = '👁 WL';
+            toast('Could not reach Plex watchlist.', 'error');
         }
     }
 

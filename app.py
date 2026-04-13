@@ -3916,6 +3916,110 @@ def media_calendar():
     return jsonify({'episodes': episodes, 'movies': movies, 'from': today, 'to': end})
 
 
+@app.route('/api/media/discover')
+@login_required
+def media_discover():
+    """Return trending, upcoming, and streaming content from TMDb (English only)."""
+    tmdb_key = os.environ.get('TMDB_API_KEY', '').strip()
+    if not tmdb_key:
+        return jsonify({'error': 'TMDb API key not configured.'})
+
+    tmdb_base = 'https://api.themoviedb.org/3'
+    img_base = 'https://image.tmdb.org/t/p/w342'
+
+    # Build a quick set of Plex library titles for in-library badges
+    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    lib_titles = set()
+    if plex_url and plex_token:
+        try:
+            for ptype in [1, 4]:  # 1=movie, 4=show
+                r = requests.get(
+                    f"{plex_url}/library/all",
+                    params={'X-Plex-Token': plex_token, 'type': ptype},
+                    headers={'Accept': 'application/json'}, timeout=8
+                )
+                if r.ok:
+                    for m in r.json().get('MediaContainer', {}).get('Metadata', []):
+                        t = (m.get('title') or '').lower().strip()
+                        if t:
+                            lib_titles.add(t)
+        except Exception as e:
+            print(f"[Discover] Plex lib fetch: {e}")
+
+    def make_item(raw, media_type):
+        title = raw.get('title') or raw.get('name', '')
+        date_str = raw.get('release_date') or raw.get('first_air_date') or ''
+        year = int(date_str[:4]) if date_str[:4].isdigit() else None
+        poster = (img_base + raw['poster_path']) if raw.get('poster_path') else None
+        return {
+            'title': title,
+            'year': year,
+            'tmdbId': raw.get('id'),
+            'mediaType': media_type,
+            'rating': round(raw.get('vote_average') or 0, 1),
+            'voteCount': raw.get('vote_count', 0),
+            'popularity': round(raw.get('popularity') or 0, 1),
+            'overview': (raw.get('overview') or '')[:160],
+            'poster': poster,
+            'releaseDate': date_str or None,
+            'inLibrary': title.lower().strip() in lib_titles,
+        }
+
+    def fetch(url, params, media_type, limit=20):
+        try:
+            resp = requests.get(url, params=params, timeout=10).json()
+            out = []
+            seen = set()
+            for item in resp.get('results', []):
+                if item.get('original_language') != 'en':
+                    continue
+                t = (item.get('title') or item.get('name') or '').strip()
+                if not t or t in seen:
+                    continue
+                seen.add(t)
+                out.append(make_item(item, media_type))
+                if len(out) >= limit:
+                    break
+            return out
+        except Exception as e:
+            print(f"[Discover] {url}: {e}")
+            return []
+
+    base_params = {'api_key': tmdb_key, 'language': 'en-US'}
+    today = datetime.now().strftime('%Y-%m-%d')
+    future_90 = (datetime.now() + timedelta(days=90)).strftime('%Y-%m-%d')
+    # Major English streaming providers: Netflix, Prime, Disney+, Apple TV+, Hulu, Max, Peacock, Paramount+
+    streaming_providers = '8|9|15|337|350|386|531|1899'
+
+    trending_movies = fetch(
+        f"{tmdb_base}/trending/movie/week", {**base_params}, 'movie', 20)
+    trending_tv = fetch(
+        f"{tmdb_base}/trending/tv/week", {**base_params}, 'tv', 20)
+    coming_soon = fetch(
+        f"{tmdb_base}/discover/movie",
+        {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
+         'primary_release_date.gte': today, 'primary_release_date.lte': future_90,
+         'region': 'US'}, 'movie', 20)
+    streaming_now = fetch(
+        f"{tmdb_base}/discover/movie",
+        {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
+         'with_watch_providers': streaming_providers, 'watch_region': 'US'}, 'movie', 20)
+    new_on_tv = fetch(
+        f"{tmdb_base}/discover/tv",
+        {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
+         'with_watch_providers': streaming_providers, 'watch_region': 'US',
+         'air_date.gte': (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')}, 'tv', 20)
+
+    return jsonify({
+        'trending_movies': trending_movies,
+        'trending_tv': trending_tv,
+        'coming_soon': coming_soon,
+        'streaming_now': streaming_now,
+        'new_on_tv': new_on_tv,
+    })
+
+
 @app.route('/api/media/disk')
 @login_required
 def media_disk():
