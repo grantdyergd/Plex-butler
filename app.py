@@ -3927,13 +3927,45 @@ def media_discover():
     tmdb_base = 'https://api.themoviedb.org/3'
     img_base = 'https://image.tmdb.org/t/p/w342'
 
-    # Build a quick set of Plex library titles for in-library badges
-    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    # Build a set of known-library titles from Sonarr + Radarr (most reliable)
+    # and also Plex as a supplement.
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+    plex_url   = get_setting('PLEX_URL', '').strip().rstrip('/')
     plex_token = get_setting('PLEX_TOKEN', '').strip()
     lib_titles = set()
+
+    # Radarr — movies in library
+    if radarr_url and radarr_key:
+        try:
+            movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=10).json()
+            if isinstance(movies, list):
+                for m in movies:
+                    t = (m.get('title') or '').lower().strip()
+                    if t:
+                        lib_titles.add(t)
+        except Exception as e:
+            print(f"[Discover] Radarr lib fetch: {e}")
+
+    # Sonarr — TV shows in library
+    if sonarr_url and sonarr_key:
+        try:
+            series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=10).json()
+            if isinstance(series, list):
+                for s in series:
+                    t = (s.get('title') or '').lower().strip()
+                    if t:
+                        lib_titles.add(t)
+        except Exception as e:
+            print(f"[Discover] Sonarr lib fetch: {e}")
+
+    # Plex — supplement with any items Sonarr/Radarr may not know about
+    # type=1 (movies), type=2 (shows) — NOT type=4 which is episodes
     if plex_url and plex_token:
         try:
-            for ptype in [1, 4]:  # 1=movie, 4=show
+            for ptype in [1, 2]:
                 r = requests.get(
                     f"{plex_url}/library/all",
                     params={'X-Plex-Token': plex_token, 'type': ptype},
