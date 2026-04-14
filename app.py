@@ -3355,7 +3355,38 @@ def media_chat_add():
                 tvdb_id = int(tvdb_id) if tvdb_id else 0
             except (ValueError, TypeError):
                 tvdb_id = 0
-            
+
+            # If we have no TVDB ID (e.g. item came from Discover which only has TMDb ID),
+            # look up the series in Sonarr to get full metadata including tvdbId.
+            lookup_item = None
+            if tvdb_id == 0:
+                title = item.get('title', '')
+                tmdb_id = item.get('tmdbId')
+                # Try tmdb: prefix first (Sonarr v3 supports it), fall back to title search
+                for term in ([f'tmdb:{tmdb_id}'] if tmdb_id else []) + [title]:
+                    try:
+                        lk = requests.get(
+                            f"{sonarr_url}/api/v3/series/lookup",
+                            params={'term': term, 'apikey': sonarr_key},
+                            timeout=12
+                        ).json()
+                        if isinstance(lk, list) and lk:
+                            # Pick the best match by title similarity
+                            title_lower = title.lower()
+                            for candidate in lk:
+                                if (candidate.get('title') or '').lower() == title_lower:
+                                    lookup_item = candidate
+                                    break
+                            if not lookup_item:
+                                lookup_item = lk[0]
+                            tvdb_id = lookup_item.get('tvdbId', 0)
+                            break
+                    except Exception as le:
+                        print(f"[Add Show Lookup] {term}: {le}")
+
+            if tvdb_id == 0:
+                return jsonify({'success': False, 'error': f'Could not find "{item.get("title")}" in Sonarr. Try searching for it manually.'})
+
             qual_id = profile_id
             try:
                 qual_id = int(qual_id) if qual_id else None
@@ -3365,14 +3396,16 @@ def media_chat_add():
             if not qual_id:
                 profiles = requests.get(f"{sonarr_url}/api/v3/qualityprofile", params={'apikey': sonarr_key}, timeout=10).json()
                 qual_id = profiles[0]['id'] if profiles else 1
-            
+
+            # Use lookup_item metadata if available (has titleSlug, images, seasons)
+            src = lookup_item or item
             payload = {
-                'title': item.get('title'),
+                'title': src.get('title') or item.get('title'),
                 'tvdbId': tvdb_id,
                 'qualityProfileId': int(qual_id),
-                'titleSlug': item.get('titleSlug') or item.get('title', '').lower().replace(' ', '-'),
-                'images': item.get('images', []),
-                'seasons': item.get('seasons', []),
+                'titleSlug': src.get('titleSlug') or item.get('titleSlug') or item.get('title', '').lower().replace(' ', '-'),
+                'images': src.get('images', []),
+                'seasons': src.get('seasons', []),
                 'rootFolderPath': root_path,
                 'monitored': True,
                 'addOptions': {'searchForMissingEpisodes': True}
