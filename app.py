@@ -4069,6 +4069,10 @@ def media_discover():
         {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
          'primary_release_date.gte': today, 'primary_release_date.lte': future_90,
          'region': 'US'}, 'movie', 20)
+    upcoming_tv = fetch(
+        f"{tmdb_base}/discover/tv",
+        {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
+         'first_air_date.gte': today, 'first_air_date.lte': future_90}, 'tv', 20)
     streaming_now = fetch(
         f"{tmdb_base}/discover/movie",
         {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
@@ -4083,6 +4087,7 @@ def media_discover():
         'trending_movies': trending_movies,
         'trending_tv': trending_tv,
         'coming_soon': coming_soon,
+        'upcoming_tv': upcoming_tv,
         'streaming_now': streaming_now,
         'new_on_tv': new_on_tv,
     })

@@ -1199,7 +1199,8 @@
             let html = '';
             html += discSection('🔥 Trending Movies This Week', data.trending_movies);
             html += discSection('📺 Trending TV This Week', data.trending_tv);
-            html += discSection('🎬 Coming Soon', data.coming_soon);
+            html += discSection('🎬 Coming Soon — Movies', data.coming_soon);
+            html += discSection('📺 Coming Soon — TV Shows', data.upcoming_tv);
             html += discSection('🍿 Popular on Streaming', data.streaming_now);
             html += discSection('📡 New on TV', data.new_on_tv);
             el.innerHTML = html || '<div class="state-msg">No recommendations available.</div>';
