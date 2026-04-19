@@ -5529,15 +5529,26 @@ def expiration_send_warnings():
         return 0
 
     threshold = datetime.utcnow() + timedelta(days=policy['warn_days'])
+    # Same cap as deletions, so the warning queue and delete queue stay in lock-step.
+    try:
+        cap = max(0, int(get_setting('EXPIRATION_MAX_DELETIONS_PER_RUN', '10')))
+    except Exception:
+        cap = 10
+
+    # Oldest-expiring first, so the items closest to deletion get warned first.
     candidates = MediaExpiration.query.filter(
         MediaExpiration.status.in_(['active', 'extended']),
         MediaExpiration.permanent == False,
         MediaExpiration.expires_at <= threshold,
         MediaExpiration.expires_at > datetime.utcnow() - timedelta(days=policy['grace_days']),
-    ).all()
+    ).order_by(MediaExpiration.expires_at.asc()).all()
 
     sent_count = 0
     for rec in candidates:
+        # Per-run cap: only send as many warnings as we could actually act on this run.
+        if cap and sent_count >= cap:
+            print(f"[Expiration Warn] Per-run cap of {cap} reached; remaining candidates deferred to next run.")
+            break
         # Respect the exclusion list — promote to permanent and skip
         if _is_title_excluded(rec.media_type, rec.title, rec.year):
             rec.permanent = True
