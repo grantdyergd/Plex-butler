@@ -165,6 +165,11 @@ class MediaExpiration(db.Model):
     status = db.Column(db.String(20), default='active', index=True)  # active|extended|permanent|deleted|missing
     deleted_at = db.Column(db.DateTime, nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    additional_requester_emails = db.Column(db.Text, nullable=True)  # comma-separated extra emails
+    last_seen_at = db.Column(db.DateTime, nullable=True)
+    last_warning_status = db.Column(db.String(20), nullable=True)    # sent|failed|skipped|no_email
+    last_warning_error = db.Column(db.Text, nullable=True)
+    requester_lookup_attempts = db.Column(db.Integer, default=0)
 
     __table_args__ = (db.UniqueConstraint('media_type', 'service_id', name='uq_expiration_type_id'),)
 
@@ -186,6 +191,7 @@ class OmbiIntroEmailLog(db.Model):
     requester_email = db.Column(db.String(200), unique=True, nullable=False, index=True)
     requester_name = db.Column(db.String(200), nullable=True)
     sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+    ombi_user_id = db.Column(db.String(100), nullable=True, index=True)
 
 
 class ScanCache(db.Model):
@@ -5048,8 +5054,140 @@ EXPIRATION_DEFAULTS = {
     'EXPIRATION_GRACE_DAYS': '7',
     'EXPIRATION_EXTEND_MONTHS': '6',
     'EXPIRATION_INTRO_EMAIL_ENABLED': 'true',
+    'EXPIRATION_USE_OLDEST_FILE_DATE': 'false',
+    'DISPLAY_TIMEZONE': 'UTC',
     'EXPIRATION_LAST_RUN_AT': '',
 }
+
+# In-process lock to keep manual scan-now and scheduled tick from racing each other inside one worker
+_expiration_run_lock = threading.Lock()
+
+
+def _run_expiration_migrations():
+    """Idempotently add new columns to existing tables (safe: ADD COLUMN IF NOT EXISTS)."""
+    statements = [
+        "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS additional_requester_emails TEXT",
+        "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP",
+        "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS last_warning_status VARCHAR(20)",
+        "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS last_warning_error TEXT",
+        "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS requester_lookup_attempts INTEGER DEFAULT 0",
+        "ALTER TABLE ombi_intro_email_log ADD COLUMN IF NOT EXISTS ombi_user_id VARCHAR(100)",
+    ]
+    with app.app_context():
+        for sql in statements:
+            try:
+                db.session.execute(db.text(sql))
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"[Expiration Migration] {sql[:80]}... -> {e}")
+
+
+def _format_date_in_tz(dt, fmt='%b %d, %Y'):
+    """Format a UTC datetime in the configured display timezone."""
+    if not dt:
+        return ''
+    try:
+        from zoneinfo import ZoneInfo
+        tz_name = get_setting('DISPLAY_TIMEZONE', 'UTC') or 'UTC'
+        utc_dt = dt.replace(tzinfo=ZoneInfo('UTC')) if dt.tzinfo is None else dt
+        return utc_dt.astimezone(ZoneInfo(tz_name)).strftime(fmt)
+    except Exception:
+        return dt.strftime(fmt)
+
+
+def get_ombi_requesters_full(media_type):
+    """Return {title_lc: [{email, name, user_id}, ...]} for all requesters of this media_type."""
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+    out = {}
+    if not ombi_url or not ombi_key:
+        return out
+    endpoint = 'tv' if media_type == 'show' else 'movie'
+    try:
+        r = requests.get(f"{ombi_url}/api/v1/Request/{endpoint}",
+                         headers={"ApiKey": ombi_key}, timeout=30)
+        if not r.ok:
+            return out
+        for req in r.json() or []:
+            title = (req.get('title') or '').strip().lower()
+            if not title:
+                continue
+            users = []
+
+            def _add(u):
+                if not u: return
+                em = (u.get('email') or u.get('Email') or '').strip().lower()
+                nm = u.get('userName') or u.get('alias') or ''
+                uid = u.get('id') or u.get('userId') or ''
+                if em:
+                    users.append({'email': em, 'name': nm, 'user_id': str(uid) if uid else None})
+
+            _add(req.get('requestedUser'))
+            for child in (req.get('childRequests') or []):
+                _add(child.get('requestedUser'))
+
+            if users:
+                # de-dup by email
+                by_email = {u['email']: u for u in users}
+                out.setdefault(title, [])
+                for u in by_email.values():
+                    if u['email'] not in {x['email'] for x in out[title]}:
+                        out[title].append(u)
+    except Exception as e:
+        print(f"[Ombi Full] {endpoint} error: {e}")
+    return out
+
+
+def _get_arr_ids_present(media_type):
+    """Return set of currently-present service_ids in *arr, or None if *arr unreachable."""
+    if media_type == 'show':
+        url = get_setting('SONARR_URL', '').strip().rstrip('/')
+        key = get_setting('SONARR_API_KEY', '').strip()
+        path = '/api/v3/series'
+    else:
+        url = get_setting('RADARR_URL', '').strip().rstrip('/')
+        key = get_setting('RADARR_API_KEY', '').strip()
+        path = '/api/v3/movie'
+    if not url or not key:
+        return None
+    try:
+        r = requests.get(f"{url}{path}", params={'apikey': key}, timeout=30)
+        if not r.ok:
+            return None
+        return {x.get('id') for x in (r.json() or []) if x.get('id')}
+    except Exception:
+        return None
+
+
+def _get_arr_oldest_file_date(media_type, service_id):
+    """Look up the oldest file date in *arr for an item; returns datetime or None."""
+    try:
+        if media_type == 'show':
+            url = get_setting('SONARR_URL', '').strip().rstrip('/')
+            key = get_setting('SONARR_API_KEY', '').strip()
+            r = requests.get(f"{url}/api/v3/episodefile",
+                             params={'apikey': key, 'seriesId': service_id}, timeout=20)
+            files = r.json() if r.ok else []
+            dates = [f.get('dateAdded') for f in files if f.get('dateAdded')]
+        else:
+            url = get_setting('RADARR_URL', '').strip().rstrip('/')
+            key = get_setting('RADARR_API_KEY', '').strip()
+            r = requests.get(f"{url}/api/v3/moviefile",
+                             params={'apikey': key, 'movieId': service_id}, timeout=20)
+            files = r.json() if r.ok else []
+            dates = [f.get('dateAdded') for f in files if f.get('dateAdded')]
+        if not dates:
+            return None
+        parsed = []
+        for d in dates:
+            try:
+                parsed.append(datetime.fromisoformat(d.replace('Z', '+00:00').split('.')[0].replace('+00:00', '')))
+            except Exception:
+                pass
+        return min(parsed) if parsed else None
+    except Exception:
+        return None
 
 
 def get_expiration_policy():
@@ -5205,117 +5343,164 @@ def expiration_reconcile_with_exclusions():
             db.session.rollback()
 
 
+def _parse_iso(s):
+    if not s: return None
+    try:
+        return datetime.fromisoformat(s.replace('Z', '+00:00').split('.')[0].replace('+00:00', ''))
+    except Exception:
+        return None
+
+
+def _select_primary_requester(users, current_email=None):
+    """From a list of {email,name,user_id}, pick one as primary (prefer existing)."""
+    if not users:
+        return None, None, [], []
+    if current_email:
+        for u in users:
+            if u['email'] == current_email.lower():
+                others = [x for x in users if x['email'] != u['email']]
+                return u['email'], u['name'], [x['email'] for x in others], [x.get('user_id') for x in others]
+    primary = users[0]
+    others = users[1:]
+    return primary['email'], primary['name'], [x['email'] for x in others], [x.get('user_id') for x in others]
+
+
+def _process_arr_item(media_type, item, requesters_by_title, policy, use_oldest_file):
+    """Upsert one *arr item into MediaExpiration. Returns ('added'|'revived'|'updated'|'skipped')."""
+    sid = item.get('id')
+    if not sid:
+        return 'skipped'
+    title = item.get('title') or ''
+    title_lc = title.strip().lower()
+    users = requesters_by_title.get(title_lc, [])
+
+    if media_type == 'show':
+        ids = {'tvdb_id': item.get('tvdbId'), 'tmdb_id': item.get('tmdbId'), 'imdb_id': item.get('imdbId')}
+    else:
+        ids = {'tmdb_id': item.get('tmdbId'), 'imdb_id': item.get('imdbId')}
+
+    added_dt = _parse_iso(item.get('added')) or datetime.utcnow()
+    if use_oldest_file:
+        oldest = _get_arr_oldest_file_date(media_type, sid)
+        if oldest and oldest < added_dt:
+            added_dt = oldest
+
+    existing = MediaExpiration.query.filter_by(media_type=media_type, service_id=sid).first()
+    if existing:
+        existing.last_seen_at = datetime.utcnow()
+        if not existing.title and title:
+            existing.title = title
+        # Re-attempt requester lookup if missing
+        if not existing.requester_email and users:
+            primary_email, primary_name, extra_emails, _ = _select_primary_requester(users)
+            existing.requester_email = primary_email
+            existing.requester_name = primary_name
+            existing.additional_requester_emails = ','.join(extra_emails) if extra_emails else None
+            existing.requester_lookup_attempts = (existing.requester_lookup_attempts or 0) + 1
+        elif users:
+            # Refresh additional list (so newly added co-requesters get picked up)
+            primary_email, _, extra_emails, _ = _select_primary_requester(users, existing.requester_email)
+            existing.additional_requester_emails = ','.join(extra_emails) if extra_emails else None
+        elif not existing.requester_email:
+            existing.requester_lookup_attempts = (existing.requester_lookup_attempts or 0) + 1
+        # Revive if previously deleted/missing (id reuse or restored item)
+        if existing.status in ('deleted', 'missing'):
+            existing.status = 'active'
+            existing.deleted_at = None
+            existing.added_at = added_dt
+            natural = _add_months(added_dt, policy['months'])
+            floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
+            existing.expires_at = max(natural, floor)
+            existing.last_warning_sent_at = None
+            existing.last_warning_status = None
+            existing.warning_count = 0
+            existing.notes = 'revived'
+        return 'revived' if (existing.status == 'active' and existing.notes == 'revived') else 'updated'
+
+    # New record
+    natural = _add_months(added_dt, policy['months'])
+    floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
+    expires_at = max(natural, floor)
+    excluded = _is_title_excluded(media_type, title, item.get('year'))
+    primary_email, primary_name, extra_emails, _ = _select_primary_requester(users)
+
+    rec = MediaExpiration(
+        media_type=media_type,
+        service_id=sid,
+        title=title,
+        year=item.get('year'),
+        requester_email=primary_email,
+        requester_name=primary_name,
+        additional_requester_emails=','.join(extra_emails) if extra_emails else None,
+        requester_lookup_attempts=1 if not primary_email else 0,
+        added_at=added_dt,
+        last_seen_at=datetime.utcnow(),
+        expires_at=expires_at,
+        permanent=excluded,
+        status='permanent' if excluded else 'active',
+        notes=('on-exclusion-list' if excluded else
+               ('first-sync-grace' if expires_at != natural else None)),
+        **ids,
+    )
+    db.session.add(rec)
+    return 'added'
+
+
 def expiration_sync_new_items():
-    """Discover new Sonarr/Radarr items and register expiration records for them."""
+    """Discover new *arr items, refresh existing ones, mark zombies as missing."""
     policy = get_expiration_policy()
-    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
-    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
-    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
-    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+    use_oldest_file = get_setting('EXPIRATION_USE_OLDEST_FILE_DATE', 'false').lower() == 'true'
 
-    tv_emails = get_ombi_tv_requesters() or {}
-    tv_names = get_ombi_tv_requester_names() or {}
-    mv_emails = get_ombi_movie_requesters() or {}
-    mv_names = get_ombi_movie_requester_names() or {}
+    tv_users = get_ombi_requesters_full('show')
+    mv_users = get_ombi_requesters_full('movie')
 
-    added_count = 0
+    counts = {'added': 0, 'revived': 0, 'updated': 0, 'missing': 0}
 
-    def parse_iso(s):
-        if not s: return None
+    for media_type, arr_path, key_setting, url_setting in [
+        ('show', '/api/v3/series', 'SONARR_API_KEY', 'SONARR_URL'),
+        ('movie', '/api/v3/movie', 'RADARR_API_KEY', 'RADARR_URL'),
+    ]:
+        url = get_setting(url_setting, '').strip().rstrip('/')
+        key = get_setting(key_setting, '').strip()
+        if not url or not key:
+            continue
         try:
-            return datetime.fromisoformat(s.replace('Z', '+00:00').split('.')[0].replace('+00:00', ''))
-        except Exception:
-            return None
+            r = requests.get(f"{url}{arr_path}", params={'apikey': key}, timeout=30)
+            if not r.ok:
+                print(f"[Expiration Sync] {media_type} *arr returned HTTP {r.status_code}; skipping zombie check")
+                continue
+            items = r.json() or []
+            present_ids = set()
+            requesters = tv_users if media_type == 'show' else mv_users
+            for it in items:
+                outcome = _process_arr_item(media_type, it, requesters, policy, use_oldest_file)
+                if outcome in counts:
+                    counts[outcome] += 1
+                if it.get('id'):
+                    present_ids.add(it['id'])
+            db.session.commit()
 
-    if sonarr_url and sonarr_key:
-        try:
-            series = requests.get(f"{sonarr_url}/api/v3/series",
-                                  params={'apikey': sonarr_key}, timeout=20).json() or []
-            for s in series if isinstance(series, list) else []:
-                sid = s.get('id')
-                if not sid:
-                    continue
-                exists = MediaExpiration.query.filter_by(media_type='show', service_id=sid).first()
-                if exists:
-                    continue
-                title = s.get('title') or ''
-                added_dt = parse_iso(s.get('added')) or datetime.utcnow()
-                req_email, req_name = _resolve_requester_for_item('show', title, tv_emails, tv_names, mv_emails, mv_names)
-                natural = _add_months(added_dt, policy['months'])
-                grace_floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
-                expires_at = max(natural, grace_floor)
-                excluded = _is_title_excluded('show', title)
-                rec = MediaExpiration(
-                    media_type='show',
-                    service_id=sid,
-                    tvdb_id=s.get('tvdbId'),
-                    tmdb_id=s.get('tmdbId'),
-                    imdb_id=s.get('imdbId'),
-                    title=title,
-                    year=s.get('year'),
-                    requester_email=req_email,
-                    requester_name=req_name,
-                    added_at=added_dt,
-                    expires_at=expires_at,
-                    permanent=excluded,
-                    status='permanent' if excluded else 'active',
-                    notes=('on-exclusion-list' if excluded else
-                           ('first-sync-grace' if expires_at != natural else None)),
-                )
-                db.session.add(rec)
-                added_count += 1
+            # Zombie sweep — only because we successfully got the list
+            zombies = MediaExpiration.query.filter(
+                MediaExpiration.media_type == media_type,
+                MediaExpiration.status.in_(['active', 'extended', 'permanent']),
+            ).all()
+            for z in zombies:
+                if z.service_id not in present_ids:
+                    z.status = 'missing'
+                    z.notes = 'no-longer-in-arr'
+                    counts['missing'] += 1
             db.session.commit()
         except Exception as e:
             db.session.rollback()
-            print(f"[Expiration Sync] Sonarr error: {e}")
+            print(f"[Expiration Sync] {media_type} error: {e}")
 
-    if radarr_url and radarr_key:
-        try:
-            movies = requests.get(f"{radarr_url}/api/v3/movie",
-                                  params={'apikey': radarr_key}, timeout=20).json() or []
-            for m in movies if isinstance(movies, list) else []:
-                mid = m.get('id')
-                if not mid:
-                    continue
-                exists = MediaExpiration.query.filter_by(media_type='movie', service_id=mid).first()
-                if exists:
-                    continue
-                title = m.get('title') or ''
-                added_dt = parse_iso(m.get('added')) or datetime.utcnow()
-                req_email, req_name = _resolve_requester_for_item('movie', title, tv_emails, tv_names, mv_emails, mv_names)
-                natural = _add_months(added_dt, policy['months'])
-                grace_floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
-                expires_at = max(natural, grace_floor)
-                excluded = _is_title_excluded('movie', title, m.get('year'))
-                rec = MediaExpiration(
-                    media_type='movie',
-                    service_id=mid,
-                    tmdb_id=m.get('tmdbId'),
-                    imdb_id=m.get('imdbId'),
-                    title=title,
-                    year=m.get('year'),
-                    requester_email=req_email,
-                    requester_name=req_name,
-                    added_at=added_dt,
-                    expires_at=expires_at,
-                    permanent=excluded,
-                    status='permanent' if excluded else 'active',
-                    notes=('on-exclusion-list' if excluded else
-                           ('first-sync-grace' if expires_at != natural else None)),
-                )
-                db.session.add(rec)
-                added_count += 1
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            print(f"[Expiration Sync] Radarr error: {e}")
-
-    print(f"[Expiration Sync] Added {added_count} new expiration records")
-    return added_count
+    print(f"[Expiration Sync] {counts}")
+    return counts
 
 
 def expiration_send_warnings():
-    """Send warning emails for items expiring within warn_days_before."""
+    """Send warning emails for items expiring within warn_days_before. Sends to all requesters."""
     policy = get_expiration_policy()
     if not policy['enabled']:
         return 0
@@ -5340,7 +5525,19 @@ def expiration_send_warnings():
         # Skip if we sent a warning recently (within the past 7 days)
         if rec.last_warning_sent_at and (datetime.utcnow() - rec.last_warning_sent_at).days < 7:
             continue
-        if not rec.requester_email:
+        # Build recipient list (primary + additional)
+        recipients = []
+        if rec.requester_email:
+            recipients.append(rec.requester_email)
+        if rec.additional_requester_emails:
+            for em in rec.additional_requester_emails.split(','):
+                em = em.strip().lower()
+                if em and em not in recipients:
+                    recipients.append(em)
+        if not recipients:
+            rec.last_warning_status = 'no_email'
+            rec.last_warning_error = 'No requester email on file'
+            db.session.commit()
             continue
 
         try:
@@ -5359,41 +5556,56 @@ def expiration_send_warnings():
             type_label = 'TV Show' if rec.media_type == 'show' else 'Movie'
             year_str = f" ({rec.year})" if rec.year else ''
             extend_months = policy['extend_months']
+            expires_str = _format_date_in_tz(rec.expires_at)
+            tz_name = get_setting('DISPLAY_TIMEZONE', 'UTC') or 'UTC'
 
             subject = f"Action needed: \"{rec.title}\" expires in {days_left} days"
-            html = f"""
-            <html><body style="font-family: Inter, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
-                <h2 style="color: #d97706;">⚠️ Your media is about to expire</h2>
-                <p>Hi{(' ' + rec.requester_name) if rec.requester_name else ''},</p>
-                <p>The {type_label.lower()} <strong>{rec.title}{year_str}</strong> that you requested
-                   is scheduled for automatic deletion in <strong>{days_left} day(s)</strong>.</p>
-                <p>To keep it in the library, please choose an option:</p>
-                <p style="margin: 25px 0;">
-                    <a href="{action_url}" style="background: #4f46e5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600;">Manage This Item</a>
-                </p>
-                <ul style="color: #555;">
-                    <li><strong>Extend</strong> — keep it for another {extend_months} month(s)</li>
-                    <li><strong>Keep permanently</strong> — never auto-delete</li>
-                    <li><strong>Delete now</strong> — free up space immediately</li>
-                </ul>
-                <p style="color: #c00;">If no action is taken, this item will be automatically deleted shortly after the expiration date.</p>
-                <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
-                <p style="color: #999; font-size: 12px;">This link expires in 30 days. Sent by your media server's automated cleanup system.</p>
-            </body></html>
-            """
-            ok, err = _send_smtp_email(rec.requester_email, subject, html, log_meta={
-                'media_type': rec.media_type,
-                'media_title': rec.title,
-                'action_type': 'expiration_warning',
-                'recipient_name': rec.requester_name,
-            })
-            if ok:
+            any_ok = False
+            last_err = None
+            for to_email in recipients:
+                html = f"""
+                <html><body style="font-family: Inter, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+                    <h2 style="color: #d97706;">⚠️ Your media is about to expire</h2>
+                    <p>Hi{(' ' + rec.requester_name) if rec.requester_name else ''},</p>
+                    <p>The {type_label.lower()} <strong>{rec.title}{year_str}</strong> that you requested
+                       is scheduled for automatic deletion in <strong>{days_left} day(s)</strong>
+                       ({expires_str} {tz_name}).</p>
+                    <p>To keep it in the library, please choose an option:</p>
+                    <p style="margin: 25px 0;">
+                        <a href="{action_url}" style="background: #4f46e5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600;">Manage This Item</a>
+                    </p>
+                    <ul style="color: #555;">
+                        <li><strong>Extend</strong> — keep it for another {extend_months} month(s)</li>
+                        <li><strong>Keep permanently</strong> — never auto-delete</li>
+                        <li><strong>Delete now</strong> — free up space immediately</li>
+                    </ul>
+                    <p style="color: #c00;">If no action is taken, this item will be automatically deleted shortly after the expiration date.</p>
+                    {('<p style="color:#888;font-size:12px;">Note: this notice was also sent to other people who requested this item.</p>' if len(recipients) > 1 else '')}
+                    <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+                    <p style="color: #999; font-size: 12px;">This link expires in 30 days. Sent by your media server's automated cleanup system.</p>
+                </body></html>
+                """
+                ok, err = _send_smtp_email(to_email, subject, html, log_meta={
+                    'media_type': rec.media_type,
+                    'media_title': rec.title,
+                    'action_type': 'expiration_warning',
+                    'recipient_name': rec.requester_name,
+                })
+                any_ok = any_ok or ok
+                if not ok:
+                    last_err = err
+                    print(f"[Expiration Warn] Email to {to_email} failed: {err}")
+
+            if any_ok:
                 rec.last_warning_sent_at = datetime.utcnow()
                 rec.warning_count = (rec.warning_count or 0) + 1
-                db.session.commit()
+                rec.last_warning_status = 'sent'
+                rec.last_warning_error = None
                 sent_count += 1
             else:
-                print(f"[Expiration Warn] Email to {rec.requester_email} failed: {err}")
+                rec.last_warning_status = 'failed'
+                rec.last_warning_error = last_err or 'unknown'
+            db.session.commit()
         except Exception as e:
             db.session.rollback()
             print(f"[Expiration Warn] Error for {rec.title}: {e}")
@@ -5423,7 +5635,7 @@ def _delete_via_arr(rec):
 
 
 def expiration_process_due():
-    """Auto-delete items past their expiration + grace period."""
+    """Auto-delete items past expiration+grace; ONLY if a warning was successfully sent first."""
     policy = get_expiration_policy()
     if not policy['enabled']:
         return 0
@@ -5443,6 +5655,14 @@ def expiration_process_due():
             rec.status = 'permanent'
             rec.notes = 'on-exclusion-list'
             db.session.commit()
+            continue
+        # SAFETY: never auto-delete without a successful warning at least grace_days old
+        if rec.last_warning_status != 'sent' or not rec.last_warning_sent_at:
+            rec.notes = 'awaiting-warning'
+            db.session.commit()
+            continue
+        if (datetime.utcnow() - rec.last_warning_sent_at).days < policy['grace_days']:
+            # warning was sent but grace period since the warning hasn't elapsed
             continue
         try:
             ok = _delete_via_arr(rec)
@@ -5483,32 +5703,44 @@ def expiration_send_intro_emails():
     if not ombi_url or not ombi_key:
         return 0
 
-    seen_emails = {}  # email -> name
+    # Collect all unique requesters across both endpoints, keyed by ombi user_id when present
+    seen = {}  # key -> {email, name, user_id}
     for endpoint in ('tv', 'movie'):
         try:
             r = requests.get(f"{ombi_url}/api/v1/Request/{endpoint}",
                              headers={'ApiKey': ombi_key}, timeout=20)
             if not r.ok:
                 continue
+            def _collect(u):
+                if not u: return
+                em = (u.get('email') or u.get('Email') or '').strip().lower()
+                nm = u.get('userName') or u.get('alias') or ''
+                uid = u.get('id') or u.get('userId') or ''
+                if not em: return
+                key = f"uid:{uid}" if uid else f"em:{em}"
+                if key not in seen:
+                    seen[key] = {'email': em, 'name': nm, 'user_id': str(uid) if uid else None}
             for req in r.json() or []:
-                ru = req.get('requestedUser') or {}
-                email = (ru.get('email') or ru.get('Email') or '').strip().lower()
-                name = ru.get('userName') or ru.get('alias') or ''
-                if not email and req.get('childRequests'):
-                    for c in req['childRequests']:
-                        cu = c.get('requestedUser') or {}
-                        email = (cu.get('email') or cu.get('Email') or '').strip().lower()
-                        name = cu.get('userName') or cu.get('alias') or ''
-                        if email:
-                            break
-                if email and email not in seen_emails:
-                    seen_emails[email] = name
+                _collect(req.get('requestedUser'))
+                for c in req.get('childRequests') or []:
+                    _collect(c.get('requestedUser'))
         except Exception as e:
             print(f"[Intro Emails] Ombi {endpoint} error: {e}")
 
     sent = 0
-    for email, name in seen_emails.items():
-        already = OmbiIntroEmailLog.query.filter_by(requester_email=email).first()
+    for info in seen.values():
+        email = info['email']
+        name = info['name']
+        uid = info['user_id']
+        # Dedup by either user_id (preferred) or email
+        q = OmbiIntroEmailLog.query
+        if uid:
+            already = q.filter(db.or_(
+                OmbiIntroEmailLog.ombi_user_id == uid,
+                OmbiIntroEmailLog.requester_email == email,
+            )).first()
+        else:
+            already = q.filter_by(requester_email=email).first()
         if already:
             continue
 
@@ -5543,7 +5775,11 @@ def expiration_send_intro_emails():
         })
         if ok:
             try:
-                db.session.add(OmbiIntroEmailLog(requester_email=email, requester_name=name))
+                db.session.add(OmbiIntroEmailLog(
+                    requester_email=email,
+                    requester_name=name,
+                    ombi_user_id=uid,
+                ))
                 db.session.commit()
                 sent += 1
             except Exception:
@@ -5553,41 +5789,66 @@ def expiration_send_intro_emails():
     return sent
 
 
-def daily_expiration_job():
-    """Master job; safe across multiple workers via atomic compare-and-set."""
-    with app.app_context():
-        try:
+def daily_expiration_job(force=False, lock_already_held=False):
+    """Master job; safe across multiple workers via atomic compare-and-set + in-process lock."""
+    if not lock_already_held:
+        if not _expiration_run_lock.acquire(blocking=False):
+            print("[Daily Expiration Job] Already running in this process; skipping.")
+            return
+    try:
+        with app.app_context():
             now_iso = datetime.utcnow().isoformat()
             threshold_iso = (datetime.utcnow() - timedelta(hours=23)).isoformat()
-            # Ensure row exists so the UPDATE can match
-            if not Settings.query.filter_by(key='EXPIRATION_LAST_RUN_AT').first():
-                try:
-                    db.session.add(Settings(key='EXPIRATION_LAST_RUN_AT', value=''))
+            claimed = False
+            try:
+                if not Settings.query.filter_by(key='EXPIRATION_LAST_RUN_AT').first():
+                    try:
+                        db.session.add(Settings(key='EXPIRATION_LAST_RUN_AT', value=''))
+                        db.session.commit()
+                    except Exception:
+                        db.session.rollback()
+                if force:
+                    db.session.execute(db.text(
+                        "UPDATE settings SET value = :now WHERE key = 'EXPIRATION_LAST_RUN_AT'"
+                    ), {'now': now_iso})
                     db.session.commit()
-                except Exception:
-                    db.session.rollback()
-            # Atomic claim: only one worker wins per ~daily window
-            result = db.session.execute(db.text("""
-                UPDATE settings SET value = :now
-                WHERE key = 'EXPIRATION_LAST_RUN_AT'
-                  AND (value IS NULL OR value = '' OR value < :threshold)
-            """), {'now': now_iso, 'threshold': threshold_iso})
-            db.session.commit()
-            if (result.rowcount or 0) == 0:
-                return  # another worker is handling this run
-            print("[Daily Expiration Job] Running...")
-            expiration_reconcile_with_exclusions()
-            expiration_sync_new_items()
-            expiration_send_warnings()
-            expiration_process_due()
-            expiration_send_intro_emails()
-            print("[Daily Expiration Job] Done.")
-        except Exception as e:
-            print(f"[Daily Expiration Job] Fatal error: {e}")
+                    claimed = True
+                else:
+                    result = db.session.execute(db.text("""
+                        UPDATE settings SET value = :now
+                        WHERE key = 'EXPIRATION_LAST_RUN_AT'
+                          AND (value IS NULL OR value = '' OR value < :threshold)
+                    """), {'now': now_iso, 'threshold': threshold_iso})
+                    db.session.commit()
+                    claimed = (result.rowcount or 0) > 0
+                if not claimed:
+                    return
+                print("[Daily Expiration Job] Running...")
+                expiration_reconcile_with_exclusions()
+                expiration_sync_new_items()
+                expiration_send_warnings()
+                expiration_process_due()
+                expiration_send_intro_emails()
+                print("[Daily Expiration Job] Done.")
+            except Exception as e:
+                print(f"[Daily Expiration Job] Fatal error: {e}")
+                # Release the lock by setting timestamp 22h old, so next hourly tick can retry
+                if claimed:
+                    try:
+                        retry_iso = (datetime.utcnow() - timedelta(hours=22)).isoformat()
+                        db.session.execute(db.text(
+                            "UPDATE settings SET value = :v WHERE key = 'EXPIRATION_LAST_RUN_AT'"
+                        ), {'v': retry_iso})
+                        db.session.commit()
+                    except Exception:
+                        db.session.rollback()
+    finally:
+        _expiration_run_lock.release()
 
 
 # Initialize policy defaults & start scheduler
 def _init_expiration_system():
+    _run_expiration_migrations()
     with app.app_context():
         for k, v in EXPIRATION_DEFAULTS.items():
             existing = Settings.query.filter_by(key=k).first()
@@ -5617,14 +5878,27 @@ _init_expiration_system()
 @login_required
 def expirations_page():
     policy = get_expiration_policy()
+    attention_q = MediaExpiration.query.filter(db.or_(
+        MediaExpiration.status == 'missing',
+        MediaExpiration.last_warning_status.in_(['failed', 'no_email']),
+        db.and_(
+            MediaExpiration.status.in_(['active', 'extended']),
+            MediaExpiration.permanent == False,
+            MediaExpiration.requester_email.is_(None),
+        ),
+    ))
     counts = {
         'active': MediaExpiration.query.filter_by(status='active').count(),
         'extended': MediaExpiration.query.filter_by(status='extended').count(),
         'permanent': MediaExpiration.query.filter_by(permanent=True).count(),
         'deleted': MediaExpiration.query.filter_by(status='deleted').count(),
+        'missing': MediaExpiration.query.filter_by(status='missing').count(),
+        'attention': attention_q.count(),
     }
     return render_template('expirations.html', policy=policy, counts=counts,
-                           last_run=get_setting('EXPIRATION_LAST_RUN_AT', ''))
+                           last_run=get_setting('EXPIRATION_LAST_RUN_AT', ''),
+                           display_timezone=get_setting('DISPLAY_TIMEZONE', 'UTC'),
+                           use_oldest_file_date=(get_setting('EXPIRATION_USE_OLDEST_FILE_DATE', 'false').lower() == 'true'))
 
 
 @app.route('/api/expirations/list')
@@ -5632,13 +5906,30 @@ def expirations_page():
 def expirations_list_api():
     status = request.args.get('status', 'active')
     sort = request.args.get('sort', 'expires_asc')
+    media_type = request.args.get('media_type', '')
+    search = (request.args.get('search', '') or '').strip().lower()
+
     q = MediaExpiration.query
     if status == 'permanent':
         q = q.filter_by(permanent=True)
+    elif status == 'attention':
+        q = q.filter(db.or_(
+            MediaExpiration.status == 'missing',
+            MediaExpiration.last_warning_status.in_(['failed', 'no_email']),
+            db.and_(
+                MediaExpiration.status.in_(['active', 'extended']),
+                MediaExpiration.permanent == False,
+                MediaExpiration.requester_email.is_(None),
+            ),
+        ))
     elif status == 'all':
         pass
     else:
         q = q.filter_by(status=status)
+    if media_type in ('show', 'movie'):
+        q = q.filter_by(media_type=media_type)
+    if search:
+        q = q.filter(db.func.lower(MediaExpiration.title).like(f"%{search}%"))
     if sort == 'expires_asc':
         q = q.order_by(MediaExpiration.expires_at.asc())
     elif sort == 'expires_desc':
@@ -5657,6 +5948,7 @@ def expirations_list_api():
             'year': i.year,
             'requester_name': i.requester_name,
             'requester_email': i.requester_email,
+            'additional_requester_emails': i.additional_requester_emails,
             'added_at': i.added_at.isoformat() if i.added_at else None,
             'expires_at': i.expires_at.isoformat() if i.expires_at else None,
             'days_left': (i.expires_at - now).days if i.expires_at else None,
@@ -5664,7 +5956,12 @@ def expirations_list_api():
             'permanent': i.permanent,
             'warning_count': i.warning_count or 0,
             'last_warning_sent_at': i.last_warning_sent_at.isoformat() if i.last_warning_sent_at else None,
+            'last_warning_status': i.last_warning_status,
+            'last_warning_error': i.last_warning_error,
+            'requester_lookup_attempts': i.requester_lookup_attempts or 0,
+            'last_seen_at': i.last_seen_at.isoformat() if i.last_seen_at else None,
             'extension_count': i.extension_count or 0,
+            'notes': i.notes,
         } for i in items]
     })
 
@@ -5680,6 +5977,8 @@ def expirations_save_policy():
         'EXPIRATION_GRACE_DAYS': str(int(data.get('grace_days', 7))),
         'EXPIRATION_EXTEND_MONTHS': str(int(data.get('extend_months', 6))),
         'EXPIRATION_INTRO_EMAIL_ENABLED': 'true' if data.get('intro_email_enabled') else 'false',
+        'EXPIRATION_USE_OLDEST_FILE_DATE': 'true' if data.get('use_oldest_file_date') else 'false',
+        'DISPLAY_TIMEZONE': (data.get('display_timezone') or 'UTC').strip() or 'UTC',
     }
     for k, v in mapping.items():
         set_setting(k, v)
@@ -5689,10 +5988,101 @@ def expirations_save_policy():
 @app.route('/api/expirations/scan-now', methods=['POST'])
 @login_required
 def expirations_scan_now():
-    """Manually trigger the daily job."""
-    set_setting('EXPIRATION_LAST_RUN_AT', '')  # Force re-run
-    threading.Thread(target=daily_expiration_job, daemon=True).start()
+    """Manually trigger the daily job. Atomically acquire the lock here so simultaneous clicks can't both spawn workers."""
+    if not _expiration_run_lock.acquire(blocking=False):
+        return jsonify({'success': False, 'message': 'A scan is already running.'}), 409
+
+    def _runner():
+        try:
+            daily_expiration_job(force=True, lock_already_held=True)
+        finally:
+            _expiration_run_lock.release()
+
+    threading.Thread(target=_runner, daemon=True).start()
     return jsonify({'success': True, 'message': 'Scan started in background.'})
+
+
+@app.route('/api/expirations/recompute-dates', methods=['POST'])
+@login_required
+def expirations_recompute_dates():
+    """Re-apply the current policy to all active items (after months/warn/grace changed)."""
+    policy = get_expiration_policy()
+    updated = 0
+    floor_days = policy['warn_days'] + policy['grace_days'] + 1
+    for rec in MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended']),
+        MediaExpiration.permanent == False,
+    ).all():
+        base = rec.added_at or datetime.utcnow()
+        natural = _add_months(base, policy['months'])
+        floor = datetime.utcnow() + timedelta(days=floor_days)
+        rec.expires_at = max(natural, floor)
+        updated += 1
+    db.session.commit()
+    return jsonify({'success': True, 'updated': updated})
+
+
+@app.route('/api/expirations/bulk-action', methods=['POST'])
+@login_required
+def expirations_bulk_action():
+    """Apply an action to many items at once."""
+    data = request.get_json() or {}
+    ids = data.get('ids') or []
+    action = data.get('action')
+    months = int(data.get('months') or get_expiration_policy()['extend_months'])
+    if not ids or not action:
+        return jsonify({'success': False, 'error': 'ids and action required'}), 400
+
+    policy = get_expiration_policy()
+    ok_count, fail_count, errors = 0, 0, []
+    by = current_user.username if current_user.is_authenticated else 'admin'
+
+    for eid in ids:
+        rec = MediaExpiration.query.get(eid)
+        if not rec:
+            fail_count += 1
+            continue
+        try:
+            if action == 'extend':
+                rec.expires_at = _add_months(datetime.utcnow(), months)
+                rec.status = 'extended'
+                rec.extension_count = (rec.extension_count or 0) + 1
+                rec.last_warning_sent_at = None
+                rec.last_warning_status = None
+            elif action == 'permanent':
+                rec.permanent = True
+                rec.status = 'permanent'
+                _add_to_exclusion_list(rec, by_name=by)
+            elif action == 'reset':
+                if rec.media_type == 'show':
+                    ex = Exclusion.query.filter(db.func.lower(Exclusion.title) == rec.title.lower()).first()
+                    if ex: db.session.delete(ex)
+                else:
+                    ex = MovieExclusion.query.filter(db.func.lower(MovieExclusion.title) == rec.title.lower()).first()
+                    if ex: db.session.delete(ex)
+                rec.permanent = False
+                rec.status = 'active'
+                rec.notes = None
+                floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
+                rec.expires_at = max(_add_months(rec.added_at or datetime.utcnow(), policy['months']), floor)
+            elif action == 'forget':
+                db.session.delete(rec)
+            elif action == 'delete-now':
+                if not _delete_via_arr(rec):
+                    fail_count += 1
+                    errors.append(f"{rec.title}: delete failed")
+                    continue
+                rec.status = 'deleted'
+                rec.deleted_at = datetime.utcnow()
+            else:
+                fail_count += 1
+                continue
+            ok_count += 1
+        except Exception as e:
+            fail_count += 1
+            errors.append(f"{rec.title if rec else eid}: {e}")
+    db.session.commit()
+    return jsonify({'success': True, 'ok': ok_count, 'failed': fail_count, 'errors': errors[:5]})
 
 
 @app.route('/api/expirations/<int:eid>/action', methods=['POST'])

@@ -43,12 +43,24 @@
                 <input type="number" min="1" max="60" class="form-control" id="pol-extend" value="{{ policy.extend_months }}">
             </div>
             <div class="col-md-3">
+                <label class="form-label">Display timezone (for emails)</label>
+                <input type="text" class="form-control" id="pol-tz" value="{{ display_timezone }}" placeholder="UTC, America/New_York, ...">
+                <small class="text-muted">IANA name. Admin table uses your browser's timezone.</small>
+            </div>
+            <div class="col-md-3">
                 <div class="form-check form-switch mt-4">
                     <input class="form-check-input" type="checkbox" id="pol-intro" {% if policy.intro_email_enabled %}checked{% endif %}>
                     <label class="form-check-label" for="pol-intro">Send intro email to new Ombi requesters</label>
                 </div>
+                <div class="form-check form-switch mt-2">
+                    <input class="form-check-input" type="checkbox" id="pol-oldest" {% if use_oldest_file_date %}checked{% endif %}>
+                    <label class="form-check-label" for="pol-oldest">Use oldest file date as "added"</label>
+                </div>
             </div>
-            <div class="col-md-6 d-flex align-items-end justify-content-end">
+            <div class="col-md-12 d-flex align-items-end justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" onclick="recomputeDates()" title="Re-apply current policy to all active items">
+                    <i class="bi bi-calculator me-1"></i>Recompute dates
+                </button>
                 <button class="btn btn-primary" onclick="savePolicy()"><i class="bi bi-save me-1"></i>Save Policy</button>
             </div>
         </div>
@@ -59,27 +71,70 @@
     </div>
 </div>
 
+<div class="alert alert-info small">
+    <i class="bi bi-info-circle me-1"></i>
+    <strong>Safety guarantees:</strong> No item is auto-deleted until a warning email has been successfully sent
+    and the grace period has passed. Items missing a requester email show up in <em>Needs Attention</em>.
+    Action links sent in emails are capability URLs &mdash; treat them like passwords; anyone with the link can act.
+</div>
+
 <ul class="nav nav-tabs mb-3">
     <li class="nav-item"><button class="nav-link active" data-status="active" onclick="loadList(this)">Active <span class="badge bg-secondary">{{ counts.active }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="extended" onclick="loadList(this)">Extended <span class="badge bg-secondary">{{ counts.extended }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="permanent" onclick="loadList(this)">Permanent <span class="badge bg-secondary">{{ counts.permanent }}</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-status="attention" onclick="loadList(this)">Needs Attention <span class="badge bg-warning text-dark">{{ counts.attention }}</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-status="missing" onclick="loadList(this)">Missing <span class="badge bg-secondary">{{ counts.missing }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="deleted" onclick="loadList(this)">Deleted <span class="badge bg-secondary">{{ counts.deleted }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="all" onclick="loadList(this)">All</button></li>
 </ul>
 
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-center">
+            <div class="col-md-4">
+                <input type="search" class="form-control form-control-sm" id="filter-search"
+                       placeholder="Search title..." oninput="loadList()">
+            </div>
+            <div class="col-md-2">
+                <select class="form-select form-select-sm" id="filter-type" onchange="loadList()">
+                    <option value="">All types</option>
+                    <option value="show">TV Shows</option>
+                    <option value="movie">Movies</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select form-select-sm" id="filter-sort" onchange="loadList()">
+                    <option value="expires_asc">Expires (soonest)</option>
+                    <option value="expires_desc">Expires (latest)</option>
+                    <option value="added_desc">Recently added</option>
+                </select>
+            </div>
+            <div class="col-md-4 text-end">
+                <span class="text-muted small me-2"><span id="selected-count">0</span> selected</span>
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-info" onclick="bulkAction('extend')" disabled id="bulk-extend">Extend</button>
+                    <button class="btn btn-outline-success" onclick="bulkAction('permanent')" disabled id="bulk-perm">Keep</button>
+                    <button class="btn btn-outline-warning" onclick="bulkAction('reset')" disabled id="bulk-reset">Reset</button>
+                    <button class="btn btn-outline-secondary" onclick="bulkAction('forget')" disabled id="bulk-forget">Forget</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-body">
-        <div id="list-loading" class="text-center text-muted py-4 d-none"><div class="spinner-border" role="status"></div></div>
         <div class="table-responsive">
             <table class="table table-hover align-middle">
                 <thead>
                     <tr>
-                        <th>Type</th><th>Title</th><th>Requester</th>
+                        <th style="width:30px"><input type="checkbox" class="form-check-input" id="select-all" onclick="toggleAll(this)"></th>
+                        <th>Type</th><th>Title</th><th>Requester(s)</th>
                         <th>Added</th><th>Expires</th><th>Days Left</th>
-                        <th>Status</th><th>Warnings</th><th></th>
+                        <th>Status</th><th>Warning</th><th></th>
                     </tr>
                 </thead>
-                <tbody id="exp-tbody"><tr><td colspan="9" class="text-center text-muted">Loading...</td></tr></tbody>
+                <tbody id="exp-tbody"><tr><td colspan="10" class="text-center text-muted">Loading...</td></tr></tbody>
             </table>
         </div>
     </div>
@@ -87,8 +142,25 @@
 
 <script>
 let currentStatus = 'active';
+let selectedIds = new Set();
 
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtLocalDate(iso){ if(!iso) return '—'; try { return new Date(iso).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); } catch(_) { return iso.slice(0,10); } }
+
+function updateBulkButtons() {
+    document.getElementById('selected-count').textContent = selectedIds.size;
+    const dis = selectedIds.size === 0;
+    ['bulk-extend','bulk-perm','bulk-reset','bulk-forget'].forEach(id => document.getElementById(id).disabled = dis);
+}
+
+function toggleAll(cb) {
+    document.querySelectorAll('.row-check').forEach(c => { c.checked = cb.checked; toggleRow(c); });
+}
+function toggleRow(cb) {
+    const id = parseInt(cb.dataset.id, 10);
+    if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+    updateBulkButtons();
+}
 
 async function loadList(btn) {
     if (btn) {
@@ -96,12 +168,21 @@ async function loadList(btn) {
         btn.classList.add('active');
         currentStatus = btn.dataset.status;
     }
+    selectedIds.clear();
+    const sa = document.getElementById('select-all'); if (sa) sa.checked = false;
+    updateBulkButtons();
+
+    const search = document.getElementById('filter-search').value;
+    const type = document.getElementById('filter-type').value;
+    const sort = document.getElementById('filter-sort').value;
+
     const tbody = document.getElementById('exp-tbody');
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Loading...</td></tr>';
-    const res = await fetch(`/api/expirations/list?status=${currentStatus}`);
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">Loading...</td></tr>';
+    const params = new URLSearchParams({status: currentStatus, sort, media_type: type, search});
+    const res = await fetch(`/api/expirations/list?${params}`);
     const data = await res.json();
     if (!data.items.length) {
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No items in this category.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No items match.</td></tr>';
         return;
     }
     tbody.innerHTML = data.items.map(i => {
@@ -109,22 +190,29 @@ async function loadList(btn) {
         let dayClass = 'text-muted';
         if (days !== null && days < 0) dayClass = 'text-danger fw-bold';
         else if (days !== null && days < 14) dayClass = 'text-warning fw-bold';
-        const requester = i.requester_name || i.requester_email || '—';
+        const requester = i.requester_name || i.requester_email || '<span class="text-warning">— no email —</span>';
         const reqEmail = i.requester_email ? `<br><small class="text-muted">${escapeHtml(i.requester_email)}</small>` : '';
+        const addtl = i.additional_requester_emails ? `<br><small class="text-muted">+ ${escapeHtml(i.additional_requester_emails.split(',').length)} other(s)</small>` : '';
         const statusBadge = i.permanent
             ? '<span class="badge bg-success">Permanent</span>'
-            : `<span class="badge bg-${i.status==='active'?'primary':i.status==='extended'?'info':i.status==='deleted'?'danger':'secondary'}">${escapeHtml(i.status)}</span>`;
+            : `<span class="badge bg-${i.status==='active'?'primary':i.status==='extended'?'info':i.status==='deleted'?'danger':i.status==='missing'?'dark':'secondary'}">${escapeHtml(i.status)}</span>`;
+        let warnCell = `<small>${i.warning_count} sent</small>`;
+        if (i.last_warning_status === 'failed') warnCell = `<span class="badge bg-danger" title="${escapeHtml(i.last_warning_error||'')}">failed</span>`;
+        else if (i.last_warning_status === 'no_email') warnCell = `<span class="badge bg-warning text-dark">no email</span>`;
+        else if (i.last_warning_sent_at) warnCell += `<br><small class="text-muted">${fmtLocalDate(i.last_warning_sent_at)}</small>`;
         const typeIcon = i.media_type === 'show' ? '<i class="bi bi-tv"></i> Show' : '<i class="bi bi-film"></i> Movie';
         const titleStr = i.title + (i.year ? ` (${i.year})` : '');
+        const checked = selectedIds.has(i.id) ? 'checked' : '';
         return `<tr>
+            <td><input type="checkbox" class="form-check-input row-check" data-id="${i.id}" onclick="toggleRow(this)" ${checked}></td>
             <td>${typeIcon}</td>
-            <td><strong>${escapeHtml(titleStr)}</strong></td>
-            <td>${escapeHtml(requester)}${reqEmail}</td>
-            <td><small>${i.added_at ? i.added_at.slice(0,10) : '—'}</small></td>
-            <td><small>${i.expires_at ? i.expires_at.slice(0,10) : '—'}</small></td>
+            <td><strong>${escapeHtml(titleStr)}</strong>${i.notes ? `<br><small class="text-muted">${escapeHtml(i.notes)}</small>` : ''}</td>
+            <td>${requester}${reqEmail}${addtl}</td>
+            <td><small>${fmtLocalDate(i.added_at)}</small></td>
+            <td><small>${fmtLocalDate(i.expires_at)}</small></td>
             <td class="${dayClass}">${days !== null ? (days < 0 ? `${Math.abs(days)} overdue` : `${days}`) : '—'}</td>
             <td>${statusBadge}</td>
-            <td><small>${i.warning_count} sent</small></td>
+            <td>${warnCell}</td>
             <td class="text-end">
                 <div class="btn-group btn-group-sm">
                     <button class="btn btn-outline-info" onclick="adminAction(${i.id},'extend')" title="Extend"><i class="bi bi-arrow-clockwise"></i></button>
@@ -151,6 +239,21 @@ async function adminAction(id, action) {
     loadList();
 }
 
+async function bulkAction(action) {
+    if (selectedIds.size === 0) return;
+    const labels = {extend:'Extend',permanent:'Keep permanently',reset:'Reset to default schedule',forget:'Stop tracking'};
+    if (!confirm(`${labels[action]} ${selectedIds.size} item(s)?`)) return;
+    const res = await fetch('/api/expirations/bulk-action', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({action, ids: Array.from(selectedIds)})
+    });
+    const data = await res.json();
+    if (!data.success) { alert(data.error || 'Bulk action failed'); return; }
+    alert(`Done. ${data.ok} succeeded, ${data.failed} failed.` + (data.errors && data.errors.length ? '\n' + data.errors.join('\n') : ''));
+    loadList();
+}
+
 async function savePolicy() {
     const body = {
         enabled: document.getElementById('pol-enabled').checked,
@@ -159,6 +262,8 @@ async function savePolicy() {
         grace_days: +document.getElementById('pol-grace').value,
         extend_months: +document.getElementById('pol-extend').value,
         intro_email_enabled: document.getElementById('pol-intro').checked,
+        use_oldest_file_date: document.getElementById('pol-oldest').checked,
+        display_timezone: document.getElementById('pol-tz').value.trim(),
     };
     const res = await fetch('/api/expirations/save-policy', {
         method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
@@ -170,6 +275,14 @@ async function savePolicy() {
     msg.classList.toggle('alert-success', !!data.success);
     msg.classList.toggle('alert-danger', !data.success);
     setTimeout(()=>msg.classList.add('d-none'), 3000);
+}
+
+async function recomputeDates() {
+    if (!confirm('Re-apply the current policy to all active items? This updates expiration dates based on the policy you have saved.')) return;
+    const res = await fetch('/api/expirations/recompute-dates', {method:'POST'});
+    const data = await res.json();
+    alert(data.success ? `Recomputed ${data.updated} item(s).` : 'Failed.');
+    loadList();
 }
 
 async function scanNow() {
