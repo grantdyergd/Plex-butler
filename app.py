@@ -4516,31 +4516,48 @@ def storage_delete_seasons():
     ]
 
     deleted_count = 0
+    failed_count = 0
+    delete_warning = None
     if file_ids_to_delete:
+        # Try Sonarr's bulk delete first (fast path; not supported on all versions)
+        bulk_ok = False
         try:
-            # Sonarr supports bulk delete via DELETE /api/v3/episodefile/bulk with body
             r = requests.delete(
                 f"{sonarr_url}/api/v3/episodefile/bulk",
                 params={'apikey': sonarr_key},
                 json={'episodeFileIds': file_ids_to_delete},
-                timeout=30,
+                timeout=60,
             )
             if r.ok:
                 deleted_count = len(file_ids_to_delete)
+                bulk_ok = True
             else:
-                # Fallback: delete one-by-one
-                print(f"[Storage Delete Seasons] bulk failed {r.status_code}, falling back")
-                for fid in file_ids_to_delete:
-                    try:
-                        rr = requests.delete(f"{sonarr_url}/api/v3/episodefile/{fid}",
-                                             params={'apikey': sonarr_key}, timeout=10)
-                        if rr.ok:
-                            deleted_count += 1
-                    except Exception:
-                        pass
+                print(f"[Storage Delete Seasons] bulk failed {r.status_code}: {r.text[:200]}")
         except Exception as e:
-            print(f"[Storage Delete Seasons] delete files: {e}")
-            return jsonify({'success': False, 'error': 'Failed to delete episode files'}), 502
+            print(f"[Storage Delete Seasons] bulk exception: {e}")
+
+        if not bulk_ok:
+            # Fallback: delete files in parallel for speed
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _del_one(fid):
+                try:
+                    rr = requests.delete(
+                        f"{sonarr_url}/api/v3/episodefile/{fid}",
+                        params={'apikey': sonarr_key},
+                        timeout=20,
+                    )
+                    return rr.ok
+                except Exception as ex:
+                    print(f"[Storage Delete Seasons] file {fid} error: {ex}")
+                    return False
+
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                results = list(ex.map(_del_one, file_ids_to_delete))
+            deleted_count = sum(1 for ok in results if ok)
+            failed_count = len(results) - deleted_count
+            if failed_count > 0:
+                delete_warning = f"{failed_count} of {len(file_ids_to_delete)} files could not be deleted by Sonarr."
 
     # Optionally unmonitor those seasons
     unmonitored = []
@@ -4573,8 +4590,12 @@ def storage_delete_seasons():
     parts = []
     if deleted_count:
         parts.append(f"Deleted **{deleted_count}** episode file(s) from season(s) {', '.join(str(s) for s in sorted(set(season_numbers)))}")
+    elif file_ids_to_delete:
+        parts.append("Could not delete any episode files")
     else:
         parts.append("No episode files found to delete for the selected season(s)")
+    if delete_warning:
+        parts.append(delete_warning)
     if unmonitored:
         parts.append(f"Unmonitored season(s) {', '.join(str(s) for s in sorted(unmonitored))}")
     if unmonitor_warning:
@@ -4582,6 +4603,8 @@ def storage_delete_seasons():
     return jsonify({
         'success': True,
         'deletedFiles': deleted_count,
+        'failedFiles': failed_count,
+        'deleteWarning': delete_warning,
         'unmonitored': unmonitored,
         'unmonitorWarning': unmonitor_warning,
         'message': '. '.join(parts) + '.',

@@ -1922,12 +1922,19 @@ async function confirmDeleteSelectedSeasons() {
         });
         const data = await r.json();
         if (data.success) {
-            alert((data.message || 'Done.').replace(/\*\*/g, ''));
-            const modal = bootstrap.Modal.getInstance(document.getElementById('seasonManagerModal'));
-            if (modal) modal.hide();
-            // Refresh the analysis panel if it's open
-            const refreshBtn = document.querySelector('#storage-drives-container .card .btn-primary');
-            if (refreshBtn) refreshBtn.click();
+            const cleanMsg = (data.message || 'Done.').replace(/\*\*/g, '');
+            alert(cleanMsg);
+            // Only auto-close & refresh if everything actually succeeded.
+            if (!data.deleteWarning && !data.unmonitorWarning) {
+                const modal = bootstrap.Modal.getInstance(document.getElementById('seasonManagerModal'));
+                if (modal) modal.hide();
+                const refreshBtn = document.querySelector('#storage-drives-container .card .btn-primary');
+                if (refreshBtn) refreshBtn.click();
+            } else {
+                // Partial success: re-enable button and let the user decide
+                btn.disabled = false;
+                updateSeasonSelection();
+            }
         } else {
             alert('Delete failed: ' + (data.error || 'Unknown error'));
             btn.disabled = false;
