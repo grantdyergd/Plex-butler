@@ -1750,6 +1750,22 @@ function renderItemTable(items) {
             ? `${item.episodeFileCount || 0} eps · avg ${item.avgEpisodeMB || 0} MB/ep`
             : (item.qualityName ? `Quality: ${escHtml(item.qualityName)}` : '');
 
+        const requesterCell = item.requester
+            ? `<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-person-fill me-1"></i>${escHtml(item.requester)}</span>`
+            : '<span class="text-muted small">—</span>';
+
+        let watchedCell;
+        if (item.lastWatchedDaysAgo == null) {
+            watchedCell = item.viewCount > 0
+                ? `<span class="text-muted small">${item.viewCount} plays</span>`
+                : '<span class="text-danger small"><i class="bi bi-eye-slash me-1"></i>Never</span>';
+        } else {
+            const days = item.lastWatchedDaysAgo;
+            const ago = days > 730 ? `${(days/365).toFixed(1)}y ago` : (days > 60 ? `${Math.round(days/30)}mo ago` : `${days}d ago`);
+            const cls = days > 365 ? 'text-warning' : (days > 90 ? 'text-muted' : 'text-success');
+            watchedCell = `<span class="${cls} small"><i class="bi bi-eye-fill me-1"></i>${ago}</span><br><span class="text-muted small">${item.viewCount} play${item.viewCount === 1 ? '' : 's'}</span>`;
+        }
+
         return `
         <tr>
             <td>${typeIcon} <strong>${escHtml(item.title)}</strong> ${item.year ? `<span class="text-muted">(${item.year})</span>` : ''}<br>
@@ -1757,6 +1773,8 @@ function renderItemTable(items) {
             <td class="text-end"><strong>${fmtGB(item.sizeGB)}</strong></td>
             <td>${statusBadge}</td>
             <td class="small text-muted">${ageText}</td>
+            <td>${requesterCell}</td>
+            <td>${watchedCell}</td>
             <td class="text-nowrap">
                 ${item.type === 'show' ? `
                 <button class="btn btn-sm btn-outline-primary me-1" title="Manage seasons" onclick="openSeasonManager(${item.id}, ${jsArg(item.title)})">
@@ -1778,6 +1796,8 @@ function renderItemTable(items) {
                     <th class="text-end">Size</th>
                     <th>Status</th>
                     <th>Added</th>
+                    <th>Requester</th>
+                    <th>Watched</th>
                     <th></th>
                 </tr>
             </thead>

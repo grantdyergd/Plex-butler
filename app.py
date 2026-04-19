@@ -4281,6 +4281,49 @@ def storage_analyze():
     one_year_ago = now - timedelta(days=365)
     six_mo_ago = now - timedelta(days=180)
 
+    # Pull requester data from Ombi (best-effort; cheap network calls)
+    try:
+        tv_requesters = get_ombi_tv_requester_names() or {}
+    except Exception as e:
+        print(f"[Storage Analyze] Ombi TV: {e}")
+        tv_requesters = {}
+    try:
+        movie_requesters = get_ombi_movie_requester_names() or {}
+    except Exception as e:
+        print(f"[Storage Analyze] Ombi movies: {e}")
+        movie_requesters = {}
+
+    # Pull watch-history aggregates from Plex (single history call, group by title)
+    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    show_watch = {}   # title.lower() -> {last, count}
+    movie_watch = {}  # title.lower() -> {last, count}
+    if plex_url and plex_token:
+        try:
+            from plexapi.server import PlexServer
+            plex = PlexServer(plex_url, plex_token, timeout=60)
+            history = plex.history(maxresults=100000)
+            for h in history:
+                t = getattr(h, 'type', None)
+                viewed_at = getattr(h, 'viewedAt', None)
+                if t == 'episode':
+                    title = (getattr(h, 'grandparentTitle', '') or '').strip().lower()
+                    if not title:
+                        continue
+                    e = show_watch.setdefault(title, {'last': None, 'count': 0})
+                elif t == 'movie':
+                    title = (getattr(h, 'title', '') or '').strip().lower()
+                    if not title:
+                        continue
+                    e = movie_watch.setdefault(title, {'last': None, 'count': 0})
+                else:
+                    continue
+                e['count'] += 1
+                if viewed_at and (e['last'] is None or viewed_at > e['last']):
+                    e['last'] = viewed_at
+        except Exception as e:
+            print(f"[Storage Analyze] Plex history: {e}")
+
     def parse_iso(s):
         if not s:
             return None
@@ -4302,10 +4345,15 @@ def storage_analyze():
                 stats = s.get('statistics') or {}
                 added = parse_iso(s.get('added'))
                 last_air = parse_iso(s.get('previousAiring'))
+                title_str = s.get('title') or ''
+                title_lc = title_str.strip().lower()
+                w = show_watch.get(title_lc) or {}
+                last_watched = w.get('last')
+                last_watched_days = (now - last_watched).days if last_watched else None
                 items.append({
                     'id': s.get('id'),
                     'type': 'show',
-                    'title': s.get('title') or '',
+                    'title': title_str,
                     'year': s.get('year'),
                     'sizeBytes': size,
                     'sizeGB': round(size / 1024**3, 2),
@@ -4320,6 +4368,10 @@ def storage_analyze():
                     'lastAirDaysAgo': (now - last_air).days if last_air else None,
                     'monitored': s.get('monitored', False),
                     'rating': round((s.get('ratings') or {}).get('value', 0), 1),
+                    'requester': tv_requesters.get(title_lc, ''),
+                    'lastWatchedDate': last_watched.strftime('%Y-%m-%d') if last_watched else '',
+                    'lastWatchedDaysAgo': last_watched_days,
+                    'viewCount': w.get('count', 0),
                 })
         except Exception as e:
             print(f"[Storage Analyze] Sonarr: {e}")
@@ -4335,10 +4387,15 @@ def storage_analyze():
                 if size <= 0:
                     continue
                 added = parse_iso(m.get('added'))
+                title_str = m.get('title') or ''
+                title_lc = title_str.strip().lower()
+                w = movie_watch.get(title_lc) or {}
+                last_watched = w.get('last')
+                last_watched_days = (now - last_watched).days if last_watched else None
                 items.append({
                     'id': m.get('id'),
                     'type': 'movie',
-                    'title': m.get('title') or '',
+                    'title': title_str,
                     'year': m.get('year'),
                     'sizeBytes': size,
                     'sizeGB': round(size / 1024**3, 2),
@@ -4349,6 +4406,10 @@ def storage_analyze():
                     'monitored': m.get('monitored', False),
                     'rating': round((m.get('ratings') or {}).get('imdb', {}).get('value', 0), 1),
                     'qualityName': ((m.get('movieFile') or {}).get('quality') or {}).get('quality', {}).get('name', ''),
+                    'requester': movie_requesters.get(title_lc, ''),
+                    'lastWatchedDate': last_watched.strftime('%Y-%m-%d') if last_watched else '',
+                    'lastWatchedDaysAgo': last_watched_days,
+                    'viewCount': w.get('count', 0),
                 })
         except Exception as e:
             print(f"[Storage Analyze] Radarr: {e}")
