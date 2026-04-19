@@ -57,6 +57,27 @@
                     <label class="form-check-label" for="pol-oldest">Use oldest file date as "added"</label>
                 </div>
             </div>
+            <div class="col-md-12">
+                <hr class="my-2">
+                <h6 class="text-muted text-uppercase small mb-2"><i class="bi bi-shield-check me-1"></i>Safety controls</h6>
+            </div>
+            <div class="col-md-3">
+                <div class="form-check form-switch mt-1">
+                    <input class="form-check-input" type="checkbox" id="pol-dryrun" {% if dry_run %}checked{% endif %}>
+                    <label class="form-check-label fw-bold text-warning" for="pol-dryrun">Dry-run mode</label>
+                </div>
+                <small class="text-muted">When ON, warnings still send and items are marked deleted in the archive, but nothing is removed from Sonarr/Radarr.</small>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Max deletions per run</label>
+                <input type="number" min="0" max="1000" class="form-control" id="pol-cap" value="{{ max_per_run }}">
+                <small class="text-muted">0 = unlimited. Items beyond the cap are deferred to the next run.</small>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Admin fallback email (for unclaimed items)</label>
+                <input type="email" class="form-control" id="pol-fallback" value="{{ admin_fallback_email }}" placeholder="admin@example.com">
+                <small class="text-muted">Items with no requester email send their warning here so they don't pile up in Needs Attention forever.</small>
+            </div>
             <div class="col-md-12 d-flex align-items-end justify-content-end gap-2">
                 <button class="btn btn-outline-secondary" onclick="recomputeDates()" title="Re-apply current policy to all active items">
                     <i class="bi bi-calculator me-1"></i>Recompute dates
@@ -86,9 +107,38 @@
     <li class="nav-item"><button class="nav-link" data-status="missing" onclick="loadList(this)">Missing <span class="badge bg-secondary">{{ counts.missing }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="deleted" onclick="loadList(this)">Deleted <span class="badge bg-secondary">{{ counts.deleted }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="all" onclick="loadList(this)">All</button></li>
+    <li class="nav-item ms-auto"><button class="nav-link text-info" data-status="archive" onclick="loadArchive(this)"><i class="bi bi-archive me-1"></i>Archive</button></li>
 </ul>
 
-<div class="card mb-3">
+<div id="archive-pane" class="d-none">
+    <div class="card mb-3">
+        <div class="card-body py-2 d-flex align-items-center gap-3 flex-wrap">
+            <span class="text-muted small">Every deletion (real or dry-run) is recorded here. You can re-request items via Ombi to bring them back.</span>
+            <div class="form-check form-switch ms-auto mb-0">
+                <input class="form-check-input" type="checkbox" id="arch-include-dry" checked onchange="loadArchive()">
+                <label class="form-check-label small" for="arch-include-dry">Include dry-run entries</label>
+            </div>
+        </div>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Type</th><th>Title</th><th>Year</th><th>Original requester</th>
+                            <th>Deleted</th><th>By</th><th>Mode</th><th>Re-requested</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="archive-rows"></tbody>
+                </table>
+            </div>
+            <div id="archive-empty" class="text-center text-muted py-4 d-none">No archived deletions yet.</div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3" data-main-pane>
     <div class="card-body py-2">
         <div class="row g-2 align-items-center">
             <div class="col-md-4">
@@ -122,7 +172,7 @@
     </div>
 </div>
 
-<div class="card">
+<div class="card" data-main-pane>
     <div class="card-body">
         <div class="table-responsive">
             <table class="table table-hover align-middle">
@@ -162,12 +212,81 @@ function toggleRow(cb) {
     updateBulkButtons();
 }
 
+function _setActiveTab(btn){
+    document.querySelectorAll('.nav-link[data-status]').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+}
+function _showMain(show){
+    document.querySelectorAll('.card.mb-3, .card:not(.mb-3)').forEach(()=>{}); // no-op safety
+    const arch = document.getElementById('archive-pane');
+    if (arch) arch.classList.toggle('d-none', show);
+    // Hide the items table & filter bar when archive is open
+    const filterBar = document.querySelector('.card.mb-3:nth-of-type(3)');
+    const itemsCard = document.querySelector('.card:last-of-type');
+    // Simpler: toggle by ids
+    const mainCards = document.querySelectorAll('[data-main-pane]');
+    mainCards.forEach(el => el.classList.toggle('d-none', !show));
+}
+
+async function loadArchive(btn){
+    if (btn) _setActiveTab(btn);
+    document.querySelectorAll('[data-main-pane]').forEach(el => el.classList.add('d-none'));
+    document.getElementById('archive-pane').classList.remove('d-none');
+    const includeDry = document.getElementById('arch-include-dry').checked;
+    const res = await fetch(`/api/archive/list?include_dry=${includeDry}&limit=200`);
+    const data = await res.json();
+    const tbody = document.getElementById('archive-rows');
+    const empty = document.getElementById('archive-empty');
+    if (!data.success || !data.items.length){
+        tbody.innerHTML = '';
+        empty.classList.remove('d-none');
+        return;
+    }
+    empty.classList.add('d-none');
+    tbody.innerHTML = data.items.map(it => {
+        const modeBadge = it.dry_run
+            ? '<span class="badge bg-info">Dry-run</span>'
+            : '<span class="badge bg-danger">Real</span>';
+        const reBadge = it.re_requested_at
+            ? `<span class="badge bg-success">${fmtLocalDate(it.re_requested_at)}</span>`
+            : '<span class="text-muted small">—</span>';
+        const canRequest = (it.media_type==='movie' ? it.tmdb_id : it.tvdb_id);
+        const reBtn = canRequest
+            ? `<button class="btn btn-sm btn-outline-primary" onclick="reRequest(${it.id}, this)" ${it.re_requested_at?'disabled':''}>
+                   <i class="bi bi-arrow-clockwise me-1"></i>Re-request
+               </button>`
+            : '<span class="text-muted small">no id</span>';
+        return `<tr>
+            <td><span class="badge bg-secondary">${it.media_type}</span></td>
+            <td>${escapeHtml(it.title)}</td>
+            <td>${it.year || '—'}</td>
+            <td>${escapeHtml(it.requester_name || it.requester_email || '—')}</td>
+            <td>${fmtLocalDate(it.deleted_at)}</td>
+            <td><small class="text-muted">${escapeHtml(it.deleted_by)}</small></td>
+            <td>${modeBadge}</td>
+            <td>${reBadge}</td>
+            <td>${reBtn}</td>
+        </tr>`;
+    }).join('');
+}
+
+async function reRequest(aid, btn){
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    const res = await fetch(`/api/archive/${aid}/re-request`, {method:'POST'});
+    const data = await res.json();
+    alert(data.message || (data.success ? 'Re-requested.' : 'Failed.'));
+    if (data.success) loadArchive();
+    else { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Re-request'; }
+}
+
 async function loadList(btn) {
     if (btn) {
-        document.querySelectorAll('.nav-link[data-status]').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        _setActiveTab(btn);
         currentStatus = btn.dataset.status;
     }
+    // Always make sure archive is hidden and main panes are visible
+    document.getElementById('archive-pane').classList.add('d-none');
+    document.querySelectorAll('[data-main-pane]').forEach(el => el.classList.remove('d-none'));
     selectedIds.clear();
     const sa = document.getElementById('select-all'); if (sa) sa.checked = false;
     updateBulkButtons();
@@ -264,6 +383,9 @@ async function savePolicy() {
         intro_email_enabled: document.getElementById('pol-intro').checked,
         use_oldest_file_date: document.getElementById('pol-oldest').checked,
         display_timezone: document.getElementById('pol-tz').value.trim(),
+        dry_run: document.getElementById('pol-dryrun').checked,
+        max_per_run: +document.getElementById('pol-cap').value,
+        admin_fallback_email: document.getElementById('pol-fallback').value.trim(),
     };
     const res = await fetch('/api/expirations/save-policy', {
         method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)

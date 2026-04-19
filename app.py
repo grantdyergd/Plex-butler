@@ -194,6 +194,26 @@ class OmbiIntroEmailLog(db.Model):
     ombi_user_id = db.Column(db.String(100), nullable=True, index=True)
 
 
+class DeletedMediaArchive(db.Model):
+    """Breadcrumb archive of every expiration-driven deletion (real or dry-run) so admin can re-request later."""
+    id = db.Column(db.Integer, primary_key=True)
+    media_type = db.Column(db.String(10), nullable=False, index=True)
+    service_id = db.Column(db.Integer, nullable=True)
+    tvdb_id = db.Column(db.Integer, nullable=True)
+    tmdb_id = db.Column(db.Integer, nullable=True)
+    imdb_id = db.Column(db.String(20), nullable=True)
+    title = db.Column(db.String(500), nullable=False)
+    year = db.Column(db.Integer, nullable=True)
+    requester_email = db.Column(db.String(200), nullable=True)
+    requester_name = db.Column(db.String(200), nullable=True)
+    original_added_at = db.Column(db.DateTime, nullable=True)
+    deleted_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    deleted_by = db.Column(db.String(50), nullable=False)  # auto-expiration | dry-run | admin-delete-now | bulk-delete
+    dry_run = db.Column(db.Boolean, default=False, index=True)
+    re_requested_at = db.Column(db.DateTime, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+
 class ScanCache(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     scan_type = db.Column(db.String(20), nullable=False)  # 'tv' or 'movie'
@@ -5056,6 +5076,9 @@ EXPIRATION_DEFAULTS = {
     'EXPIRATION_INTRO_EMAIL_ENABLED': 'true',
     'EXPIRATION_USE_OLDEST_FILE_DATE': 'false',
     'DISPLAY_TIMEZONE': 'UTC',
+    'EXPIRATION_DRY_RUN': 'true',                  # safe default: don't actually delete on first install
+    'EXPIRATION_MAX_DELETIONS_PER_RUN': '10',      # blast-radius cap
+    'EXPIRATION_ADMIN_FALLBACK_EMAIL': '',         # if set, no-requester items warn this address
     'EXPIRATION_LAST_RUN_AT': '',
 }
 
@@ -5527,6 +5550,7 @@ def expiration_send_warnings():
             continue
         # Build recipient list (primary + additional)
         recipients = []
+        unclaimed = False
         if rec.requester_email:
             recipients.append(rec.requester_email)
         if rec.additional_requester_emails:
@@ -5535,10 +5559,15 @@ def expiration_send_warnings():
                 if em and em not in recipients:
                     recipients.append(em)
         if not recipients:
-            rec.last_warning_status = 'no_email'
-            rec.last_warning_error = 'No requester email on file'
-            db.session.commit()
-            continue
+            fallback = (get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', '') or '').strip().lower()
+            if fallback:
+                recipients = [fallback]
+                unclaimed = True
+            else:
+                rec.last_warning_status = 'no_email'
+                rec.last_warning_error = 'No requester email on file (no admin fallback set)'
+                db.session.commit()
+                continue
 
         try:
             token_str = secrets.token_urlsafe(32)
@@ -5559,7 +5588,27 @@ def expiration_send_warnings():
             expires_str = _format_date_in_tz(rec.expires_at)
             tz_name = get_setting('DISPLAY_TIMEZONE', 'UTC') or 'UTC'
 
-            subject = f"Action needed: \"{rec.title}\" expires in {days_left} days"
+            subject_prefix = ''
+            if _is_dry_run():
+                subject_prefix += '[TEST] '
+            if unclaimed:
+                subject_prefix += '[Unclaimed] '
+            subject = f"{subject_prefix}Action needed: \"{rec.title}\" expires in {days_left} days"
+
+            multi_recipient_note = ('<p style="color:#888;font-size:12px;">'
+                                    'Note: this notice was also sent to other people who requested this item.</p>'
+                                    if len(recipients) > 1 else '')
+            unclaimed_note = ('<p style="color:#888;font-size:12px;background:#fff3cd;padding:8px;border-radius:4px;">'
+                              "This item is currently <strong>unclaimed</strong> in our records (no requester email). "
+                              "You are receiving this because you are configured as the admin fallback. Acting on the "
+                              "link below will manage the item on the requester's behalf.</p>"
+                              if unclaimed else '')
+            dry_run_note = ('<p style="color:#0d6efd;font-size:12px;background:#cfe2ff;padding:8px;border-radius:4px;">'
+                            '<strong>TEST MODE:</strong> The system is currently in dry-run mode. The link still works '
+                            'for managing this item, but the automatic deletion step will be skipped &mdash; nothing '
+                            'will actually be removed yet.</p>'
+                            if _is_dry_run() else '')
+
             any_ok = False
             last_err = None
             for to_email in recipients:
@@ -5580,7 +5629,9 @@ def expiration_send_warnings():
                         <li><strong>Delete now</strong> — free up space immediately</li>
                     </ul>
                     <p style="color: #c00;">If no action is taken, this item will be automatically deleted shortly after the expiration date.</p>
-                    {('<p style="color:#888;font-size:12px;">Note: this notice was also sent to other people who requested this item.</p>' if len(recipients) > 1 else '')}
+                    {multi_recipient_note}
+                    {unclaimed_note}
+                    {dry_run_note}
                     <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
                     <p style="color: #999; font-size: 12px;">This link expires in 30 days. Sent by your media server's automated cleanup system.</p>
                 </body></html>
@@ -5614,8 +5665,15 @@ def expiration_send_warnings():
     return sent_count
 
 
-def _delete_via_arr(rec):
-    """Actually remove the item from Sonarr/Radarr with file deletion."""
+def _is_dry_run():
+    return get_setting('EXPIRATION_DRY_RUN', 'false').lower() == 'true'
+
+
+def _delete_via_arr(rec, force_real=False):
+    """Remove from Sonarr/Radarr with file deletion. In dry-run, log only and return True."""
+    if _is_dry_run() and not force_real:
+        print(f"[DRY RUN] Would delete {rec.media_type} {rec.title!r} (id={rec.service_id})")
+        return True
     if rec.media_type == 'show':
         url = get_setting('SONARR_URL', '').strip().rstrip('/')
         key = get_setting('SONARR_API_KEY', '').strip()
@@ -5634,20 +5692,58 @@ def _delete_via_arr(rec):
         return r.ok
 
 
+def _archive_deletion(rec, deleted_by, dry_run=False, notes=None):
+    """Stage a breadcrumb row and flush it so any DB error surfaces BEFORE the destructive *arr call.
+
+    Raises on failure — callers MUST catch and abort the deletion if archiving fails.
+    """
+    db.session.add(DeletedMediaArchive(
+        media_type=rec.media_type,
+        service_id=rec.service_id,
+        tvdb_id=rec.tvdb_id,
+        tmdb_id=rec.tmdb_id,
+        imdb_id=rec.imdb_id,
+        title=rec.title,
+        year=rec.year,
+        requester_email=rec.requester_email,
+        requester_name=rec.requester_name,
+        original_added_at=rec.added_at,
+        deleted_at=datetime.utcnow(),
+        deleted_by=deleted_by,
+        dry_run=dry_run,
+        notes=notes,
+    ))
+    db.session.flush()  # surface DB errors now, before we hit Sonarr/Radarr
+
+
 def expiration_process_due():
-    """Auto-delete items past expiration+grace; ONLY if a warning was successfully sent first."""
+    """Auto-delete items past expiration+grace.
+
+    Safety gates (in order):
+      1. Exclusion list always wins.
+      2. A successful warning must have been sent at least grace_days ago.
+      3. Per-run delete cap. Anything beyond the cap is left for the next run with notes='cap-exceeded'.
+      4. Dry-run mode short-circuits the actual *arr delete (still archives + marks the record).
+    """
     policy = get_expiration_policy()
     if not policy['enabled']:
         return 0
+
+    dry_run = _is_dry_run()
+    try:
+        cap = max(0, int(get_setting('EXPIRATION_MAX_DELETIONS_PER_RUN', '10')))
+    except Exception:
+        cap = 10
 
     cutoff = datetime.utcnow() - timedelta(days=policy['grace_days'])
     due = MediaExpiration.query.filter(
         MediaExpiration.status.in_(['active', 'extended']),
         MediaExpiration.permanent == False,
         MediaExpiration.expires_at <= cutoff,
-    ).all()
+    ).order_by(MediaExpiration.expires_at.asc()).all()
 
     deleted = 0
+    skipped_for_cap = 0
     for rec in due:
         # Final safety net — exclusion list always wins
         if _is_title_excluded(rec.media_type, rec.title, rec.year):
@@ -5662,33 +5758,50 @@ def expiration_process_due():
             db.session.commit()
             continue
         if (datetime.utcnow() - rec.last_warning_sent_at).days < policy['grace_days']:
-            # warning was sent but grace period since the warning hasn't elapsed
+            continue
+        # Per-run cap — leave the rest for the next run, surface in admin
+        if cap and deleted >= cap:
+            rec.notes = f'cap-exceeded ({cap}/run)'
+            db.session.commit()
+            skipped_for_cap += 1
             continue
         try:
+            # 1) Archive FIRST (flushes immediately) — if this fails we never call *arr.
+            note_val = 'dry-run-deletion' if dry_run else None
+            _archive_deletion(rec, deleted_by=('dry-run' if dry_run else 'auto-expiration'),
+                              dry_run=dry_run, notes=note_val)
+            # 2) External destructive call (no-op in dry-run).
             ok = _delete_via_arr(rec)
-            if ok:
-                rec.status = 'deleted'
-                rec.deleted_at = datetime.utcnow()
-                # Also record in DeletionHistory if model present
-                try:
-                    db.session.add(DeletionHistory(
-                        media_type=rec.media_type,
-                        title=rec.title,
-                        deleted_at=datetime.utcnow(),
-                        deleted_by='auto-expiration',
-                        size_bytes=0,
-                    ))
-                except Exception:
-                    pass
-                db.session.commit()
-                deleted += 1
-                print(f"[Expiration Delete] Auto-deleted {rec.media_type} {rec.title}")
-            else:
-                print(f"[Expiration Delete] Failed to delete {rec.title}")
+            if not ok:
+                # Roll back the archive row too — nothing was actually deleted.
+                db.session.rollback()
+                print(f"[Expiration Delete] Failed to delete {rec.title}; archive rolled back")
+                continue
+            # 3) Mark the source record + DeletionHistory, then commit.
+            rec.status = 'deleted'
+            rec.deleted_at = datetime.utcnow()
+            if dry_run:
+                rec.notes = 'dry-run-deletion'
+            try:
+                db.session.add(DeletionHistory(
+                    media_type=rec.media_type,
+                    title=rec.title,
+                    deleted_at=datetime.utcnow(),
+                    deleted_by=('auto-expiration-dryrun' if dry_run else 'auto-expiration'),
+                    size_bytes=0,
+                ))
+            except Exception:
+                pass
+            db.session.commit()
+            deleted += 1
+            tag = '[DRY RUN] ' if dry_run else ''
+            print(f"[Expiration Delete] {tag}{rec.media_type} {rec.title}")
         except Exception as e:
             db.session.rollback()
             print(f"[Expiration Delete] Error for {rec.title}: {e}")
 
+    if skipped_for_cap:
+        print(f"[Expiration Delete] Per-run cap of {cap} reached; {skipped_for_cap} item(s) deferred to next run.")
     return deleted
 
 
@@ -5898,7 +6011,10 @@ def expirations_page():
     return render_template('expirations.html', policy=policy, counts=counts,
                            last_run=get_setting('EXPIRATION_LAST_RUN_AT', ''),
                            display_timezone=get_setting('DISPLAY_TIMEZONE', 'UTC'),
-                           use_oldest_file_date=(get_setting('EXPIRATION_USE_OLDEST_FILE_DATE', 'false').lower() == 'true'))
+                           use_oldest_file_date=(get_setting('EXPIRATION_USE_OLDEST_FILE_DATE', 'false').lower() == 'true'),
+                           dry_run=_is_dry_run(),
+                           max_per_run=int(get_setting('EXPIRATION_MAX_DELETIONS_PER_RUN', '10') or 10),
+                           admin_fallback_email=get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', ''))
 
 
 @app.route('/api/expirations/list')
@@ -5979,6 +6095,9 @@ def expirations_save_policy():
         'EXPIRATION_INTRO_EMAIL_ENABLED': 'true' if data.get('intro_email_enabled') else 'false',
         'EXPIRATION_USE_OLDEST_FILE_DATE': 'true' if data.get('use_oldest_file_date') else 'false',
         'DISPLAY_TIMEZONE': (data.get('display_timezone') or 'UTC').strip() or 'UTC',
+        'EXPIRATION_DRY_RUN': 'true' if data.get('dry_run') else 'false',
+        'EXPIRATION_MAX_DELETIONS_PER_RUN': str(max(0, int(data.get('max_per_run', 10)))),
+        'EXPIRATION_ADMIN_FALLBACK_EMAIL': (data.get('admin_fallback_email') or '').strip(),
     }
     for k, v in mapping.items():
         set_setting(k, v)
@@ -6068,17 +6187,29 @@ def expirations_bulk_action():
             elif action == 'forget':
                 db.session.delete(rec)
             elif action == 'delete-now':
+                dry = _is_dry_run()
+                # Archive FIRST (flushes); abort cleanly if it fails.
+                _archive_deletion(rec, deleted_by=('bulk-dry-run' if dry else 'bulk-delete'),
+                                  dry_run=dry, notes=f'bulk action by {by}')
                 if not _delete_via_arr(rec):
+                    db.session.rollback()
                     fail_count += 1
-                    errors.append(f"{rec.title}: delete failed")
+                    errors.append(f"{rec.title}: delete failed (archive rolled back)")
                     continue
                 rec.status = 'deleted'
                 rec.deleted_at = datetime.utcnow()
+                if dry:
+                    rec.notes = 'dry-run-deletion'
+                # Commit per-item so a later item's failure can't undo this archive.
+                db.session.commit()
             else:
                 fail_count += 1
                 continue
             ok_count += 1
         except Exception as e:
+            # Roll back any pending (un-committed) work for this item — including a flushed-but-uncommitted
+            # archive row from delete-now — so it can never be smuggled into the final commit below.
+            db.session.rollback()
             fail_count += 1
             errors.append(f"{rec.title if rec else eid}: {e}")
     db.session.commit()
@@ -6118,11 +6249,22 @@ def expirations_admin_action(eid):
         floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
         rec.expires_at = max(_add_months(rec.added_at or datetime.utcnow(), policy['months']), floor)
     elif action == 'delete-now':
-        ok = _delete_via_arr(rec)
-        if not ok:
-            return jsonify({'success': False, 'error': 'Sonarr/Radarr delete failed'}), 502
+        dry = _is_dry_run()
+        by = current_user.username if current_user.is_authenticated else 'admin'
+        # Archive FIRST so a deletion can never escape the audit log.
+        try:
+            _archive_deletion(rec, deleted_by=('admin-dry-run' if dry else 'admin-delete-now'),
+                              dry_run=dry, notes=f'admin action by {by}')
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'success': False, 'error': f'Archive insert failed; deletion aborted: {e}'}), 500
+        if not _delete_via_arr(rec):
+            db.session.rollback()
+            return jsonify({'success': False, 'error': 'Sonarr/Radarr delete failed (archive rolled back)'}), 502
         rec.status = 'deleted'
         rec.deleted_at = datetime.utcnow()
+        if dry:
+            rec.notes = 'dry-run-deletion'
     elif action == 'forget':
         db.session.delete(rec)
     else:
@@ -6130,6 +6272,81 @@ def expirations_admin_action(eid):
 
     db.session.commit()
     return jsonify({'success': True})
+
+
+@app.route('/api/archive/list')
+@login_required
+def archive_list():
+    """Paginated list of archived deletions, newest first."""
+    try:
+        limit = max(1, min(500, int(request.args.get('limit', 100))))
+        offset = max(0, int(request.args.get('offset', 0)))
+    except Exception:
+        limit, offset = 100, 0
+    show_dry = (request.args.get('include_dry', 'true').lower() == 'true')
+    q = DeletedMediaArchive.query
+    if not show_dry:
+        q = q.filter(DeletedMediaArchive.dry_run == False)
+    total = q.count()
+    rows = q.order_by(DeletedMediaArchive.deleted_at.desc()).offset(offset).limit(limit).all()
+    return jsonify({
+        'success': True,
+        'total': total,
+        'items': [{
+            'id': r.id,
+            'media_type': r.media_type,
+            'service_id': r.service_id,
+            'tvdb_id': r.tvdb_id,
+            'tmdb_id': r.tmdb_id,
+            'imdb_id': r.imdb_id,
+            'title': r.title,
+            'year': r.year,
+            'requester_email': r.requester_email,
+            'requester_name': r.requester_name,
+            'original_added_at': r.original_added_at.isoformat() if r.original_added_at else None,
+            'deleted_at': r.deleted_at.isoformat() if r.deleted_at else None,
+            'deleted_by': r.deleted_by,
+            'dry_run': bool(r.dry_run),
+            're_requested_at': r.re_requested_at.isoformat() if r.re_requested_at else None,
+            'notes': r.notes,
+        } for r in rows],
+    })
+
+
+def _ombi_re_request(rec):
+    """Submit a fresh request to Ombi for an archived item. Returns (ok, message)."""
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+    if not ombi_url or not ombi_key:
+        return False, 'Ombi is not configured'
+    headers = {'ApiKey': ombi_key, 'Accept': 'application/json', 'Content-Type': 'application/json'}
+    try:
+        if rec.media_type == 'movie':
+            if not rec.tmdb_id:
+                return False, 'Missing TMDb id; cannot re-request movie'
+            r = requests.post(f'{ombi_url}/api/v1/Request/movie', headers=headers,
+                              json={'theMovieDbId': int(rec.tmdb_id)}, timeout=20)
+        else:
+            if not rec.tvdb_id:
+                return False, 'Missing TVDb id; cannot re-request show'
+            r = requests.post(f'{ombi_url}/api/v1/Request/tv', headers=headers,
+                              json={'tvDbId': int(rec.tvdb_id), 'requestAll': True}, timeout=20)
+        if r.ok:
+            return True, 'Re-requested via Ombi'
+        return False, f'Ombi returned HTTP {r.status_code}: {r.text[:200]}'
+    except Exception as e:
+        return False, str(e)
+
+
+@app.route('/api/archive/<int:aid>/re-request', methods=['POST'])
+@login_required
+def archive_re_request(aid):
+    rec = DeletedMediaArchive.query.get_or_404(aid)
+    ok, msg = _ombi_re_request(rec)
+    if ok:
+        rec.re_requested_at = datetime.utcnow()
+        db.session.commit()
+    return jsonify({'success': ok, 'message': msg})
 
 
 @app.route('/expire/<token>')
@@ -6184,12 +6401,17 @@ def expire_action_submit(token):
             _add_to_exclusion_list(rec, by_name=rec.requester_name, by_email=rec.requester_email)
             msg = f'"{rec.title}" will be kept permanently.'
         else:  # delete
-            ok = _delete_via_arr(rec)
-            if not ok:
-                db.session.rollback()  # releases the token claim too
+            dry = _is_dry_run()
+            # Archive FIRST so a deletion can never escape the audit log.
+            _archive_deletion(rec, deleted_by=('requester-dry-run' if dry else 'requester-delete'),
+                              dry_run=dry, notes='requester chose delete via token')
+            if not _delete_via_arr(rec):
+                db.session.rollback()  # releases the token claim AND the archive row
                 return jsonify({'success': False, 'error': 'Could not delete from server'}), 502
             rec.status = 'deleted'
             rec.deleted_at = now
+            if dry:
+                rec.notes = 'dry-run-deletion'
             msg = f'"{rec.title}" has been deleted.'
         db.session.commit()
         return jsonify({'success': True, 'message': msg})
