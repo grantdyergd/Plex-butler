@@ -4417,6 +4417,177 @@ def storage_analyze():
     })
 
 
+@app.route('/api/storage/show-seasons')
+@login_required
+def storage_show_seasons():
+    """Return per-season breakdown for a Sonarr series."""
+    series_id = request.args.get('id', type=int)
+    if not series_id:
+        return jsonify({'error': 'Missing series id'}), 400
+
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    if not sonarr_url or not sonarr_key:
+        return jsonify({'error': 'Sonarr not configured'}), 400
+
+    try:
+        sr = requests.get(f"{sonarr_url}/api/v3/series/{series_id}",
+                          params={'apikey': sonarr_key}, timeout=10)
+        if not sr.ok:
+            return jsonify({'error': f'Sonarr returned {sr.status_code}'}), 502
+        series = sr.json()
+
+        ef = requests.get(f"{sonarr_url}/api/v3/episodefile",
+                          params={'apikey': sonarr_key, 'seriesId': series_id}, timeout=15)
+        episode_files = ef.json() if ef.ok else []
+    except Exception as e:
+        print(f"[Storage Seasons] {e}")
+        return jsonify({'error': 'Failed to fetch season info'}), 502
+
+    # Group episode files by season
+    files_by_season = {}
+    for f in episode_files if isinstance(episode_files, list) else []:
+        sn = f.get('seasonNumber')
+        if sn is None:
+            continue
+        files_by_season.setdefault(sn, []).append(f.get('id'))
+
+    seasons_out = []
+    for s in series.get('seasons', []) or []:
+        sn = s.get('seasonNumber')
+        stats = s.get('statistics') or {}
+        size = stats.get('sizeOnDisk', 0) or 0
+        seasons_out.append({
+            'seasonNumber': sn,
+            'monitored': s.get('monitored', False),
+            'episodeFileCount': stats.get('episodeFileCount', 0),
+            'episodeCount': stats.get('episodeCount', 0),
+            'totalEpisodeCount': stats.get('totalEpisodeCount', 0),
+            'sizeBytes': size,
+            'sizeGB': round(size / 1024**3, 2),
+            'episodeFileIds': files_by_season.get(sn, []),
+        })
+
+    seasons_out.sort(key=lambda x: x['seasonNumber'] if x['seasonNumber'] is not None else -1)
+
+    return jsonify({
+        'seriesId': series_id,
+        'title': series.get('title'),
+        'totalSizeGB': round(sum(s['sizeBytes'] for s in seasons_out) / 1024**3, 2),
+        'seasons': seasons_out,
+    })
+
+
+@app.route('/api/storage/delete-seasons', methods=['POST'])
+@login_required
+def storage_delete_seasons():
+    """Delete files for selected seasons of a show, optionally unmonitor those seasons."""
+    data = request.get_json() or {}
+    series_id = data.get('seriesId')
+    season_numbers = data.get('seasons') or []
+    unmonitor = bool(data.get('unmonitor', True))
+
+    if not series_id or not season_numbers:
+        return jsonify({'success': False, 'error': 'Missing seriesId or seasons'}), 400
+
+    try:
+        season_numbers = [int(s) for s in season_numbers]
+    except Exception:
+        return jsonify({'success': False, 'error': 'Invalid season numbers'}), 400
+
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    if not sonarr_url or not sonarr_key:
+        return jsonify({'success': False, 'error': 'Sonarr not configured'}), 400
+
+    try:
+        ef = requests.get(f"{sonarr_url}/api/v3/episodefile",
+                          params={'apikey': sonarr_key, 'seriesId': series_id}, timeout=15)
+        if not ef.ok:
+            return jsonify({'success': False, 'error': f'Failed to list episode files ({ef.status_code})'}), 502
+        episode_files = ef.json() or []
+    except Exception as e:
+        print(f"[Storage Delete Seasons] list files: {e}")
+        return jsonify({'success': False, 'error': 'Failed to list episode files'}), 502
+
+    file_ids_to_delete = [
+        f.get('id') for f in episode_files
+        if f.get('seasonNumber') in season_numbers and f.get('id')
+    ]
+
+    deleted_count = 0
+    if file_ids_to_delete:
+        try:
+            # Sonarr supports bulk delete via DELETE /api/v3/episodefile/bulk with body
+            r = requests.delete(
+                f"{sonarr_url}/api/v3/episodefile/bulk",
+                params={'apikey': sonarr_key},
+                json={'episodeFileIds': file_ids_to_delete},
+                timeout=30,
+            )
+            if r.ok:
+                deleted_count = len(file_ids_to_delete)
+            else:
+                # Fallback: delete one-by-one
+                print(f"[Storage Delete Seasons] bulk failed {r.status_code}, falling back")
+                for fid in file_ids_to_delete:
+                    try:
+                        rr = requests.delete(f"{sonarr_url}/api/v3/episodefile/{fid}",
+                                             params={'apikey': sonarr_key}, timeout=10)
+                        if rr.ok:
+                            deleted_count += 1
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[Storage Delete Seasons] delete files: {e}")
+            return jsonify({'success': False, 'error': 'Failed to delete episode files'}), 502
+
+    # Optionally unmonitor those seasons
+    unmonitored = []
+    unmonitor_warning = None
+    if unmonitor:
+        try:
+            sr = requests.get(f"{sonarr_url}/api/v3/series/{series_id}",
+                              params={'apikey': sonarr_key}, timeout=10)
+            if sr.ok:
+                series = sr.json()
+                pending = []
+                for s in series.get('seasons', []) or []:
+                    if s.get('seasonNumber') in season_numbers and s.get('monitored'):
+                        s['monitored'] = False
+                        pending.append(s.get('seasonNumber'))
+                if pending:
+                    pr = requests.put(f"{sonarr_url}/api/v3/series/{series_id}",
+                                      params={'apikey': sonarr_key}, json=series, timeout=15)
+                    if pr.ok:
+                        unmonitored = pending
+                    else:
+                        print(f"[Storage Delete Seasons] unmonitor failed {pr.status_code}: {pr.text[:200]}")
+                        unmonitor_warning = f"Could not unmonitor seasons (Sonarr returned {pr.status_code})."
+            else:
+                unmonitor_warning = f"Could not fetch series to unmonitor (Sonarr returned {sr.status_code})."
+        except Exception as e:
+            print(f"[Storage Delete Seasons] unmonitor: {e}")
+            unmonitor_warning = "Could not unmonitor seasons (network error)."
+
+    parts = []
+    if deleted_count:
+        parts.append(f"Deleted **{deleted_count}** episode file(s) from season(s) {', '.join(str(s) for s in sorted(set(season_numbers)))}")
+    else:
+        parts.append("No episode files found to delete for the selected season(s)")
+    if unmonitored:
+        parts.append(f"Unmonitored season(s) {', '.join(str(s) for s in sorted(unmonitored))}")
+    if unmonitor_warning:
+        parts.append(unmonitor_warning)
+    return jsonify({
+        'success': True,
+        'deletedFiles': deleted_count,
+        'unmonitored': unmonitored,
+        'unmonitorWarning': unmonitor_warning,
+        'message': '. '.join(parts) + '.',
+    })
+
+
 @app.route('/api/media/sonarr-search')
 @login_required
 def media_sonarr_search():

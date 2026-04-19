@@ -481,6 +481,30 @@
         </div>
     </div>
 
+    <div class="modal fade" id="seasonManagerModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-collection-play me-2"></i><span id="sm-title">Manage Seasons</span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="sm-body">
+                    <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading seasons…</div>
+                </div>
+                <div class="modal-footer">
+                    <div class="form-check me-auto">
+                        <input class="form-check-input" type="checkbox" id="sm-unmonitor" checked>
+                        <label class="form-check-label" for="sm-unmonitor">Also unmonitor selected seasons in Sonarr</label>
+                    </div>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" id="sm-delete-btn" onclick="confirmDeleteSelectedSeasons()" disabled>
+                        <i class="bi bi-trash me-1"></i>Delete Selected
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="tab-pane fade" id="storage-pane" role="tabpanel">
         <div class="row mb-3">
             <div class="col-12">
@@ -1733,8 +1757,12 @@ function renderItemTable(items) {
             <td class="text-end"><strong>${fmtGB(item.sizeGB)}</strong></td>
             <td>${statusBadge}</td>
             <td class="small text-muted">${ageText}</td>
-            <td>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteStorageItem(${jsArg(item.type)}, ${item.id}, ${jsArg(item.title)}, this)">
+            <td class="text-nowrap">
+                ${item.type === 'show' ? `
+                <button class="btn btn-sm btn-outline-primary me-1" title="Manage seasons" onclick="openSeasonManager(${item.id}, ${jsArg(item.title)})">
+                    <i class="bi bi-collection-play"></i>
+                </button>` : ''}
+                <button class="btn btn-sm btn-outline-danger" title="Delete entirely" onclick="deleteStorageItem(${jsArg(item.type)}, ${item.id}, ${jsArg(item.title)}, this)">
                     <i class="bi bi-trash"></i>
                 </button>
             </td>
@@ -1756,6 +1784,160 @@ function renderItemTable(items) {
             <tbody>${rows}</tbody>
         </table>
     </div>`;
+}
+
+// ===== Season Manager =====
+let smState = { seriesId: null, title: '', seasons: [] };
+
+async function openSeasonManager(seriesId, title) {
+    smState = { seriesId, title, seasons: [] };
+    document.getElementById('sm-title').textContent = `Manage Seasons — ${title}`;
+    document.getElementById('sm-body').innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading seasons…</div>';
+    document.getElementById('sm-delete-btn').disabled = true;
+    document.getElementById('sm-unmonitor').checked = true;
+
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('seasonManagerModal'));
+    modal.show();
+
+    try {
+        const r = await fetch(`/api/storage/show-seasons?id=${seriesId}`);
+        const data = await r.json();
+        if (data.error) {
+            document.getElementById('sm-body').innerHTML = `<div class="alert alert-danger">${escHtml(data.error)}</div>`;
+            return;
+        }
+        smState.seasons = data.seasons || [];
+        renderSeasonManager(data);
+    } catch (e) {
+        document.getElementById('sm-body').innerHTML = '<div class="alert alert-danger">Failed to load seasons.</div>';
+    }
+}
+
+function renderSeasonManager(data) {
+    const seasons = data.seasons || [];
+    if (seasons.length === 0) {
+        document.getElementById('sm-body').innerHTML = '<p class="text-muted">This show has no seasons listed in Sonarr.</p>';
+        return;
+    }
+    const rows = seasons.map(s => {
+        const isSpecial = s.seasonNumber === 0;
+        const label = isSpecial ? 'Specials' : `Season ${s.seasonNumber}`;
+        const hasFiles = (s.episodeFileIds || []).length > 0;
+        const selectable = hasFiles && !isSpecial;
+        const completion = s.episodeCount > 0
+            ? `${s.episodeFileCount}/${s.episodeCount} eps`
+            : `${s.episodeFileCount} eps`;
+        return `
+        <tr${isSpecial ? ' class="text-muted"' : ''}>
+            <td>
+                <div class="form-check">
+                    <input class="form-check-input sm-season-cb" type="checkbox"
+                           id="sm-s-${s.seasonNumber}" value="${s.seasonNumber}"
+                           data-files="${(s.episodeFileIds || []).length}"
+                           ${selectable ? '' : 'disabled'}
+                           onchange="updateSeasonSelection()">
+                    <label class="form-check-label" for="sm-s-${s.seasonNumber}">
+                        <strong>${escHtml(label)}</strong>
+                    </label>
+                </div>
+            </td>
+            <td class="text-center">${completion}</td>
+            <td class="text-end"><strong>${fmtGB(s.sizeGB)}</strong></td>
+            <td class="text-center">
+                ${s.monitored ? '<span class="badge bg-success">Monitored</span>' : '<span class="badge bg-secondary">Unmonitored</span>'}
+            </td>
+        </tr>`;
+    }).join('');
+
+    const totalGB = data.totalSizeGB || 0;
+    document.getElementById('sm-body').innerHTML = `
+        <p class="text-muted small mb-2">
+            Select older seasons to delete their files from disk. Total on disk:
+            <strong>${fmtGB(totalGB)}</strong>.
+            Specials and seasons with no files cannot be deleted.
+        </p>
+        <div class="d-flex gap-2 mb-2">
+            <button class="btn btn-sm btn-outline-secondary" onclick="smSelectAll(true)">Select all with files</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="smSelectAll(false)">Clear</button>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Season</th>
+                        <th class="text-center">Episodes</th>
+                        <th class="text-end">Size</th>
+                        <th class="text-center">Status</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+        <div class="alert alert-warning small mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            Deleting removes episode files from disk. The show itself stays in Sonarr so future episodes can still be tracked.
+        </div>
+    `;
+}
+
+function smSelectAll(check) {
+    document.querySelectorAll('.sm-season-cb').forEach(cb => {
+        if (!cb.disabled) cb.checked = check;
+    });
+    updateSeasonSelection();
+}
+
+function updateSeasonSelection() {
+    const selected = Array.from(document.querySelectorAll('.sm-season-cb:checked'));
+    const btn = document.getElementById('sm-delete-btn');
+    btn.disabled = selected.length === 0;
+    const totalFiles = selected.reduce((sum, cb) => sum + parseInt(cb.dataset.files || '0', 10), 0);
+    btn.innerHTML = selected.length > 0
+        ? `<i class="bi bi-trash me-1"></i>Delete ${selected.length} season(s) — ${totalFiles} files`
+        : '<i class="bi bi-trash me-1"></i>Delete Selected';
+}
+
+async function confirmDeleteSelectedSeasons() {
+    const selected = Array.from(document.querySelectorAll('.sm-season-cb:checked'))
+        .map(cb => parseInt(cb.value, 10));
+    if (selected.length === 0) return;
+
+    const unmonitor = document.getElementById('sm-unmonitor').checked;
+    const seasonList = selected.sort((a, b) => a - b).map(n => n === 0 ? 'Specials' : `Season ${n}`).join(', ');
+    if (!confirm(`Delete files for ${seasonList} of "${smState.title}"?${unmonitor ? '\n\nThese seasons will also be unmonitored in Sonarr.' : ''}\n\nThis cannot be undone.`)) return;
+
+    const btn = document.getElementById('sm-delete-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Deleting…';
+
+    try {
+        const r = await fetch('/api/storage/delete-seasons', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                seriesId: smState.seriesId,
+                seasons: selected,
+                unmonitor,
+            }),
+        });
+        const data = await r.json();
+        if (data.success) {
+            alert((data.message || 'Done.').replace(/\*\*/g, ''));
+            const modal = bootstrap.Modal.getInstance(document.getElementById('seasonManagerModal'));
+            if (modal) modal.hide();
+            // Refresh the analysis panel if it's open
+            const refreshBtn = document.querySelector('#storage-drives-container .card .btn-primary');
+            if (refreshBtn) refreshBtn.click();
+        } else {
+            alert('Delete failed: ' + (data.error || 'Unknown error'));
+            btn.disabled = false;
+            updateSeasonSelection();
+        }
+    } catch (e) {
+        alert('Delete failed: network error');
+        btn.disabled = false;
+        updateSeasonSelection();
+    }
 }
 
 async function deleteStorageItem(type, id, title, btn) {
