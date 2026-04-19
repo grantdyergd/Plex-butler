@@ -871,13 +871,18 @@
             ? `<button class="card-btn card-btn-done" disabled>✓ Owned</button>`
             : `<button class="card-btn card-btn-add" id="addbtn-${prefix}-${i}" onclick="addMedia('${item.mediaType}','${prefix}',${i})">+ Add</button>`;
 
+        const tmdbUrlType = item.mediaType === 'movie' ? 'movie' : 'tv';
+        const infoBtnHtml = item.tmdbId
+            ? `<a class="disc-btn-info" href="https://www.themoviedb.org/${tmdbUrlType}/${item.tmdbId}" target="_blank" rel="noopener" title="View on TMDb">ℹ️</a>`
+            : '';
+
         card.innerHTML = `
             ${posterHtml}
             <div class="card-body">
                 <div class="card-title">${esc(item.title)}</div>
                 <div class="card-meta">${esc(item.year || '')} ${rating}</div>
                 <div class="card-badges">${typeBadge}${inLibBadge}</div>
-                <div class="card-actions">${addBtnHtml}</div>
+                <div class="card-actions">${addBtnHtml}${infoBtnHtml}</div>
             </div>`;
 
         // Store item data on the element
