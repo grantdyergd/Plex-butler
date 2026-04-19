@@ -5168,6 +5168,9 @@ def expiration_sync_new_items():
                 title = s.get('title') or ''
                 added_dt = parse_iso(s.get('added')) or datetime.utcnow()
                 req_email, req_name = _resolve_requester_for_item('show', title, tv_emails, tv_names, mv_emails, mv_names)
+                natural = _add_months(added_dt, policy['months'])
+                grace_floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
+                expires_at = max(natural, grace_floor)
                 rec = MediaExpiration(
                     media_type='show',
                     service_id=sid,
@@ -5179,8 +5182,9 @@ def expiration_sync_new_items():
                     requester_email=req_email,
                     requester_name=req_name,
                     added_at=added_dt,
-                    expires_at=_add_months(added_dt, policy['months']),
+                    expires_at=expires_at,
                     status='active',
+                    notes=('first-sync-grace' if expires_at != natural else None),
                 )
                 db.session.add(rec)
                 added_count += 1
@@ -5203,6 +5207,9 @@ def expiration_sync_new_items():
                 title = m.get('title') or ''
                 added_dt = parse_iso(m.get('added')) or datetime.utcnow()
                 req_email, req_name = _resolve_requester_for_item('movie', title, tv_emails, tv_names, mv_emails, mv_names)
+                natural = _add_months(added_dt, policy['months'])
+                grace_floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
+                expires_at = max(natural, grace_floor)
                 rec = MediaExpiration(
                     media_type='movie',
                     service_id=mid,
@@ -5213,8 +5220,9 @@ def expiration_sync_new_items():
                     requester_email=req_email,
                     requester_name=req_name,
                     added_at=added_dt,
-                    expires_at=_add_months(added_dt, policy['months']),
+                    expires_at=expires_at,
                     status='active',
+                    notes=('first-sync-grace' if expires_at != natural else None),
                 )
                 db.session.add(rec)
                 added_count += 1
