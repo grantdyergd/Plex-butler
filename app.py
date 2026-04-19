@@ -5118,6 +5118,49 @@ def _send_smtp_email(to_email, subject, html_body, log_meta=None):
     return success, err
 
 
+def _is_title_excluded(media_type, title, year=None):
+    """Check whether this title is on the user's exclusion list."""
+    if not title:
+        return False
+    t = title.strip().lower()
+    if media_type == 'show':
+        return Exclusion.query.filter(db.func.lower(Exclusion.title) == t).first() is not None
+    return MovieExclusion.query.filter(db.func.lower(MovieExclusion.title) == t).first() is not None
+
+
+def _add_to_exclusion_list(rec, by_name=None, by_email=None):
+    """Add a MediaExpiration record's title to the appropriate exclusion list."""
+    try:
+        if rec.media_type == 'show':
+            existing = Exclusion.query.filter(db.func.lower(Exclusion.title) == rec.title.lower()).first()
+            if not existing:
+                db.session.add(Exclusion(
+                    title=rec.title,
+                    excluded_by='requester' if by_email else 'admin',
+                    excluded_by_name=by_name or rec.requester_name,
+                    excluded_by_email=by_email or rec.requester_email,
+                    original_requester_name=rec.requester_name,
+                    original_requester_email=rec.requester_email,
+                ))
+        else:
+            existing = MovieExclusion.query.filter(
+                db.func.lower(MovieExclusion.title) == rec.title.lower()
+            ).first()
+            if not existing:
+                db.session.add(MovieExclusion(
+                    title=rec.title,
+                    year=rec.year,
+                    tmdb_id=rec.tmdb_id,
+                    excluded_by='requester' if by_email else 'admin',
+                    excluded_by_name=by_name or rec.requester_name,
+                    excluded_by_email=by_email or rec.requester_email,
+                    original_requester_name=rec.requester_name,
+                    original_requester_email=rec.requester_email,
+                ))
+    except Exception as e:
+        print(f"[Exclusion Add] {e}")
+
+
 def _add_months(dt, months):
     """Add N months to a datetime (approximate, calendar-aware enough)."""
     # Simple approach: add 30.44 days per month
@@ -5171,6 +5214,7 @@ def expiration_sync_new_items():
                 natural = _add_months(added_dt, policy['months'])
                 grace_floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
                 expires_at = max(natural, grace_floor)
+                excluded = _is_title_excluded('show', title)
                 rec = MediaExpiration(
                     media_type='show',
                     service_id=sid,
@@ -5183,8 +5227,10 @@ def expiration_sync_new_items():
                     requester_name=req_name,
                     added_at=added_dt,
                     expires_at=expires_at,
-                    status='active',
-                    notes=('first-sync-grace' if expires_at != natural else None),
+                    permanent=excluded,
+                    status='permanent' if excluded else 'active',
+                    notes=('on-exclusion-list' if excluded else
+                           ('first-sync-grace' if expires_at != natural else None)),
                 )
                 db.session.add(rec)
                 added_count += 1
@@ -5210,6 +5256,7 @@ def expiration_sync_new_items():
                 natural = _add_months(added_dt, policy['months'])
                 grace_floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
                 expires_at = max(natural, grace_floor)
+                excluded = _is_title_excluded('movie', title, m.get('year'))
                 rec = MediaExpiration(
                     media_type='movie',
                     service_id=mid,
@@ -5221,8 +5268,10 @@ def expiration_sync_new_items():
                     requester_name=req_name,
                     added_at=added_dt,
                     expires_at=expires_at,
-                    status='active',
-                    notes=('first-sync-grace' if expires_at != natural else None),
+                    permanent=excluded,
+                    status='permanent' if excluded else 'active',
+                    notes=('on-exclusion-list' if excluded else
+                           ('first-sync-grace' if expires_at != natural else None)),
                 )
                 db.session.add(rec)
                 added_count += 1
@@ -5251,6 +5300,13 @@ def expiration_send_warnings():
 
     sent_count = 0
     for rec in candidates:
+        # Respect the exclusion list — promote to permanent and skip
+        if _is_title_excluded(rec.media_type, rec.title, rec.year):
+            rec.permanent = True
+            rec.status = 'permanent'
+            rec.notes = 'on-exclusion-list'
+            db.session.commit()
+            continue
         # Skip if we sent a warning recently (within the past 7 days)
         if rec.last_warning_sent_at and (datetime.utcnow() - rec.last_warning_sent_at).days < 7:
             continue
@@ -5351,6 +5407,13 @@ def expiration_process_due():
 
     deleted = 0
     for rec in due:
+        # Final safety net — exclusion list always wins
+        if _is_title_excluded(rec.media_type, rec.title, rec.year):
+            rec.permanent = True
+            rec.status = 'permanent'
+            rec.notes = 'on-exclusion-list'
+            db.session.commit()
+            continue
         try:
             ok = _delete_via_arr(rec)
             if ok:
@@ -5686,6 +5749,7 @@ def expire_action_submit(token):
         elif action == 'keep':
             rec.permanent = True
             rec.status = 'permanent'
+            _add_to_exclusion_list(rec, by_name=rec.requester_name, by_email=rec.requester_email)
             msg = f'"{rec.title}" will be kept permanently.'
         else:  # delete
             ok = _delete_via_arr(rec)
