@@ -4170,6 +4170,253 @@ def media_disk():
     return jsonify(info)
 
 
+@app.route('/api/storage/drives')
+@login_required
+def storage_drives():
+    """Return unique drives (root folders) from Sonarr+Radarr with capacity info."""
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+
+    drives = {}  # path -> drive info
+
+    def add_root(r, source):
+        path = r.get('path', '').rstrip('/') or '/'
+        free = r.get('freeSpace', 0) or 0
+        total = r.get('totalSpace', 0) or 0
+        if path not in drives:
+            drives[path] = {
+                'path': path,
+                'freeBytes': free,
+                'totalBytes': total,
+                'sources': set(),
+            }
+        # Use the largest reported total/free in case of mismatch
+        drives[path]['freeBytes'] = max(drives[path]['freeBytes'], free)
+        drives[path]['totalBytes'] = max(drives[path]['totalBytes'], total)
+        drives[path]['sources'].add(source)
+
+    if sonarr_url and sonarr_key:
+        try:
+            roots = requests.get(f"{sonarr_url}/api/v3/rootfolder", params={'apikey': sonarr_key}, timeout=8).json()
+            if isinstance(roots, list):
+                for r in roots:
+                    add_root(r, 'sonarr')
+        except Exception as e:
+            print(f"[Storage] Sonarr roots: {e}")
+
+    if radarr_url and radarr_key:
+        try:
+            roots = requests.get(f"{radarr_url}/api/v3/rootfolder", params={'apikey': radarr_key}, timeout=8).json()
+            if isinstance(roots, list):
+                for r in roots:
+                    add_root(r, 'radarr')
+        except Exception as e:
+            print(f"[Storage] Radarr roots: {e}")
+
+    # For each drive, sum used space from Sonarr/Radarr items rooted there
+    series_list = []
+    movies_list = []
+    if sonarr_url and sonarr_key:
+        try:
+            series_list = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json() or []
+        except Exception as e:
+            print(f"[Storage] Sonarr series: {e}")
+    if radarr_url and radarr_key:
+        try:
+            movies_list = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json() or []
+        except Exception as e:
+            print(f"[Storage] Radarr movies: {e}")
+
+    out = []
+    for path, d in drives.items():
+        used_by_lib = 0
+        item_count = 0
+        for s in series_list if isinstance(series_list, list) else []:
+            sp = (s.get('path') or '').rstrip('/')
+            if sp == path or sp.startswith(path + '/'):
+                size = (s.get('statistics') or {}).get('sizeOnDisk', 0) or 0
+                used_by_lib += size
+                item_count += 1
+        for m in movies_list if isinstance(movies_list, list) else []:
+            mp = (m.get('path') or '').rstrip('/')
+            if mp == path or mp.startswith(path + '/'):
+                used_by_lib += m.get('sizeOnDisk', 0) or 0
+                if m.get('hasFile'):
+                    item_count += 1
+        used_total = max(d['totalBytes'] - d['freeBytes'], 0)
+        other_used = max(used_total - used_by_lib, 0)
+        out.append({
+            'path': path,
+            'totalGB': round(d['totalBytes'] / 1024**3, 1),
+            'freeGB': round(d['freeBytes'] / 1024**3, 1),
+            'usedGB': round(used_total / 1024**3, 1),
+            'libraryGB': round(used_by_lib / 1024**3, 1),
+            'otherGB': round(other_used / 1024**3, 1),
+            'percentUsed': round((used_total / d['totalBytes']) * 100, 1) if d['totalBytes'] else 0,
+            'itemCount': item_count,
+            'sources': sorted(list(d['sources'])),
+        })
+
+    out.sort(key=lambda x: -x['percentUsed'])
+    return jsonify({'drives': out})
+
+
+@app.route('/api/storage/analyze')
+@login_required
+def storage_analyze():
+    """Analyze what's on a given drive: largest items + smart recommendations."""
+    path = (request.args.get('path') or '').strip().rstrip('/')
+    if not path:
+        return jsonify({'error': 'Missing path parameter'})
+
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+
+    items = []
+    now = datetime.now()
+    one_year_ago = now - timedelta(days=365)
+    six_mo_ago = now - timedelta(days=180)
+
+    def parse_iso(s):
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace('Z', '+00:00').split('.')[0].replace('+00:00', ''))
+        except Exception:
+            return None
+
+    if sonarr_url and sonarr_key:
+        try:
+            series = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json() or []
+            for s in series if isinstance(series, list) else []:
+                sp = (s.get('path') or '').rstrip('/')
+                if not (sp == path or sp.startswith(path + '/')):
+                    continue
+                size = (s.get('statistics') or {}).get('sizeOnDisk', 0) or 0
+                if size <= 0:
+                    continue
+                stats = s.get('statistics') or {}
+                added = parse_iso(s.get('added'))
+                last_air = parse_iso(s.get('previousAiring'))
+                items.append({
+                    'id': s.get('id'),
+                    'type': 'show',
+                    'title': s.get('title') or '',
+                    'year': s.get('year'),
+                    'sizeBytes': size,
+                    'sizeGB': round(size / 1024**3, 2),
+                    'path': sp,
+                    'status': s.get('status'),  # continuing | ended | upcoming
+                    'episodeFileCount': stats.get('episodeFileCount', 0),
+                    'episodeCount': stats.get('episodeCount', 0),
+                    'avgEpisodeMB': round((size / stats['episodeFileCount']) / 1024**2, 0) if stats.get('episodeFileCount') else 0,
+                    'addedDate': s.get('added', '')[:10] if s.get('added') else '',
+                    'addedDaysAgo': (now - added).days if added else None,
+                    'lastAirDate': s.get('previousAiring', '')[:10] if s.get('previousAiring') else '',
+                    'lastAirDaysAgo': (now - last_air).days if last_air else None,
+                    'monitored': s.get('monitored', False),
+                    'rating': round((s.get('ratings') or {}).get('value', 0), 1),
+                })
+        except Exception as e:
+            print(f"[Storage Analyze] Sonarr: {e}")
+
+    if radarr_url and radarr_key:
+        try:
+            movies = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json() or []
+            for m in movies if isinstance(movies, list) else []:
+                mp = (m.get('path') or '').rstrip('/')
+                if not (mp == path or mp.startswith(path + '/')):
+                    continue
+                size = m.get('sizeOnDisk', 0) or 0
+                if size <= 0:
+                    continue
+                added = parse_iso(m.get('added'))
+                items.append({
+                    'id': m.get('id'),
+                    'type': 'movie',
+                    'title': m.get('title') or '',
+                    'year': m.get('year'),
+                    'sizeBytes': size,
+                    'sizeGB': round(size / 1024**3, 2),
+                    'path': mp,
+                    'status': m.get('status'),  # released | inCinemas | announced
+                    'addedDate': m.get('added', '')[:10] if m.get('added') else '',
+                    'addedDaysAgo': (now - added).days if added else None,
+                    'monitored': m.get('monitored', False),
+                    'rating': round((m.get('ratings') or {}).get('imdb', {}).get('value', 0), 1),
+                    'qualityName': ((m.get('movieFile') or {}).get('quality') or {}).get('quality', {}).get('name', ''),
+                })
+        except Exception as e:
+            print(f"[Storage Analyze] Radarr: {e}")
+
+    items.sort(key=lambda x: -x['sizeBytes'])
+    total_bytes = sum(i['sizeBytes'] for i in items)
+
+    # Build recommendation buckets
+    largest = items[:20]
+
+    ended_or_released_old = [
+        i for i in items
+        if i['sizeGB'] >= 5
+        and ((i['type'] == 'show' and (i.get('status') == 'ended' or (i.get('lastAirDaysAgo') or 0) > 365))
+             or (i['type'] == 'movie' and (i.get('addedDaysAgo') or 0) > 365))
+    ][:20]
+
+    inactive_shows = [
+        i for i in items
+        if i['type'] == 'show'
+        and (i.get('lastAirDaysAgo') or 0) > 180
+        and i.get('status') != 'ended'
+        and i['sizeGB'] >= 3
+    ][:20]
+
+    high_avg = [
+        i for i in items
+        if (i['type'] == 'show' and i.get('avgEpisodeMB', 0) >= 2500)
+           or (i['type'] == 'movie' and i['sizeGB'] >= 15)
+    ][:20]
+
+    old_unused = [
+        i for i in items
+        if (i.get('addedDaysAgo') or 0) > 365
+        and i['sizeGB'] >= 2
+    ][:30]
+
+    # Top-level summary
+    summary = []
+    if largest:
+        top10_gb = sum(i['sizeGB'] for i in items[:10])
+        summary.append(f"📊 Your top 10 largest items use **{top10_gb:.1f} GB** ({(top10_gb*1024**3/total_bytes*100):.0f}% of this drive's library content).")
+    if ended_or_released_old:
+        gb = sum(i['sizeGB'] for i in ended_or_released_old)
+        summary.append(f"🏁 **{len(ended_or_released_old)}** ended/old items totaling **{gb:.1f} GB** could likely be cleaned up.")
+    if inactive_shows:
+        gb = sum(i['sizeGB'] for i in inactive_shows)
+        summary.append(f"💤 **{len(inactive_shows)}** TV shows haven't aired new episodes in 6+ months ({gb:.1f} GB).")
+    if high_avg:
+        gb = sum(i['sizeGB'] for i in high_avg)
+        summary.append(f"📦 **{len(high_avg)}** items have unusually large file sizes ({gb:.1f} GB) — possibly higher quality than needed.")
+    if old_unused:
+        gb = sum(i['sizeGB'] for i in old_unused)
+        summary.append(f"🕰️ **{len(old_unused)}** items were added over a year ago ({gb:.1f} GB) — review for relevance.")
+
+    return jsonify({
+        'path': path,
+        'totalLibraryGB': round(total_bytes / 1024**3, 1),
+        'itemCount': len(items),
+        'summary': summary,
+        'largest': largest,
+        'endedOrOld': ended_or_released_old,
+        'inactiveShows': inactive_shows,
+        'highAverage': high_avg,
+        'oldUnused': old_unused,
+    })
+
+
 @app.route('/api/media/sonarr-search')
 @login_required
 def media_sonarr_search():

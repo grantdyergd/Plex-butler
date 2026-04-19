@@ -20,6 +20,11 @@
             <i class="bi bi-film me-2"></i>Movies
         </button>
     </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="storage-tab" data-bs-toggle="tab" data-bs-target="#storage-pane" type="button" role="tab" onclick="loadStorageDrives()">
+            <i class="bi bi-hdd-stack me-2"></i>Storage
+        </button>
+    </li>
 </ul>
 
 <div class="tab-content" id="mediaTabContent">
@@ -474,6 +479,24 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <div class="tab-pane fade" id="storage-pane" role="tabpanel">
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <h5 class="mb-1"><i class="bi bi-hdd-stack me-2"></i>Drive Storage Overview</h5>
+                        <p class="text-muted small mb-0">See where your space is going and find what's safe to clean up.</p>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" onclick="loadStorageDrives()">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div id="storage-drives-container" class="row g-3"></div>
+        <div id="storage-analyze-section" class="mt-4" style="display:none;"></div>
     </div>
 </div>
 
@@ -1527,6 +1550,245 @@ function formatAIResponse(text) {
         .replace(/\n/g, '<br>')
         .replace(/^/, '<p>')
         .replace(/$/, '</p>');
+}
+
+// ==================== STORAGE TAB ====================
+let storageDrivesCache = null;
+
+function escHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Safely encode a value for use as an inline-handler argument inside a
+// double-quoted HTML attribute. JSON.stringify produces a valid JS string
+// literal; HTML-escaping makes it safe inside the attribute. Result must
+// be inserted *unquoted* in the JS call: onclick="foo(${jsArg(x)})"
+function jsArg(v) {
+    return escHtml(JSON.stringify(v == null ? '' : v));
+}
+
+function fmtGB(gb) {
+    if (gb == null) return '—';
+    if (gb >= 1024) return (gb / 1024).toFixed(2) + ' TB';
+    return gb.toFixed(1) + ' GB';
+}
+
+async function loadStorageDrives() {
+    const container = document.getElementById('storage-drives-container');
+    const analyzeSection = document.getElementById('storage-analyze-section');
+    analyzeSection.style.display = 'none';
+    analyzeSection.innerHTML = '';
+    container.innerHTML = '<div class="col-12 text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading drives…</div>';
+
+    try {
+        const r = await fetch('/api/storage/drives');
+        const data = await r.json();
+        storageDrivesCache = data.drives || [];
+
+        if (storageDrivesCache.length === 0) {
+            container.innerHTML = '<div class="col-12"><div class="alert alert-info">No drives detected. Make sure Sonarr or Radarr is configured in Settings.</div></div>';
+            return;
+        }
+
+        container.innerHTML = storageDrivesCache.map(renderDriveCard).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="col-12"><div class="alert alert-danger">Failed to load drive information.</div></div>';
+    }
+}
+
+function renderDriveCard(drive) {
+    const pct = drive.percentUsed || 0;
+    let barClass = 'bg-success';
+    if (pct >= 90) barClass = 'bg-danger';
+    else if (pct >= 75) barClass = 'bg-warning';
+
+    const sourceBadges = (drive.sources || []).map(s =>
+        `<span class="badge bg-secondary me-1">${escHtml(s)}</span>`
+    ).join('');
+
+    const otherNote = drive.otherGB > 0
+        ? `<div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>${fmtGB(drive.otherGB)} used by other content (not tracked by Sonarr/Radarr)</div>`
+        : '';
+
+    return `
+    <div class="col-md-6 col-lg-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div class="text-truncate flex-grow-1 me-2">
+                        <strong title="${escHtml(drive.path)}"><i class="bi bi-hdd me-1"></i>${escHtml(drive.path)}</strong>
+                    </div>
+                    <div>${sourceBadges}</div>
+                </div>
+                <div class="progress mb-2" style="height: 18px;">
+                    <div class="progress-bar ${barClass}" role="progressbar"
+                         style="width: ${pct}%" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100">
+                        ${pct.toFixed(1)}%
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between small">
+                    <span><strong>${fmtGB(drive.usedGB)}</strong> used</span>
+                    <span class="${drive.freeGB < 50 ? 'text-danger' : 'text-success'}">
+                        <strong>${fmtGB(drive.freeGB)}</strong> free
+                    </span>
+                    <span class="text-muted">of ${fmtGB(drive.totalGB)}</span>
+                </div>
+                <div class="small text-muted mt-1">
+                    <i class="bi bi-collection me-1"></i>${drive.itemCount} items · ${fmtGB(drive.libraryGB)} tracked
+                </div>
+                ${otherNote}
+                <button class="btn btn-primary btn-sm w-100 mt-3" onclick="analyzeDrive(${jsArg(drive.path)}, this)">
+                    <i class="bi bi-search me-1"></i>Analyze This Drive
+                </button>
+            </div>
+        </div>
+    </div>`;
+}
+
+async function analyzeDrive(path, btn) {
+    const section = document.getElementById('storage-analyze-section');
+    btn.disabled = true;
+    const origText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Analyzing…';
+    section.style.display = '';
+    section.innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Crunching numbers…</div>';
+    section.scrollIntoView({behavior: 'smooth', block: 'start'});
+
+    try {
+        const r = await fetch(`/api/storage/analyze?path=${encodeURIComponent(path)}`);
+        const data = await r.json();
+        if (data.error) {
+            section.innerHTML = `<div class="alert alert-danger">${escHtml(data.error)}</div>`;
+            return;
+        }
+        section.innerHTML = renderAnalysis(data);
+    } catch(e) {
+        section.innerHTML = '<div class="alert alert-danger">Analysis failed. Please try again.</div>';
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+    }
+}
+
+function renderAnalysis(data) {
+    const summaryHtml = (data.summary || []).map(s =>
+        `<li>${s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')}</li>`
+    ).join('');
+
+    const sections = [
+        ['🔥 Top 20 Largest Items', 'largest', data.largest, 'These are the biggest single items on this drive. Removing one of these gives you the most space back per click.'],
+        ['🏁 Ended Shows / Old Movies (≥5 GB)', 'ended', data.endedOrOld, 'Shows that have ended or movies added over a year ago. They\'ll never grow more — safe candidates if you\'ve already watched them.'],
+        ['💤 Inactive Shows (no new episodes in 6+ months)', 'inactive', data.inactiveShows, 'Shows that haven\'t aired anything in 6+ months but are still marked as continuing. Possibly forgotten or on hiatus.'],
+        ['📦 Unusually Large Files', 'high', data.highAverage, 'Items with very high file sizes (4K, remux, etc.). Re-encoding or downgrading quality could free significant space.'],
+        ['🕰️ Old Additions (>1 year)', 'old', data.oldUnused, 'Items added more than a year ago. Worth reviewing — your tastes may have changed.'],
+    ];
+
+    const tabsNav = sections.map(([label, key], i) =>
+        `<li class="nav-item"><button class="nav-link ${i === 0 ? 'active' : ''}" data-bs-toggle="tab" data-bs-target="#stab-${key}">${label} <span class="badge bg-secondary ms-1">${(sections[i][2] || []).length}</span></button></li>`
+    ).join('');
+
+    const tabsBody = sections.map(([label, key, items, blurb], i) => `
+        <div class="tab-pane fade ${i === 0 ? 'show active' : ''}" id="stab-${key}">
+            <p class="text-muted small mt-3 mb-2">${blurb}</p>
+            ${renderItemTable(items)}
+        </div>
+    `).join('');
+
+    return `
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-clipboard-data me-2"></i>Analysis: <code>${escHtml(data.path)}</code></h5>
+            <div class="small text-muted mt-1">${data.itemCount} items · ${fmtGB(data.totalLibraryGB)} of tracked library content</div>
+        </div>
+        <div class="card-body">
+            ${summaryHtml ? `<div class="alert alert-info mb-3"><strong>📋 Summary:</strong><ul class="mb-0 mt-2">${summaryHtml}</ul></div>` : ''}
+            <ul class="nav nav-tabs flex-wrap" role="tablist">${tabsNav}</ul>
+            <div class="tab-content">${tabsBody}</div>
+        </div>
+    </div>`;
+}
+
+function renderItemTable(items) {
+    if (!items || items.length === 0) {
+        return '<p class="text-muted small">Nothing to flag here. 👍</p>';
+    }
+    const rows = items.map(item => {
+        const typeIcon = item.type === 'show' ? '📺' : '🎬';
+        const ageText = item.addedDaysAgo != null
+            ? (item.addedDaysAgo > 730 ? `${(item.addedDaysAgo/365).toFixed(1)}y ago` : `${item.addedDaysAgo}d ago`)
+            : '—';
+        const statusBadge = item.status
+            ? `<span class="badge ${item.status === 'ended' ? 'bg-secondary' : (item.status === 'continuing' ? 'bg-success' : 'bg-info')}">${escHtml(item.status)}</span>`
+            : '';
+        const extra = item.type === 'show'
+            ? `${item.episodeFileCount || 0} eps · avg ${item.avgEpisodeMB || 0} MB/ep`
+            : (item.qualityName ? `Quality: ${escHtml(item.qualityName)}` : '');
+
+        return `
+        <tr>
+            <td>${typeIcon} <strong>${escHtml(item.title)}</strong> ${item.year ? `<span class="text-muted">(${item.year})</span>` : ''}<br>
+                <span class="small text-muted">${extra}</span></td>
+            <td class="text-end"><strong>${fmtGB(item.sizeGB)}</strong></td>
+            <td>${statusBadge}</td>
+            <td class="small text-muted">${ageText}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteStorageItem(${jsArg(item.type)}, ${item.id}, ${jsArg(item.title)}, this)">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    return `
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th class="text-end">Size</th>
+                    <th>Status</th>
+                    <th>Added</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    </div>`;
+}
+
+async function deleteStorageItem(type, id, title, btn) {
+    if (!confirm(`Delete "${title}" and remove all files from disk? This cannot be undone.`)) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    try {
+        const r = await fetch('/api/media-chat/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: type === 'show' ? 'delete_show' : 'delete_movie',
+                item: { id, title }
+            })
+        });
+        const data = await r.json();
+        if (data.success) {
+            const row = btn.closest('tr');
+            row.style.transition = 'opacity 0.4s';
+            row.style.opacity = '0';
+            setTimeout(() => row.remove(), 400);
+        } else {
+            alert('Delete failed: ' + (data.error || data.message || 'Unknown error'));
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-trash"></i>';
+        }
+    } catch(e) {
+        alert('Delete failed: network error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-trash"></i>';
+    }
 }
 </script>
 {% endblock %}
