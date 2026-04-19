@@ -5175,6 +5175,36 @@ def _resolve_requester_for_item(media_type, title, tv_requesters_email, tv_reque
     return (movie_requesters_email.get(title_lc), movie_requesters_name.get(title_lc))
 
 
+def expiration_reconcile_with_exclusions():
+    """Make the global exclusion lists the single source of truth for `permanent`."""
+    policy = get_expiration_policy()
+    excl_shows = {e.title.lower() for e in Exclusion.query.all()}
+    excl_movies = {e.title.lower() for e in MovieExclusion.query.all()}
+    promoted = demoted = 0
+    for rec in MediaExpiration.query.filter(MediaExpiration.status != 'deleted').all():
+        title_lc = (rec.title or '').lower()
+        is_excluded = (title_lc in excl_shows) if rec.media_type == 'show' else (title_lc in excl_movies)
+        if is_excluded and not rec.permanent:
+            rec.permanent = True
+            rec.status = 'permanent'
+            rec.notes = 'on-exclusion-list'
+            promoted += 1
+        elif (not is_excluded) and rec.permanent:
+            # Removed from exclusion list — bring back into rotation with a fresh grace window
+            rec.permanent = False
+            rec.status = 'active'
+            rec.notes = None
+            floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
+            rec.expires_at = max(_add_months(rec.added_at or datetime.utcnow(), policy['months']), floor)
+            demoted += 1
+    if promoted or demoted:
+        try:
+            db.session.commit()
+            print(f"[Expiration Reconcile] Promoted {promoted} / Demoted {demoted}")
+        except Exception:
+            db.session.rollback()
+
+
 def expiration_sync_new_items():
     """Discover new Sonarr/Radarr items and register expiration records for them."""
     policy = get_expiration_policy()
@@ -5546,6 +5576,7 @@ def daily_expiration_job():
             if (result.rowcount or 0) == 0:
                 return  # another worker is handling this run
             print("[Daily Expiration Job] Running...")
+            expiration_reconcile_with_exclusions()
             expiration_sync_new_items()
             expiration_send_warnings()
             expiration_process_due()
@@ -5681,10 +5712,21 @@ def expirations_admin_action(eid):
     elif action == 'permanent':
         rec.permanent = True
         rec.status = 'permanent'
+        # Mirror into the global exclusion list — single source of truth
+        _add_to_exclusion_list(rec, by_name=current_user.username if current_user.is_authenticated else 'admin')
     elif action == 'reset':
+        # Also remove from exclusion list so it's truly back in rotation
+        if rec.media_type == 'show':
+            ex = Exclusion.query.filter(db.func.lower(Exclusion.title) == rec.title.lower()).first()
+            if ex: db.session.delete(ex)
+        else:
+            ex = MovieExclusion.query.filter(db.func.lower(MovieExclusion.title) == rec.title.lower()).first()
+            if ex: db.session.delete(ex)
         rec.permanent = False
         rec.status = 'active'
-        rec.expires_at = _add_months(rec.added_at or datetime.utcnow(), policy['months'])
+        rec.notes = None
+        floor = datetime.utcnow() + timedelta(days=policy['warn_days'] + policy['grace_days'] + 1)
+        rec.expires_at = max(_add_months(rec.added_at or datetime.utcnow(), policy['months']), floor)
     elif action == 'delete-now':
         ok = _delete_via_arr(rec)
         if not ok:
