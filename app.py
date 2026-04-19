@@ -144,6 +144,50 @@ class RequesterReviewToken(db.Model):
     is_used = db.Column(db.Boolean, default=False)
 
 
+class MediaExpiration(db.Model):
+    """Tracks expiration date for each media item; auto-deletion target."""
+    id = db.Column(db.Integer, primary_key=True)
+    media_type = db.Column(db.String(10), nullable=False)  # 'show' | 'movie'
+    service_id = db.Column(db.Integer, nullable=False)     # Sonarr series id or Radarr movie id
+    tmdb_id = db.Column(db.Integer, nullable=True, index=True)
+    tvdb_id = db.Column(db.Integer, nullable=True, index=True)
+    imdb_id = db.Column(db.String(20), nullable=True)
+    title = db.Column(db.String(500), nullable=False)
+    year = db.Column(db.Integer, nullable=True)
+    requester_email = db.Column(db.String(200), nullable=True)
+    requester_name = db.Column(db.String(200), nullable=True)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    last_warning_sent_at = db.Column(db.DateTime, nullable=True)
+    warning_count = db.Column(db.Integer, default=0)
+    permanent = db.Column(db.Boolean, default=False)         # never auto-delete
+    extension_count = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='active', index=True)  # active|extended|permanent|deleted|missing
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (db.UniqueConstraint('media_type', 'service_id', name='uq_expiration_type_id'),)
+
+
+class ExpirationActionToken(db.Model):
+    """One-time token sent in warning email; lets requester decide what to do."""
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    expiration_id = db.Column(db.Integer, db.ForeignKey('media_expiration.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    action_taken = db.Column(db.String(20), nullable=True)   # extend|keep|delete
+
+
+class OmbiIntroEmailLog(db.Model):
+    """Tracks Ombi requesters we've already sent the intro/rules email to."""
+    id = db.Column(db.Integer, primary_key=True)
+    requester_email = db.Column(db.String(200), unique=True, nullable=False, index=True)
+    requester_name = db.Column(db.String(200), nullable=True)
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class ScanCache(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     scan_type = db.Column(db.String(20), nullable=False)  # 'tv' or 'movie'
@@ -4991,6 +5035,663 @@ def media_plex_watchlist_add():
     except Exception as e:
         print(f"[Plex Watchlist Add] {e}")
         return jsonify({'success': False, 'error': 'Could not add to Plex watchlist. Check your Plex token.'})
+
+
+# ============================================================
+# MEDIA EXPIRATION SYSTEM
+# ============================================================
+
+EXPIRATION_DEFAULTS = {
+    'EXPIRATION_ENABLED': 'false',
+    'EXPIRATION_MONTHS': '6',
+    'EXPIRATION_WARN_DAYS_BEFORE': '14',
+    'EXPIRATION_GRACE_DAYS': '7',
+    'EXPIRATION_EXTEND_MONTHS': '6',
+    'EXPIRATION_INTRO_EMAIL_ENABLED': 'true',
+    'EXPIRATION_LAST_RUN_AT': '',
+}
+
+
+def get_expiration_policy():
+    return {
+        'enabled': get_setting('EXPIRATION_ENABLED', 'false').lower() == 'true',
+        'months': int(get_setting('EXPIRATION_MONTHS', '6') or '6'),
+        'warn_days': int(get_setting('EXPIRATION_WARN_DAYS_BEFORE', '14') or '14'),
+        'grace_days': int(get_setting('EXPIRATION_GRACE_DAYS', '7') or '7'),
+        'extend_months': int(get_setting('EXPIRATION_EXTEND_MONTHS', '6') or '6'),
+        'intro_email_enabled': get_setting('EXPIRATION_INTRO_EMAIL_ENABLED', 'true').lower() == 'true',
+    }
+
+
+def _base_url_for_email():
+    custom_domain = get_setting('CUSTOM_DOMAIN', '').strip()
+    if custom_domain:
+        host = custom_domain.replace('https://', '').replace('http://', '').rstrip('/')
+        return f"https://{host}"
+    try:
+        return request.host_url.rstrip('/')
+    except Exception:
+        return 'http://localhost:5000'
+
+
+def _send_smtp_email(to_email, subject, html_body, log_meta=None):
+    """Send a single HTML email via configured SMTP. Logs to EmailHistory."""
+    smtp_host = get_setting('SMTP_HOST')
+    smtp_port = int(get_setting('SMTP_PORT', '587') or '587')
+    smtp_user = get_setting('SMTP_USER')
+    smtp_password = get_setting('SMTP_PASSWORD') or os.environ.get('SMTP_PASSWORD', '')
+    smtp_from = get_setting('SMTP_FROM') or smtp_user
+    if not (smtp_host and smtp_user and smtp_password and to_email):
+        return False, 'SMTP not configured or missing recipient'
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = smtp_from
+        msg['To'] = to_email
+        msg.attach(MIMEText(html_body, 'html'))
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        success, err = True, None
+    except Exception as e:
+        success, err = False, str(e)
+
+    try:
+        meta = log_meta or {}
+        db.session.add(EmailHistory(
+            media_type=meta.get('media_type', 'system'),
+            media_title=meta.get('media_title', subject[:200]),
+            action_type=meta.get('action_type', 'expiration'),
+            recipient_name=meta.get('recipient_name'),
+            recipient_email=to_email,
+            subject=subject,
+            body_html=html_body,
+            sent_at=datetime.utcnow(),
+            was_successful=success,
+            error_message=err,
+        ))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+    return success, err
+
+
+def _add_months(dt, months):
+    """Add N months to a datetime (approximate, calendar-aware enough)."""
+    # Simple approach: add 30.44 days per month
+    return dt + timedelta(days=int(round(months * 30.44)))
+
+
+def _resolve_requester_for_item(media_type, title, tv_requesters_email, tv_requesters_name,
+                                  movie_requesters_email, movie_requesters_name):
+    title_lc = (title or '').strip().lower()
+    if media_type == 'show':
+        return (tv_requesters_email.get(title_lc), tv_requesters_name.get(title_lc))
+    return (movie_requesters_email.get(title_lc), movie_requesters_name.get(title_lc))
+
+
+def expiration_sync_new_items():
+    """Discover new Sonarr/Radarr items and register expiration records for them."""
+    policy = get_expiration_policy()
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+
+    tv_emails = get_ombi_tv_requesters() or {}
+    tv_names = get_ombi_tv_requester_names() or {}
+    mv_emails = get_ombi_movie_requesters() or {}
+    mv_names = get_ombi_movie_requester_names() or {}
+
+    added_count = 0
+
+    def parse_iso(s):
+        if not s: return None
+        try:
+            return datetime.fromisoformat(s.replace('Z', '+00:00').split('.')[0].replace('+00:00', ''))
+        except Exception:
+            return None
+
+    if sonarr_url and sonarr_key:
+        try:
+            series = requests.get(f"{sonarr_url}/api/v3/series",
+                                  params={'apikey': sonarr_key}, timeout=20).json() or []
+            for s in series if isinstance(series, list) else []:
+                sid = s.get('id')
+                if not sid:
+                    continue
+                exists = MediaExpiration.query.filter_by(media_type='show', service_id=sid).first()
+                if exists:
+                    continue
+                title = s.get('title') or ''
+                added_dt = parse_iso(s.get('added')) or datetime.utcnow()
+                req_email, req_name = _resolve_requester_for_item('show', title, tv_emails, tv_names, mv_emails, mv_names)
+                rec = MediaExpiration(
+                    media_type='show',
+                    service_id=sid,
+                    tvdb_id=s.get('tvdbId'),
+                    tmdb_id=s.get('tmdbId'),
+                    imdb_id=s.get('imdbId'),
+                    title=title,
+                    year=s.get('year'),
+                    requester_email=req_email,
+                    requester_name=req_name,
+                    added_at=added_dt,
+                    expires_at=_add_months(added_dt, policy['months']),
+                    status='active',
+                )
+                db.session.add(rec)
+                added_count += 1
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[Expiration Sync] Sonarr error: {e}")
+
+    if radarr_url and radarr_key:
+        try:
+            movies = requests.get(f"{radarr_url}/api/v3/movie",
+                                  params={'apikey': radarr_key}, timeout=20).json() or []
+            for m in movies if isinstance(movies, list) else []:
+                mid = m.get('id')
+                if not mid:
+                    continue
+                exists = MediaExpiration.query.filter_by(media_type='movie', service_id=mid).first()
+                if exists:
+                    continue
+                title = m.get('title') or ''
+                added_dt = parse_iso(m.get('added')) or datetime.utcnow()
+                req_email, req_name = _resolve_requester_for_item('movie', title, tv_emails, tv_names, mv_emails, mv_names)
+                rec = MediaExpiration(
+                    media_type='movie',
+                    service_id=mid,
+                    tmdb_id=m.get('tmdbId'),
+                    imdb_id=m.get('imdbId'),
+                    title=title,
+                    year=m.get('year'),
+                    requester_email=req_email,
+                    requester_name=req_name,
+                    added_at=added_dt,
+                    expires_at=_add_months(added_dt, policy['months']),
+                    status='active',
+                )
+                db.session.add(rec)
+                added_count += 1
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"[Expiration Sync] Radarr error: {e}")
+
+    print(f"[Expiration Sync] Added {added_count} new expiration records")
+    return added_count
+
+
+def expiration_send_warnings():
+    """Send warning emails for items expiring within warn_days_before."""
+    policy = get_expiration_policy()
+    if not policy['enabled']:
+        return 0
+
+    threshold = datetime.utcnow() + timedelta(days=policy['warn_days'])
+    candidates = MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended']),
+        MediaExpiration.permanent == False,
+        MediaExpiration.expires_at <= threshold,
+        MediaExpiration.expires_at > datetime.utcnow() - timedelta(days=policy['grace_days']),
+    ).all()
+
+    sent_count = 0
+    for rec in candidates:
+        # Skip if we sent a warning recently (within the past 7 days)
+        if rec.last_warning_sent_at and (datetime.utcnow() - rec.last_warning_sent_at).days < 7:
+            continue
+        if not rec.requester_email:
+            continue
+
+        try:
+            token_str = secrets.token_urlsafe(32)
+            tok = ExpirationActionToken(
+                token=token_str,
+                expiration_id=rec.id,
+                expires_at=datetime.utcnow() + timedelta(days=30),
+            )
+            db.session.add(tok)
+            db.session.commit()
+
+            base_url = _base_url_for_email()
+            action_url = f"{base_url}/expire/{token_str}"
+            days_left = max(0, (rec.expires_at - datetime.utcnow()).days)
+            type_label = 'TV Show' if rec.media_type == 'show' else 'Movie'
+            year_str = f" ({rec.year})" if rec.year else ''
+            extend_months = policy['extend_months']
+
+            subject = f"Action needed: \"{rec.title}\" expires in {days_left} days"
+            html = f"""
+            <html><body style="font-family: Inter, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+                <h2 style="color: #d97706;">⚠️ Your media is about to expire</h2>
+                <p>Hi{(' ' + rec.requester_name) if rec.requester_name else ''},</p>
+                <p>The {type_label.lower()} <strong>{rec.title}{year_str}</strong> that you requested
+                   is scheduled for automatic deletion in <strong>{days_left} day(s)</strong>.</p>
+                <p>To keep it in the library, please choose an option:</p>
+                <p style="margin: 25px 0;">
+                    <a href="{action_url}" style="background: #4f46e5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600;">Manage This Item</a>
+                </p>
+                <ul style="color: #555;">
+                    <li><strong>Extend</strong> — keep it for another {extend_months} month(s)</li>
+                    <li><strong>Keep permanently</strong> — never auto-delete</li>
+                    <li><strong>Delete now</strong> — free up space immediately</li>
+                </ul>
+                <p style="color: #c00;">If no action is taken, this item will be automatically deleted shortly after the expiration date.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+                <p style="color: #999; font-size: 12px;">This link expires in 30 days. Sent by your media server's automated cleanup system.</p>
+            </body></html>
+            """
+            ok, err = _send_smtp_email(rec.requester_email, subject, html, log_meta={
+                'media_type': rec.media_type,
+                'media_title': rec.title,
+                'action_type': 'expiration_warning',
+                'recipient_name': rec.requester_name,
+            })
+            if ok:
+                rec.last_warning_sent_at = datetime.utcnow()
+                rec.warning_count = (rec.warning_count or 0) + 1
+                db.session.commit()
+                sent_count += 1
+            else:
+                print(f"[Expiration Warn] Email to {rec.requester_email} failed: {err}")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[Expiration Warn] Error for {rec.title}: {e}")
+
+    print(f"[Expiration Warn] Sent {sent_count} warning emails")
+    return sent_count
+
+
+def _delete_via_arr(rec):
+    """Actually remove the item from Sonarr/Radarr with file deletion."""
+    if rec.media_type == 'show':
+        url = get_setting('SONARR_URL', '').strip().rstrip('/')
+        key = get_setting('SONARR_API_KEY', '').strip()
+        if not url or not key:
+            return False
+        r = requests.delete(f"{url}/api/v3/series/{rec.service_id}",
+                            params={'apikey': key, 'deleteFiles': 'true'}, timeout=30)
+        return r.ok
+    else:
+        url = get_setting('RADARR_URL', '').strip().rstrip('/')
+        key = get_setting('RADARR_API_KEY', '').strip()
+        if not url or not key:
+            return False
+        r = requests.delete(f"{url}/api/v3/movie/{rec.service_id}",
+                            params={'apikey': key, 'deleteFiles': 'true'}, timeout=30)
+        return r.ok
+
+
+def expiration_process_due():
+    """Auto-delete items past their expiration + grace period."""
+    policy = get_expiration_policy()
+    if not policy['enabled']:
+        return 0
+
+    cutoff = datetime.utcnow() - timedelta(days=policy['grace_days'])
+    due = MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended']),
+        MediaExpiration.permanent == False,
+        MediaExpiration.expires_at <= cutoff,
+    ).all()
+
+    deleted = 0
+    for rec in due:
+        try:
+            ok = _delete_via_arr(rec)
+            if ok:
+                rec.status = 'deleted'
+                rec.deleted_at = datetime.utcnow()
+                # Also record in DeletionHistory if model present
+                try:
+                    db.session.add(DeletionHistory(
+                        media_type=rec.media_type,
+                        title=rec.title,
+                        deleted_at=datetime.utcnow(),
+                        deleted_by='auto-expiration',
+                        size_bytes=0,
+                    ))
+                except Exception:
+                    pass
+                db.session.commit()
+                deleted += 1
+                print(f"[Expiration Delete] Auto-deleted {rec.media_type} {rec.title}")
+            else:
+                print(f"[Expiration Delete] Failed to delete {rec.title}")
+        except Exception as e:
+            db.session.rollback()
+            print(f"[Expiration Delete] Error for {rec.title}: {e}")
+
+    return deleted
+
+
+def expiration_send_intro_emails():
+    """Email new Ombi requesters about the auto-expiration policy."""
+    policy = get_expiration_policy()
+    if not policy['intro_email_enabled']:
+        return 0
+
+    ombi_url = get_setting('OMBI_URL', '').strip().rstrip('/')
+    ombi_key = get_setting('OMBI_API_KEY', '').strip()
+    if not ombi_url or not ombi_key:
+        return 0
+
+    seen_emails = {}  # email -> name
+    for endpoint in ('tv', 'movie'):
+        try:
+            r = requests.get(f"{ombi_url}/api/v1/Request/{endpoint}",
+                             headers={'ApiKey': ombi_key}, timeout=20)
+            if not r.ok:
+                continue
+            for req in r.json() or []:
+                ru = req.get('requestedUser') or {}
+                email = (ru.get('email') or ru.get('Email') or '').strip().lower()
+                name = ru.get('userName') or ru.get('alias') or ''
+                if not email and req.get('childRequests'):
+                    for c in req['childRequests']:
+                        cu = c.get('requestedUser') or {}
+                        email = (cu.get('email') or cu.get('Email') or '').strip().lower()
+                        name = cu.get('userName') or cu.get('alias') or ''
+                        if email:
+                            break
+                if email and email not in seen_emails:
+                    seen_emails[email] = name
+        except Exception as e:
+            print(f"[Intro Emails] Ombi {endpoint} error: {e}")
+
+    sent = 0
+    for email, name in seen_emails.items():
+        already = OmbiIntroEmailLog.query.filter_by(requester_email=email).first()
+        if already:
+            continue
+
+        months = policy['months']
+        warn = policy['warn_days']
+        subject = "Welcome — how the media library handles expirations"
+        html = f"""
+        <html><body style="font-family: Inter, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+            <h2>Thanks for your media request{(', ' + name) if name else ''}!</h2>
+            <p>Just a heads-up about how our library handles content over time:</p>
+            <ul style="line-height: 1.8;">
+                <li>Each show or movie has an <strong>expiration date</strong> set to about <strong>{months} months</strong> after it was added.</li>
+                <li>About <strong>{warn} days</strong> before that date, we'll email you with a link to:
+                    <ul>
+                        <li>Extend the item another {policy['extend_months']} months</li>
+                        <li>Keep it permanently</li>
+                        <li>Delete it immediately to free up space</li>
+                    </ul>
+                </li>
+                <li>If you don't respond, the content is <strong>automatically removed</strong> shortly after its expiration date.</li>
+            </ul>
+            <p>This keeps the library lean and ensures everyone has the storage they need. Just keep an eye on these emails when they arrive!</p>
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+            <p style="color: #999; font-size: 12px;">This is a one-time notification. You won't receive it again.</p>
+        </body></html>
+        """
+        ok, err = _send_smtp_email(email, subject, html, log_meta={
+            'media_type': 'system',
+            'media_title': 'Welcome / Expiration Policy',
+            'action_type': 'intro_email',
+            'recipient_name': name,
+        })
+        if ok:
+            try:
+                db.session.add(OmbiIntroEmailLog(requester_email=email, requester_name=name))
+                db.session.commit()
+                sent += 1
+            except Exception:
+                db.session.rollback()
+
+    print(f"[Intro Emails] Sent {sent} new intro emails")
+    return sent
+
+
+def daily_expiration_job():
+    """Master job; safe across multiple workers via atomic compare-and-set."""
+    with app.app_context():
+        try:
+            now_iso = datetime.utcnow().isoformat()
+            threshold_iso = (datetime.utcnow() - timedelta(hours=23)).isoformat()
+            # Ensure row exists so the UPDATE can match
+            if not Settings.query.filter_by(key='EXPIRATION_LAST_RUN_AT').first():
+                try:
+                    db.session.add(Settings(key='EXPIRATION_LAST_RUN_AT', value=''))
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+            # Atomic claim: only one worker wins per ~daily window
+            result = db.session.execute(db.text("""
+                UPDATE settings SET value = :now
+                WHERE key = 'EXPIRATION_LAST_RUN_AT'
+                  AND (value IS NULL OR value = '' OR value < :threshold)
+            """), {'now': now_iso, 'threshold': threshold_iso})
+            db.session.commit()
+            if (result.rowcount or 0) == 0:
+                return  # another worker is handling this run
+            print("[Daily Expiration Job] Running...")
+            expiration_sync_new_items()
+            expiration_send_warnings()
+            expiration_process_due()
+            expiration_send_intro_emails()
+            print("[Daily Expiration Job] Done.")
+        except Exception as e:
+            print(f"[Daily Expiration Job] Fatal error: {e}")
+
+
+# Initialize policy defaults & start scheduler
+def _init_expiration_system():
+    with app.app_context():
+        for k, v in EXPIRATION_DEFAULTS.items():
+            existing = Settings.query.filter_by(key=k).first()
+            if not existing:
+                db.session.add(Settings(key=k, value=v))
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        sched = BackgroundScheduler(daemon=True)
+        sched.add_job(daily_expiration_job, 'interval', hours=1, id='daily_expiration', max_instances=1, coalesce=True)
+        sched.start()
+        print("[Scheduler] Daily expiration job scheduled (hourly check, runs ~daily)")
+    except Exception as e:
+        print(f"[Scheduler] Failed to start: {e}")
+
+
+_init_expiration_system()
+
+
+# ===== Admin & action routes =====
+
+@app.route('/expirations')
+@login_required
+def expirations_page():
+    policy = get_expiration_policy()
+    counts = {
+        'active': MediaExpiration.query.filter_by(status='active').count(),
+        'extended': MediaExpiration.query.filter_by(status='extended').count(),
+        'permanent': MediaExpiration.query.filter_by(permanent=True).count(),
+        'deleted': MediaExpiration.query.filter_by(status='deleted').count(),
+    }
+    return render_template('expirations.html', policy=policy, counts=counts,
+                           last_run=get_setting('EXPIRATION_LAST_RUN_AT', ''))
+
+
+@app.route('/api/expirations/list')
+@login_required
+def expirations_list_api():
+    status = request.args.get('status', 'active')
+    sort = request.args.get('sort', 'expires_asc')
+    q = MediaExpiration.query
+    if status == 'permanent':
+        q = q.filter_by(permanent=True)
+    elif status == 'all':
+        pass
+    else:
+        q = q.filter_by(status=status)
+    if sort == 'expires_asc':
+        q = q.order_by(MediaExpiration.expires_at.asc())
+    elif sort == 'expires_desc':
+        q = q.order_by(MediaExpiration.expires_at.desc())
+    elif sort == 'added_desc':
+        q = q.order_by(MediaExpiration.added_at.desc())
+    items = q.limit(500).all()
+
+    now = datetime.utcnow()
+    return jsonify({
+        'items': [{
+            'id': i.id,
+            'media_type': i.media_type,
+            'service_id': i.service_id,
+            'title': i.title,
+            'year': i.year,
+            'requester_name': i.requester_name,
+            'requester_email': i.requester_email,
+            'added_at': i.added_at.isoformat() if i.added_at else None,
+            'expires_at': i.expires_at.isoformat() if i.expires_at else None,
+            'days_left': (i.expires_at - now).days if i.expires_at else None,
+            'status': i.status,
+            'permanent': i.permanent,
+            'warning_count': i.warning_count or 0,
+            'last_warning_sent_at': i.last_warning_sent_at.isoformat() if i.last_warning_sent_at else None,
+            'extension_count': i.extension_count or 0,
+        } for i in items]
+    })
+
+
+@app.route('/api/expirations/save-policy', methods=['POST'])
+@login_required
+def expirations_save_policy():
+    data = request.get_json() or {}
+    mapping = {
+        'EXPIRATION_ENABLED': 'true' if data.get('enabled') else 'false',
+        'EXPIRATION_MONTHS': str(int(data.get('months', 6))),
+        'EXPIRATION_WARN_DAYS_BEFORE': str(int(data.get('warn_days', 14))),
+        'EXPIRATION_GRACE_DAYS': str(int(data.get('grace_days', 7))),
+        'EXPIRATION_EXTEND_MONTHS': str(int(data.get('extend_months', 6))),
+        'EXPIRATION_INTRO_EMAIL_ENABLED': 'true' if data.get('intro_email_enabled') else 'false',
+    }
+    for k, v in mapping.items():
+        set_setting(k, v)
+    return jsonify({'success': True, 'policy': get_expiration_policy()})
+
+
+@app.route('/api/expirations/scan-now', methods=['POST'])
+@login_required
+def expirations_scan_now():
+    """Manually trigger the daily job."""
+    set_setting('EXPIRATION_LAST_RUN_AT', '')  # Force re-run
+    threading.Thread(target=daily_expiration_job, daemon=True).start()
+    return jsonify({'success': True, 'message': 'Scan started in background.'})
+
+
+@app.route('/api/expirations/<int:eid>/action', methods=['POST'])
+@login_required
+def expirations_admin_action(eid):
+    rec = MediaExpiration.query.get_or_404(eid)
+    data = request.get_json() or {}
+    action = data.get('action')
+    policy = get_expiration_policy()
+
+    if action == 'extend':
+        months = int(data.get('months', policy['extend_months']))
+        rec.expires_at = _add_months(datetime.utcnow(), months)
+        rec.status = 'extended'
+        rec.extension_count = (rec.extension_count or 0) + 1
+        rec.last_warning_sent_at = None
+    elif action == 'permanent':
+        rec.permanent = True
+        rec.status = 'permanent'
+    elif action == 'reset':
+        rec.permanent = False
+        rec.status = 'active'
+        rec.expires_at = _add_months(rec.added_at or datetime.utcnow(), policy['months'])
+    elif action == 'delete-now':
+        ok = _delete_via_arr(rec)
+        if not ok:
+            return jsonify({'success': False, 'error': 'Sonarr/Radarr delete failed'}), 502
+        rec.status = 'deleted'
+        rec.deleted_at = datetime.utcnow()
+    elif action == 'forget':
+        db.session.delete(rec)
+    else:
+        return jsonify({'success': False, 'error': 'Unknown action'}), 400
+
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/expire/<token>')
+def expire_action_page(token):
+    tok = ExpirationActionToken.query.filter_by(token=token).first()
+    if not tok:
+        return render_template('expire_error.html', message='This link is invalid.'), 404
+    if tok.used_at:
+        return render_template('expire_error.html', message=f'You already chose to {tok.action_taken} this item.')
+    if tok.expires_at < datetime.utcnow():
+        return render_template('expire_error.html', message='This link has expired. Please contact your library admin.')
+    rec = MediaExpiration.query.get(tok.expiration_id)
+    if not rec:
+        return render_template('expire_error.html', message='This item is no longer tracked.'), 404
+    return render_template('expire_action.html', rec=rec, token=token,
+                           extend_months=get_expiration_policy()['extend_months'])
+
+
+@app.route('/expire/<token>/action', methods=['POST'])
+def expire_action_submit(token):
+    action = (request.get_json() or {}).get('action')
+    if action not in ('extend', 'keep', 'delete'):
+        return jsonify({'success': False, 'error': 'Unknown action'}), 400
+
+    # Atomically claim the token so concurrent requests can't double-act
+    now = datetime.utcnow()
+    claim = db.session.execute(db.text("""
+        UPDATE expiration_action_token
+        SET used_at = :now, action_taken = :action
+        WHERE token = :token AND used_at IS NULL AND expires_at > :now
+    """), {'now': now, 'action': action, 'token': token})
+    if (claim.rowcount or 0) == 0:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': 'Token invalid, expired, or already used'}), 400
+
+    tok = ExpirationActionToken.query.filter_by(token=token).first()
+    rec = MediaExpiration.query.get(tok.expiration_id) if tok else None
+    if not rec:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': 'Item no longer tracked'}), 404
+
+    policy = get_expiration_policy()
+    try:
+        if action == 'extend':
+            rec.expires_at = _add_months(now, policy['extend_months'])
+            rec.status = 'extended'
+            rec.extension_count = (rec.extension_count or 0) + 1
+            msg = f'Kept "{rec.title}" for another {policy["extend_months"]} months.'
+        elif action == 'keep':
+            rec.permanent = True
+            rec.status = 'permanent'
+            msg = f'"{rec.title}" will be kept permanently.'
+        else:  # delete
+            ok = _delete_via_arr(rec)
+            if not ok:
+                db.session.rollback()  # releases the token claim too
+                return jsonify({'success': False, 'error': 'Could not delete from server'}), 502
+            rec.status = 'deleted'
+            rec.deleted_at = now
+            msg = f'"{rec.title}" has been deleted.'
+        db.session.commit()
+        return jsonify({'success': True, 'message': msg})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 if __name__ == '__main__':

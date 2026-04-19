@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Expirations - Media Cleanup{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+            <h2><i class="bi bi-hourglass-split me-2"></i>Media Expirations</h2>
+            <p class="text-muted mb-0">Automatically expire media after a set period. Requesters get a heads-up by email.</p>
+        </div>
+        <div>
+            <button class="btn btn-outline-primary" onclick="scanNow()" id="scan-btn">
+                <i class="bi bi-arrow-repeat me-1"></i>Run Daily Job Now
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header"><h5 class="mb-0"><i class="bi bi-gear me-2"></i>Expiration Policy</h5></div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <div class="form-check form-switch mt-4">
+                    <input class="form-check-input" type="checkbox" id="pol-enabled" {% if policy.enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="pol-enabled"><strong>Enable auto-expiration</strong></label>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Expire after (months)</label>
+                <input type="number" min="1" max="60" class="form-control" id="pol-months" value="{{ policy.months }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Warn before (days)</label>
+                <input type="number" min="1" max="90" class="form-control" id="pol-warn" value="{{ policy.warn_days }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Grace period after expiry (days)</label>
+                <input type="number" min="0" max="30" class="form-control" id="pol-grace" value="{{ policy.grace_days }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Extend duration (months)</label>
+                <input type="number" min="1" max="60" class="form-control" id="pol-extend" value="{{ policy.extend_months }}">
+            </div>
+            <div class="col-md-3">
+                <div class="form-check form-switch mt-4">
+                    <input class="form-check-input" type="checkbox" id="pol-intro" {% if policy.intro_email_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="pol-intro">Send intro email to new Ombi requesters</label>
+                </div>
+            </div>
+            <div class="col-md-6 d-flex align-items-end justify-content-end">
+                <button class="btn btn-primary" onclick="savePolicy()"><i class="bi bi-save me-1"></i>Save Policy</button>
+            </div>
+        </div>
+        {% if last_run %}
+        <p class="text-muted small mt-3 mb-0">Last automated run: <span id="last-run">{{ last_run }}</span></p>
+        {% endif %}
+        <div id="policy-msg" class="alert alert-success mt-3 d-none"></div>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><button class="nav-link active" data-status="active" onclick="loadList(this)">Active <span class="badge bg-secondary">{{ counts.active }}</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-status="extended" onclick="loadList(this)">Extended <span class="badge bg-secondary">{{ counts.extended }}</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-status="permanent" onclick="loadList(this)">Permanent <span class="badge bg-secondary">{{ counts.permanent }}</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-status="deleted" onclick="loadList(this)">Deleted <span class="badge bg-secondary">{{ counts.deleted }}</span></button></li>
+    <li class="nav-item"><button class="nav-link" data-status="all" onclick="loadList(this)">All</button></li>
+</ul>
+
+<div class="card">
+    <div class="card-body">
+        <div id="list-loading" class="text-center text-muted py-4 d-none"><div class="spinner-border" role="status"></div></div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Type</th><th>Title</th><th>Requester</th>
+                        <th>Added</th><th>Expires</th><th>Days Left</th>
+                        <th>Status</th><th>Warnings</th><th></th>
+                    </tr>
+                </thead>
+                <tbody id="exp-tbody"><tr><td colspan="9" class="text-center text-muted">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+let currentStatus = 'active';
+
+function escapeHtml(s){return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+async function loadList(btn) {
+    if (btn) {
+        document.querySelectorAll('.nav-link[data-status]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentStatus = btn.dataset.status;
+    }
+    const tbody = document.getElementById('exp-tbody');
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Loading...</td></tr>';
+    const res = await fetch(`/api/expirations/list?status=${currentStatus}`);
+    const data = await res.json();
+    if (!data.items.length) {
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">No items in this category.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = data.items.map(i => {
+        const days = i.days_left;
+        let dayClass = 'text-muted';
+        if (days !== null && days < 0) dayClass = 'text-danger fw-bold';
+        else if (days !== null && days < 14) dayClass = 'text-warning fw-bold';
+        const requester = i.requester_name || i.requester_email || '—';
+        const reqEmail = i.requester_email ? `<br><small class="text-muted">${escapeHtml(i.requester_email)}</small>` : '';
+        const statusBadge = i.permanent
+            ? '<span class="badge bg-success">Permanent</span>'
+            : `<span class="badge bg-${i.status==='active'?'primary':i.status==='extended'?'info':i.status==='deleted'?'danger':'secondary'}">${escapeHtml(i.status)}</span>`;
+        const typeIcon = i.media_type === 'show' ? '<i class="bi bi-tv"></i> Show' : '<i class="bi bi-film"></i> Movie';
+        const titleStr = i.title + (i.year ? ` (${i.year})` : '');
+        return `<tr>
+            <td>${typeIcon}</td>
+            <td><strong>${escapeHtml(titleStr)}</strong></td>
+            <td>${escapeHtml(requester)}${reqEmail}</td>
+            <td><small>${i.added_at ? i.added_at.slice(0,10) : '—'}</small></td>
+            <td><small>${i.expires_at ? i.expires_at.slice(0,10) : '—'}</small></td>
+            <td class="${dayClass}">${days !== null ? (days < 0 ? `${Math.abs(days)} overdue` : `${days}`) : '—'}</td>
+            <td>${statusBadge}</td>
+            <td><small>${i.warning_count} sent</small></td>
+            <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-info" onclick="adminAction(${i.id},'extend')" title="Extend"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button class="btn btn-outline-success" onclick="adminAction(${i.id},'permanent')" title="Keep permanently"><i class="bi bi-shield-check"></i></button>
+                    <button class="btn btn-outline-warning" onclick="adminAction(${i.id},'reset')" title="Reset to default schedule"><i class="bi bi-arrow-counterclockwise"></i></button>
+                    <button class="btn btn-outline-danger" onclick="adminAction(${i.id},'delete-now')" title="Delete now"><i class="bi bi-trash"></i></button>
+                    <button class="btn btn-outline-secondary" onclick="adminAction(${i.id},'forget')" title="Stop tracking"><i class="bi bi-x-circle"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function adminAction(id, action) {
+    const labels = {extend:'Extend',permanent:'Keep permanently',reset:'Reset',['delete-now']:'Delete from server',forget:'Stop tracking'};
+    if (!confirm(`${labels[action]} this item?`)) return;
+    const res = await fetch(`/api/expirations/${id}/action`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({action})
+    });
+    const data = await res.json();
+    if (!data.success) { alert(data.error || 'Action failed'); return; }
+    loadList();
+}
+
+async function savePolicy() {
+    const body = {
+        enabled: document.getElementById('pol-enabled').checked,
+        months: +document.getElementById('pol-months').value,
+        warn_days: +document.getElementById('pol-warn').value,
+        grace_days: +document.getElementById('pol-grace').value,
+        extend_months: +document.getElementById('pol-extend').value,
+        intro_email_enabled: document.getElementById('pol-intro').checked,
+    };
+    const res = await fetch('/api/expirations/save-policy', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    const msg = document.getElementById('policy-msg');
+    msg.textContent = data.success ? 'Policy saved.' : 'Failed to save policy.';
+    msg.classList.remove('d-none');
+    msg.classList.toggle('alert-success', !!data.success);
+    msg.classList.toggle('alert-danger', !data.success);
+    setTimeout(()=>msg.classList.add('d-none'), 3000);
+}
+
+async function scanNow() {
+    const btn = document.getElementById('scan-btn');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running...';
+    try {
+        const res = await fetch('/api/expirations/scan-now', {method:'POST'});
+        const data = await res.json();
+        alert(data.message || 'Started.');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i>Run Daily Job Now';
+        setTimeout(loadList, 5000);
+    }
+}
+
+loadList();
+</script>
+{% endblock %}
