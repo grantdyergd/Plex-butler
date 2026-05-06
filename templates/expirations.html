@@ -78,6 +78,15 @@
                 <input type="email" class="form-control" id="pol-fallback" value="{{ admin_fallback_email }}" placeholder="admin@example.com">
                 <small class="text-muted">Items with no requester email send their warning here so they don't pile up in Needs Attention forever.</small>
             </div>
+            <div class="col-md-12">
+                <label class="form-label">Public URL for "Manage This Item" links</label>
+                <input type="url" class="form-control" id="pol-public-url" value="{{ public_url }}" placeholder="{{ detected_public_url }}">
+                <small class="text-muted">
+                    Used in warning emails so requesters can click through from anywhere. Leave blank to auto-detect
+                    (currently <code>{{ detected_public_url }}</code>). Set this to your custom domain if you have one,
+                    or to the <code>.replit.app</code> URL of your deployment.
+                </small>
+            </div>
             <div class="col-md-12 d-flex align-items-end justify-content-end gap-2">
                 <button class="btn btn-outline-secondary" onclick="recomputeDates()" title="Re-apply current policy to all active items">
                     <i class="bi bi-calculator me-1"></i>Recompute dates
@@ -386,6 +395,7 @@ async function savePolicy() {
         dry_run: document.getElementById('pol-dryrun').checked,
         max_per_run: +document.getElementById('pol-cap').value,
         admin_fallback_email: document.getElementById('pol-fallback').value.trim(),
+        public_url: document.getElementById('pol-public-url').value.trim(),
     };
     const res = await fetch('/api/expirations/save-policy', {
         method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)

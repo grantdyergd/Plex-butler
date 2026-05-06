@@ -5079,6 +5079,7 @@ EXPIRATION_DEFAULTS = {
     'EXPIRATION_DRY_RUN': 'true',                  # safe default: don't actually delete on first install
     'EXPIRATION_MAX_DELETIONS_PER_RUN': '10',      # blast-radius cap
     'EXPIRATION_ADMIN_FALLBACK_EMAIL': '',         # if set, no-requester items warn this address
+    'EXPIRATION_PUBLIC_URL': '',                   # public base URL used in warning emails (auto-detects from REPLIT_DOMAINS if blank)
     'EXPIRATION_LAST_RUN_AT': '',
 }
 
@@ -5225,10 +5226,31 @@ def get_expiration_policy():
 
 
 def _base_url_for_email():
+    """Build the public URL the requester will visit when they click 'Manage This Item'.
+
+    Resolution order (first non-empty wins):
+      1. EXPIRATION_PUBLIC_URL setting (admin override on the Expirations page)
+      2. CUSTOM_DOMAIN setting (legacy)
+      3. REPLIT_DOMAINS env var (auto-set on Replit deploys & dev)
+      4. Flask's request.host_url (works inside a request, but the daily job has no request)
+      5. localhost (last resort — only useful if you're testing locally)
+    """
+    def _normalize(host):
+        host = host.strip().rstrip('/')
+        if host.startswith('http://') or host.startswith('https://'):
+            return host
+        return f"https://{host}"
+
+    explicit = get_setting('EXPIRATION_PUBLIC_URL', '').strip()
+    if explicit:
+        return _normalize(explicit)
     custom_domain = get_setting('CUSTOM_DOMAIN', '').strip()
     if custom_domain:
-        host = custom_domain.replace('https://', '').replace('http://', '').rstrip('/')
-        return f"https://{host}"
+        return _normalize(custom_domain)
+    replit_domains = os.environ.get('REPLIT_DOMAINS', '').strip()
+    if replit_domains:
+        # comma-separated; first one is the canonical domain
+        return _normalize(replit_domains.split(',')[0].strip())
     try:
         return request.host_url.rstrip('/')
     except Exception:
@@ -6025,7 +6047,9 @@ def expirations_page():
                            use_oldest_file_date=(get_setting('EXPIRATION_USE_OLDEST_FILE_DATE', 'false').lower() == 'true'),
                            dry_run=_is_dry_run(),
                            max_per_run=int(get_setting('EXPIRATION_MAX_DELETIONS_PER_RUN', '10') or 10),
-                           admin_fallback_email=get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', ''))
+                           admin_fallback_email=get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', ''),
+                           public_url=get_setting('EXPIRATION_PUBLIC_URL', ''),
+                           detected_public_url=_base_url_for_email())
 
 
 @app.route('/api/expirations/list')
@@ -6109,6 +6133,7 @@ def expirations_save_policy():
         'EXPIRATION_DRY_RUN': 'true' if data.get('dry_run') else 'false',
         'EXPIRATION_MAX_DELETIONS_PER_RUN': str(max(0, int(data.get('max_per_run', 10)))),
         'EXPIRATION_ADMIN_FALLBACK_EMAIL': (data.get('admin_fallback_email') or '').strip(),
+        'EXPIRATION_PUBLIC_URL': (data.get('public_url') or '').strip(),
     }
     for k, v in mapping.items():
         set_setting(k, v)
