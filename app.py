@@ -6140,6 +6140,110 @@ def expirations_save_policy():
     return jsonify({'success': True, 'policy': get_expiration_policy()})
 
 
+@app.route('/api/expirations/send-test-warning', methods=['POST'])
+@login_required
+def expirations_send_test_warning():
+    """Send a real, working warning email to a chosen address against the soonest-expiring active item.
+
+    Useful for verifying SMTP, the public URL setting, and the full /expire/<token> click-through flow.
+    The token is real, so clicking through and choosing an action will actually take effect on the item.
+    """
+    data = request.get_json() or {}
+    to_email = (data.get('email') or '').strip()
+    if not to_email or '@' not in to_email:
+        return jsonify({'success': False, 'error': 'Valid recipient email required'}), 400
+
+    rec = (MediaExpiration.query
+           .filter(MediaExpiration.status.in_(['active', 'extended']),
+                   MediaExpiration.permanent == False)
+           .order_by(MediaExpiration.expires_at.asc())
+           .first())
+    if not rec:
+        return jsonify({'success': False,
+                        'error': 'No active expiration records to test against. Run a scan first.'}), 400
+
+    try:
+        token_str = secrets.token_urlsafe(32)
+        tok = ExpirationActionToken(
+            token=token_str,
+            expiration_id=rec.id,
+            expires_at=datetime.utcnow() + timedelta(days=30),
+        )
+        db.session.add(tok)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'error': f'Could not mint token: {e}'}), 500
+
+    base_url = _base_url_for_email()
+    action_url = f"{base_url}/expire/{token_str}"
+    policy = get_expiration_policy()
+    days_left = max(0, (rec.expires_at - datetime.utcnow()).days)
+    type_label = 'TV Show' if rec.media_type == 'show' else 'Movie'
+    year_str = f" ({rec.year})" if rec.year else ''
+    extend_months = policy['extend_months']
+    expires_str = _format_date_in_tz(rec.expires_at)
+    tz_name = get_setting('DISPLAY_TIMEZONE', 'UTC') or 'UTC'
+
+    subject = f"[TEST EMAIL] Action needed: \"{rec.title}\" expires in {days_left} days"
+    test_banner = (
+        '<p style="color:#0d6efd;font-size:13px;background:#cfe2ff;padding:10px;border-radius:4px;">'
+        '<strong>This is a manual TEST email</strong> sent from the admin so you can verify the '
+        '"Manage This Item" button works. The token is real &mdash; clicking through and choosing an '
+        "action will actually take effect on the item shown below.</p>"
+    )
+    dry_run_note = (
+        '<p style="color:#0d6efd;font-size:12px;background:#cfe2ff;padding:8px;border-radius:4px;">'
+        '<strong>TEST MODE:</strong> The system is currently in dry-run mode. The link still works '
+        'for managing this item, but the automatic deletion step will be skipped &mdash; nothing '
+        'will actually be removed yet.</p>'
+        if _is_dry_run() else ''
+    )
+    html = f"""
+    <html><body style="font-family: Inter, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #333;">
+        {test_banner}
+        <h2 style="color: #d97706;">⚠️ Your media is about to expire</h2>
+        <p>Hi,</p>
+        <p>The {type_label.lower()} <strong>{rec.title}{year_str}</strong> that you requested
+           is scheduled for automatic deletion in <strong>{days_left} day(s)</strong>
+           ({expires_str} {tz_name}).</p>
+        <p>To keep it in the library, please choose an option:</p>
+        <p style="margin: 25px 0;">
+            <a href="{action_url}" style="background: #4f46e5; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600;">Manage This Item</a>
+        </p>
+        <ul style="color: #555;">
+            <li><strong>Extend</strong> &mdash; keep it for another {extend_months} month(s)</li>
+            <li><strong>Keep permanently</strong> &mdash; never auto-delete</li>
+            <li><strong>Delete now</strong> &mdash; free up space immediately</li>
+        </ul>
+        <p style="color: #c00;">If no action is taken, this item will be automatically deleted shortly after the expiration date.</p>
+        {dry_run_note}
+        <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+        <p style="color: #999; font-size: 12px;">
+            Test target item id: {rec.id} &middot; Token expires in 30 days &middot;
+            Link host: <code>{base_url}</code>
+        </p>
+    </body></html>
+    """
+
+    ok, err = _send_smtp_email(to_email, subject, html, log_meta={
+        'media_type': rec.media_type,
+        'media_title': rec.title,
+        'action_type': 'expiration_warning_test',
+        'recipient_name': 'Test Recipient',
+    })
+    if ok:
+        return jsonify({
+            'success': True,
+            'item': f"{rec.title}{year_str}",
+            'item_id': rec.id,
+            'action_url': action_url,
+            'base_url': base_url,
+            'recipient': to_email,
+        })
+    return jsonify({'success': False, 'error': err or 'SMTP send failed'}), 500
+
+
 @app.route('/api/expirations/scan-now', methods=['POST'])
 @login_required
 def expirations_scan_now():

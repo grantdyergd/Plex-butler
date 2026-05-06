@@ -87,6 +87,24 @@
                     or to the <code>.replit.app</code> URL of your deployment.
                 </small>
             </div>
+            <div class="col-md-12">
+                <hr class="my-2">
+                <label class="form-label">
+                    <i class="bi bi-envelope-paper me-1"></i>Send a test warning email
+                </label>
+                <div class="input-group">
+                    <input type="email" class="form-control" id="test-email" placeholder="you@example.com">
+                    <button class="btn btn-outline-primary" onclick="sendTestWarning()">
+                        <i class="bi bi-send me-1"></i>Send Test
+                    </button>
+                </div>
+                <small class="text-muted">
+                    Sends a real warning email (with a real, clickable token) for the soonest-expiring item.
+                    Clicking the button in the email will land on this site and actually act on the item, so
+                    treat the action you take as live.
+                </small>
+                <div id="test-email-msg" class="small mt-2"></div>
+            </div>
             <div class="col-md-12 d-flex align-items-end justify-content-end gap-2">
                 <button class="btn btn-outline-secondary" onclick="recomputeDates()" title="Re-apply current policy to all active items">
                     <i class="bi bi-calculator me-1"></i>Recompute dates
@@ -407,6 +425,38 @@ async function savePolicy() {
     msg.classList.toggle('alert-success', !!data.success);
     msg.classList.toggle('alert-danger', !data.success);
     setTimeout(()=>msg.classList.add('d-none'), 3000);
+}
+
+async function sendTestWarning() {
+    const emailEl = document.getElementById('test-email');
+    const msg = document.getElementById('test-email-msg');
+    const email = emailEl.value.trim();
+    if (!email || !email.includes('@')) {
+        msg.className = 'small mt-2 text-danger';
+        msg.textContent = 'Please enter a valid email address.';
+        return;
+    }
+    msg.className = 'small mt-2 text-muted';
+    msg.textContent = 'Sending...';
+    try {
+        const res = await fetch('/api/expirations/send-test-warning', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({email})
+        });
+        const data = await res.json();
+        if (data.success) {
+            msg.className = 'small mt-2 text-success';
+            msg.innerHTML = `Sent to <strong>${data.recipient}</strong> for item <em>${data.item}</em>. ` +
+                            `Link host: <code>${data.base_url}</code>.`;
+        } else {
+            msg.className = 'small mt-2 text-danger';
+            msg.textContent = data.error || 'Send failed.';
+        }
+    } catch (e) {
+        msg.className = 'small mt-2 text-danger';
+        msg.textContent = 'Network error: ' + e.message;
+    }
 }
 
 async function recomputeDates() {
