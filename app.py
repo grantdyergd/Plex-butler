@@ -6402,9 +6402,51 @@ def watchlist_sync_job():
             print(f'[WatchlistSync] Unhandled error: {e}')
 
 
+def _backfill_series_status():
+    """One-time background backfill: populate series_status for existing show records that lack it."""
+    import threading, time
+    def _run():
+        time.sleep(10)  # wait for app to finish starting
+        try:
+            with app.app_context():
+                missing = MediaExpiration.query.filter(
+                    MediaExpiration.media_type == 'show',
+                    MediaExpiration.series_status.is_(None),
+                ).count()
+                if not missing:
+                    return
+                print(f"[SeriesStatus Backfill] {missing} show records need series_status — querying Sonarr...")
+                url = get_setting('SONARR_URL', '').strip().rstrip('/')
+                key = get_setting('SONARR_API_KEY', '').strip()
+                if not url or not key:
+                    print("[SeriesStatus Backfill] Sonarr not configured; skipping.")
+                    return
+                r = requests.get(f"{url}/api/v3/series", params={'apikey': key}, timeout=30)
+                if not r.ok:
+                    print(f"[SeriesStatus Backfill] Sonarr returned {r.status_code}; skipping.")
+                    return
+                series_list = r.json() or []
+                status_map = {s['id']: s.get('status', '').lower() for s in series_list}
+                updated = 0
+                for rec in MediaExpiration.query.filter(
+                    MediaExpiration.media_type == 'show',
+                    MediaExpiration.series_status.is_(None),
+                ).all():
+                    st = status_map.get(rec.service_id)
+                    if st:
+                        rec.series_status = st
+                        updated += 1
+                db.session.commit()
+                print(f"[SeriesStatus Backfill] Updated {updated} records.")
+        except Exception as e:
+            print(f"[SeriesStatus Backfill] Error: {e}")
+    threading.Thread(target=_run, daemon=True).start()
+
+
 # Initialize policy defaults & start scheduler
 def _init_expiration_system():
     _run_expiration_migrations()
+    _backfill_series_status()
     with app.app_context():
         for k, v in EXPIRATION_DEFAULTS.items():
             existing = Settings.query.filter_by(key=k).first()
@@ -6484,7 +6526,14 @@ def expirations_list_api():
                 MediaExpiration.permanent == False,
                 MediaExpiration.requester_email.is_(None),
             ),
-        ))
+        )).filter(
+            # Continuing shows are protected — they don't need attention
+            db.or_(
+                MediaExpiration.media_type != 'show',
+                MediaExpiration.series_status.is_(None),
+                MediaExpiration.series_status.in_(['ended', 'deleted']),
+            )
+        )
     elif status == 'all':
         pass
     else:
