@@ -232,6 +232,21 @@ class WatchHistoryCache(db.Model):
 WATCH_HISTORY_CACHE_DAYS = 7
 
 
+class WatchlistSyncItem(db.Model):
+    """Tracks every Plex watchlist item we have seen and attempted to sync to Sonarr/Radarr."""
+    id = db.Column(db.Integer, primary_key=True)
+    plex_guid = db.Column(db.String(300), unique=True, nullable=False, index=True)
+    plex_rating_key = db.Column(db.String(100), nullable=True)
+    title = db.Column(db.String(500), nullable=False)
+    year = db.Column(db.Integer, nullable=True)
+    media_type = db.Column(db.String(10), nullable=False)  # movie | show
+    first_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+    processed_at = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(30), nullable=True, index=True)  # added|already_exists|failed|skipped
+    status_message = db.Column(db.Text, nullable=True)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
@@ -5992,6 +6007,257 @@ def daily_expiration_job(force=False, lock_already_held=False):
         _expiration_run_lock.release()
 
 
+# ===== Watchlist Sync =====
+
+_watchlist_sync_lock = threading.Lock()
+
+
+def _pick_quality_profile(profiles):
+    """Return the best quality profile id: prefer 1080p, then 720p, then first."""
+    if not profiles:
+        return 1
+    for keyword in ('1080', '720'):
+        for p in profiles:
+            if keyword in (p.get('name') or ''):
+                return p['id']
+    return profiles[0]['id']
+
+
+def _best_root_folder(roots):
+    """Return the root folder path with the most free space."""
+    if not roots:
+        return None
+    best = max(roots, key=lambda r: r.get('freeSpace', 0))
+    return best.get('path')
+
+
+def _sync_watchlist_item(item_row):
+    """Try to add a WatchlistSyncItem to Sonarr or Radarr. Returns (status, message)."""
+    title = item_row.title
+    year = item_row.year
+    media_type = item_row.media_type  # 'movie' | 'show'
+
+    if media_type == 'show':
+        sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+        sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+        if not sonarr_url or not sonarr_key:
+            return 'skipped', 'Sonarr not configured'
+        try:
+            roots = requests.get(f"{sonarr_url}/api/v3/rootfolder",
+                                 params={'apikey': sonarr_key}, timeout=10).json()
+            root_path = _best_root_folder(roots) or '/tv'
+            profiles = requests.get(f"{sonarr_url}/api/v3/qualityprofile",
+                                    params={'apikey': sonarr_key}, timeout=10).json()
+            qual_id = _pick_quality_profile(profiles)
+            search_terms = [f'"{title}"']
+            if year:
+                search_terms.append(f'"{title} {year}"')
+            lookup_item = None
+            for term in search_terms:
+                lk = requests.get(f"{sonarr_url}/api/v3/series/lookup",
+                                  params={'term': term, 'apikey': sonarr_key}, timeout=12).json()
+                if isinstance(lk, list) and lk:
+                    title_lower = title.lower()
+                    for candidate in lk:
+                        if (candidate.get('title') or '').lower() == title_lower:
+                            if not year or candidate.get('year') == year:
+                                lookup_item = candidate
+                                break
+                    if not lookup_item:
+                        lookup_item = lk[0]
+                    break
+            if not lookup_item:
+                return 'failed', f'Could not find "{title}" in Sonarr lookup'
+            tvdb_id = lookup_item.get('tvdbId', 0)
+            if not tvdb_id:
+                return 'failed', f'No TVDB ID found for "{title}"'
+            payload = {
+                'title': lookup_item.get('title', title),
+                'tvdbId': tvdb_id,
+                'qualityProfileId': qual_id,
+                'titleSlug': lookup_item.get('titleSlug', title.lower().replace(' ', '-')),
+                'images': lookup_item.get('images', []),
+                'seasons': lookup_item.get('seasons', []),
+                'rootFolderPath': root_path,
+                'monitored': True,
+                'addOptions': {'searchForMissingEpisodes': True},
+            }
+            r = requests.post(f"{sonarr_url}/api/v3/series",
+                              params={'apikey': sonarr_key}, json=payload, timeout=15)
+            if r.ok:
+                return 'added', f'Added to Sonarr (profile id {qual_id}, folder {root_path})'
+            err_data = r.json()
+            err_msg = (err_data[0].get('errorMessage', '') if isinstance(err_data, list) and err_data
+                       else str(err_data))
+            if 'already' in err_msg.lower() or 'exists' in err_msg.lower():
+                return 'already_exists', 'Already in Sonarr'
+            return 'failed', f'Sonarr error: {err_msg}'
+        except Exception as e:
+            return 'failed', f'Exception: {e}'
+
+    elif media_type == 'movie':
+        radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+        radarr_key = get_setting('RADARR_API_KEY', '').strip()
+        if not radarr_url or not radarr_key:
+            return 'skipped', 'Radarr not configured'
+        try:
+            roots = requests.get(f"{radarr_url}/api/v3/rootfolder",
+                                 params={'apikey': radarr_key}, timeout=10).json()
+            root_path = _best_root_folder(roots) or '/movies'
+            profiles = requests.get(f"{radarr_url}/api/v3/qualityprofile",
+                                    params={'apikey': radarr_key}, timeout=10).json()
+            qual_id = _pick_quality_profile(profiles)
+            search_term = f'"{title}"'
+            lk = requests.get(f"{radarr_url}/api/v3/movie/lookup",
+                              params={'term': search_term, 'apikey': radarr_key}, timeout=12).json()
+            lookup_item = None
+            if isinstance(lk, list) and lk:
+                title_lower = title.lower()
+                for candidate in lk:
+                    if (candidate.get('title') or '').lower() == title_lower:
+                        if not year or candidate.get('year') == year:
+                            lookup_item = candidate
+                            break
+                if not lookup_item:
+                    lookup_item = lk[0]
+            if not lookup_item:
+                return 'failed', f'Could not find "{title}" in Radarr lookup'
+            tmdb_id = lookup_item.get('tmdbId', 0)
+            if not tmdb_id:
+                return 'failed', f'No TMDB ID found for "{title}"'
+            payload = {
+                'title': lookup_item.get('title', title),
+                'tmdbId': tmdb_id,
+                'qualityProfileId': qual_id,
+                'titleSlug': lookup_item.get('titleSlug', title.lower().replace(' ', '-')),
+                'images': lookup_item.get('images', []),
+                'year': lookup_item.get('year', year or 0),
+                'rootFolderPath': root_path,
+                'monitored': True,
+                'addOptions': {'searchForMovie': True},
+            }
+            r = requests.post(f"{radarr_url}/api/v3/movie",
+                              params={'apikey': radarr_key}, json=payload, timeout=15)
+            if r.ok:
+                return 'added', f'Added to Radarr (profile id {qual_id}, folder {root_path})'
+            err_data = r.json()
+            err_msg = (err_data[0].get('errorMessage', '') if isinstance(err_data, list) and err_data
+                       else str(err_data))
+            if 'already' in err_msg.lower() or 'exists' in err_msg.lower():
+                return 'already_exists', 'Already in Radarr'
+            return 'failed', f'Radarr error: {err_msg}'
+        except Exception as e:
+            return 'failed', f'Exception: {e}'
+
+    return 'skipped', f'Unknown media type: {media_type}'
+
+
+def watchlist_sync_job():
+    """Background job: poll Plex watchlist and auto-add new items to Sonarr/Radarr."""
+    with app.app_context():
+        try:
+            enabled = get_setting('WATCHLIST_SYNC_ENABLED', 'false').lower() == 'true'
+            if not enabled:
+                return
+
+            plex_token = get_setting('PLEX_TOKEN', '').strip()
+            if not plex_token:
+                print('[WatchlistSync] Skipping — Plex token not configured')
+                return
+
+            plex_headers = {
+                'X-Plex-Token': plex_token,
+                'X-Plex-Client-Identifier': 'media-scrubber-watchlist-sync',
+                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Version': '1.0',
+                'Accept': 'application/json',
+            }
+
+            all_items = []
+            offset = 0
+            page_size = 50
+            total_size = None
+            while True:
+                resp = requests.get(
+                    "https://discover.provider.plex.tv/library/sections/watchlist/all",
+                    params={'X-Plex-Container-Start': offset, 'X-Plex-Container-Size': page_size},
+                    headers=plex_headers,
+                    timeout=20,
+                )
+                if resp.status_code != 200:
+                    print(f'[WatchlistSync] Plex returned {resp.status_code}, aborting')
+                    return
+                container = resp.json().get('MediaContainer', {})
+                items = container.get('Metadata', [])
+                if total_size is None:
+                    total_size = container.get('totalSize', len(items))
+                if not items:
+                    break
+                all_items.extend(items)
+                offset += len(items)
+                if offset >= total_size:
+                    break
+
+            now = datetime.utcnow()
+            added_count = 0
+            new_count = 0
+            fail_count = 0
+
+            for item in all_items:
+                guid = item.get('guid', '')
+                if not guid:
+                    continue
+                rating_key = item.get('ratingKey', '')
+                title = item.get('title', 'Unknown')
+                raw_year = item.get('year')
+                try:
+                    year = int(raw_year) if raw_year else None
+                except (ValueError, TypeError):
+                    year = None
+                plex_type = item.get('type', '')  # 'movie' or 'show'
+                if plex_type not in ('movie', 'show'):
+                    continue
+
+                row = WatchlistSyncItem.query.filter_by(plex_guid=guid).first()
+                if row:
+                    row.last_seen_at = now
+                    if row.status in ('added', 'already_exists', 'skipped'):
+                        db.session.commit()
+                        continue
+                else:
+                    row = WatchlistSyncItem(
+                        plex_guid=guid,
+                        plex_rating_key=rating_key,
+                        title=title,
+                        year=year,
+                        media_type=plex_type,
+                        first_seen_at=now,
+                        last_seen_at=now,
+                    )
+                    db.session.add(row)
+                    db.session.flush()
+                    new_count += 1
+
+                status, msg = _sync_watchlist_item(row)
+                row.status = status
+                row.status_message = msg
+                row.processed_at = now
+                db.session.commit()
+
+                print(f'[WatchlistSync] {title} ({year}) [{plex_type}] → {status}: {msg}')
+                if status == 'added':
+                    added_count += 1
+                elif status == 'failed':
+                    fail_count += 1
+
+            set_setting('WATCHLIST_SYNC_LAST_RUN', now.strftime('%Y-%m-%d %H:%M:%S UTC'))
+            set_setting('WATCHLIST_SYNC_LAST_SUMMARY',
+                        f'{len(all_items)} on watchlist, {new_count} new, {added_count} added, {fail_count} failed')
+            print(f'[WatchlistSync] Done — {len(all_items)} items, {new_count} new, {added_count} added, {fail_count} failed')
+        except Exception as e:
+            print(f'[WatchlistSync] Unhandled error: {e}')
+
+
 # Initialize policy defaults & start scheduler
 def _init_expiration_system():
     _run_expiration_migrations()
@@ -6009,8 +6275,10 @@ def _init_expiration_system():
         from apscheduler.schedulers.background import BackgroundScheduler
         sched = BackgroundScheduler(daemon=True)
         sched.add_job(daily_expiration_job, 'interval', hours=1, id='daily_expiration', max_instances=1, coalesce=True)
+        sched.add_job(watchlist_sync_job, 'interval', minutes=5, id='watchlist_sync', max_instances=1, coalesce=True)
         sched.start()
         print("[Scheduler] Daily expiration job scheduled (hourly check, runs ~daily)")
+        print("[Scheduler] Watchlist sync job scheduled (every 5 minutes)")
     except Exception as e:
         print(f"[Scheduler] Failed to start: {e}")
 
@@ -6558,6 +6826,84 @@ def expire_action_submit(token):
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ===== Watchlist Sync routes =====
+
+@app.route('/watchlist-sync')
+@login_required
+def watchlist_sync_page():
+    enabled = get_setting('WATCHLIST_SYNC_ENABLED', 'false').lower() == 'true'
+    last_run = get_setting('WATCHLIST_SYNC_LAST_RUN', '')
+    last_summary = get_setting('WATCHLIST_SYNC_LAST_SUMMARY', '')
+    recent = (WatchlistSyncItem.query
+              .order_by(WatchlistSyncItem.last_seen_at.desc())
+              .limit(200).all())
+    return render_template('watchlist_sync.html',
+                           enabled=enabled,
+                           last_run=last_run,
+                           last_summary=last_summary,
+                           recent=recent)
+
+
+@app.route('/api/watchlist-sync/toggle', methods=['POST'])
+@login_required
+def watchlist_sync_toggle():
+    data = request.get_json() or {}
+    enabled = bool(data.get('enabled'))
+    set_setting('WATCHLIST_SYNC_ENABLED', 'true' if enabled else 'false')
+    return jsonify({'success': True, 'enabled': enabled})
+
+
+@app.route('/api/watchlist-sync/run-now', methods=['POST'])
+@login_required
+def watchlist_sync_run_now():
+    if not _watchlist_sync_lock.acquire(blocking=False):
+        return jsonify({'success': False, 'error': 'Sync already running'}), 429
+    def _run():
+        try:
+            watchlist_sync_job()
+        finally:
+            _watchlist_sync_lock.release()
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return jsonify({'success': True, 'message': 'Sync started in background'})
+
+
+@app.route('/api/watchlist-sync/status')
+@login_required
+def watchlist_sync_status():
+    return jsonify({
+        'enabled': get_setting('WATCHLIST_SYNC_ENABLED', 'false').lower() == 'true',
+        'last_run': get_setting('WATCHLIST_SYNC_LAST_RUN', ''),
+        'last_summary': get_setting('WATCHLIST_SYNC_LAST_SUMMARY', ''),
+        'running': not _watchlist_sync_lock.acquire(blocking=False) or _watchlist_sync_lock.release() or False,
+        'recent': [
+            {
+                'id': r.id,
+                'title': r.title,
+                'year': r.year,
+                'media_type': r.media_type,
+                'status': r.status,
+                'status_message': r.status_message,
+                'processed_at': r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else None,
+                'first_seen_at': r.first_seen_at.strftime('%Y-%m-%d %H:%M') if r.first_seen_at else None,
+            }
+            for r in WatchlistSyncItem.query.order_by(WatchlistSyncItem.last_seen_at.desc()).limit(200).all()
+        ]
+    })
+
+
+@app.route('/api/watchlist-sync/retry/<int:item_id>', methods=['POST'])
+@login_required
+def watchlist_sync_retry(item_id):
+    row = WatchlistSyncItem.query.get_or_404(item_id)
+    status, msg = _sync_watchlist_item(row)
+    row.status = status
+    row.status_message = msg
+    row.processed_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'success': True, 'status': status, 'message': msg})
 
 
 if __name__ == '__main__':

@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}Watchlist Sync — Media Scrubber{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row g-4">
+
+        <!-- Header -->
+        <div class="col-12">
+            <h2 class="fw-bold mb-0"><i class="bi bi-bookmark-star me-2 text-primary"></i>Watchlist Sync</h2>
+            <p class="text-muted mt-1 mb-0">
+                Automatically adds items from your Plex watchlist to Sonarr (TV) or Radarr (movies) every 5 minutes.
+                Works regardless of which Plex client you use — just add to your watchlist and the download starts.
+            </p>
+        </div>
+
+        <!-- Status & Controls -->
+        <div class="col-md-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title fw-semibold mb-3"><i class="bi bi-toggles me-2"></i>Controls</h5>
+
+                    <div class="d-flex align-items-center gap-3 mb-4">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="sync-enabled" role="switch"
+                                   {% if enabled %}checked{% endif %}
+                                   onchange="toggleSync(this.checked)" style="width:2.5em;height:1.4em;">
+                        </div>
+                        <span id="enabled-label" class="fw-semibold {% if enabled %}text-success{% else %}text-muted{% endif %}">
+                            {% if enabled %}Enabled — syncing every 5 minutes{% else %}Disabled{% endif %}
+                        </span>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="small text-muted mb-1">Last run</div>
+                        <div id="last-run" class="fw-semibold">{{ last_run or 'Never' }}</div>
+                    </div>
+                    <div class="mb-4">
+                        <div class="small text-muted mb-1">Last result</div>
+                        <div id="last-summary" class="small">{{ last_summary or '—' }}</div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" onclick="runNow()" id="run-btn">
+                            <i class="bi bi-play-circle me-1"></i>Sync Now
+                        </button>
+                        <button class="btn btn-outline-secondary" onclick="refreshStatus()">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                        </button>
+                    </div>
+                    <div id="run-msg" class="small mt-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- How it works -->
+        <div class="col-md-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title fw-semibold mb-3"><i class="bi bi-info-circle me-2"></i>How it works</h5>
+                    <ul class="small text-muted mb-0" style="line-height:1.9;">
+                        <li>Every <strong>5 minutes</strong> this app polls your Plex watchlist via Plex's cloud API.</li>
+                        <li>New <strong>TV shows</strong> are looked up and added to <strong>Sonarr</strong> with all seasons monitored and an immediate episode search triggered.</li>
+                        <li>New <strong>movies</strong> are looked up and added to <strong>Radarr</strong> with an immediate download search triggered.</li>
+                        <li>Quality profile: prefers any profile with <strong>1080p</strong> in the name, falls back to 720p, then the first available profile.</li>
+                        <li>Root folder: the folder with the most free space is chosen automatically.</li>
+                        <li>Each item is only processed <strong>once</strong> — once it's marked "added" or "already exists" it won't be retried on future syncs.</li>
+                        <li>Items that <strong>fail</strong> will be retried on the next sync run (or you can retry them manually below).</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Log table -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h5 class="card-title fw-semibold mb-0">
+                            <i class="bi bi-list-check me-2"></i>Watchlist Item Log
+                        </h5>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="text" class="form-control form-control-sm" id="log-search"
+                                   placeholder="Filter by title…" oninput="filterLog()" style="width:200px;">
+                            <select class="form-select form-select-sm" id="log-filter" onchange="filterLog()" style="width:150px;">
+                                <option value="">All statuses</option>
+                                <option value="added">Added</option>
+                                <option value="already_exists">Already exists</option>
+                                <option value="failed">Failed</option>
+                                <option value="skipped">Skipped</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {% if recent %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle" id="log-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Detail</th>
+                                    <th>First seen</th>
+                                    <th>Processed</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in recent %}
+                                <tr data-title="{{ item.title|lower }}" data-status="{{ item.status or '' }}" id="row-{{ item.id }}">
+                                    <td class="fw-semibold">{{ item.title }}{% if item.year %} <span class="text-muted fw-normal">({{ item.year }})</span>{% endif %}</td>
+                                    <td>
+                                        {% if item.media_type == 'movie' %}
+                                        <span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-camera-film me-1"></i>Movie</span>
+                                        {% else %}
+                                        <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-tv me-1"></i>TV Show</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if item.status == 'added' %}
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Added</span>
+                                        {% elif item.status == 'already_exists' %}
+                                        <span class="badge bg-secondary"><i class="bi bi-check me-1"></i>Already exists</span>
+                                        {% elif item.status == 'failed' %}
+                                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>
+                                        {% elif item.status == 'skipped' %}
+                                        <span class="badge bg-warning text-dark"><i class="bi bi-dash-circle me-1"></i>Skipped</span>
+                                        {% else %}
+                                        <span class="badge bg-light text-dark">Pending</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-muted small" style="max-width:300px;">{{ item.status_message or '—' }}</td>
+                                    <td class="text-muted small">{{ item.first_seen_at.strftime('%b %d %H:%M') if item.first_seen_at else '—' }}</td>
+                                    <td class="text-muted small">{{ item.processed_at.strftime('%b %d %H:%M') if item.processed_at else '—' }}</td>
+                                    <td>
+                                        {% if item.status == 'failed' %}
+                                        <button class="btn btn-sm btn-outline-warning py-0 px-2" onclick="retryItem({{ item.id }}, this)">
+                                            <i class="bi bi-arrow-clockwise"></i> Retry
+                                        </button>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-muted text-center py-5">
+                        <i class="bi bi-bookmark-star" style="font-size:2rem;opacity:.4;"></i>
+                        <p class="mt-2 mb-0">No watchlist items seen yet. Enable the sync and items will appear here after the first run.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+async function toggleSync(enabled) {
+    const label = document.getElementById('enabled-label');
+    const res = await fetch('/api/watchlist-sync/toggle', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled})
+    });
+    const data = await res.json();
+    if (data.success) {
+        label.textContent = enabled ? 'Enabled — syncing every 5 minutes' : 'Disabled';
+        label.className = 'fw-semibold ' + (enabled ? 'text-success' : 'text-muted');
+    }
+}
+
+async function runNow() {
+    const btn = document.getElementById('run-btn');
+    const msg = document.getElementById('run-msg');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running…';
+    msg.className = 'small mt-2 text-muted';
+    msg.textContent = 'Sync started — check back in a moment…';
+    const res = await fetch('/api/watchlist-sync/run-now', {method: 'POST'});
+    const data = await res.json();
+    if (!data.success) {
+        msg.className = 'small mt-2 text-danger';
+        msg.textContent = data.error || 'Failed to start sync.';
+    }
+    setTimeout(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-play-circle me-1"></i>Sync Now';
+        refreshStatus();
+    }, 8000);
+}
+
+async function refreshStatus() {
+    const res = await fetch('/api/watchlist-sync/status');
+    const data = await res.json();
+    document.getElementById('last-run').textContent = data.last_run || 'Never';
+    document.getElementById('last-summary').textContent = data.last_summary || '—';
+
+    const tbody = document.querySelector('#log-table tbody');
+    if (!tbody || !data.recent.length) return;
+
+    const statusBadge = (s) => {
+        if (s === 'added') return '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Added</span>';
+        if (s === 'already_exists') return '<span class="badge bg-secondary"><i class="bi bi-check me-1"></i>Already exists</span>';
+        if (s === 'failed') return '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>';
+        if (s === 'skipped') return '<span class="badge bg-warning text-dark"><i class="bi bi-dash-circle me-1"></i>Skipped</span>';
+        return '<span class="badge bg-light text-dark">Pending</span>';
+    };
+
+    tbody.innerHTML = data.recent.map(r => `
+        <tr data-title="${(r.title || '').toLowerCase()}" data-status="${r.status || ''}" id="row-${r.id}">
+            <td class="fw-semibold">${r.title}${r.year ? ` <span class="text-muted fw-normal">(${r.year})</span>` : ''}</td>
+            <td>${r.media_type === 'movie'
+                ? '<span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-camera-film me-1"></i>Movie</span>'
+                : '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-tv me-1"></i>TV Show</span>'
+            }</td>
+            <td>${statusBadge(r.status)}</td>
+            <td class="text-muted small" style="max-width:300px;">${r.status_message || '—'}</td>
+            <td class="text-muted small">${r.first_seen_at || '—'}</td>
+            <td class="text-muted small">${r.processed_at || '—'}</td>
+            <td>${r.status === 'failed' ? `<button class="btn btn-sm btn-outline-warning py-0 px-2" onclick="retryItem(${r.id},this)"><i class="bi bi-arrow-clockwise"></i> Retry</button>` : ''}</td>
+        </tr>
+    `).join('');
+    filterLog();
+}
+
+async function retryItem(id, btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    const res = await fetch(`/api/watchlist-sync/retry/${id}`, {method: 'POST'});
+    const data = await res.json();
+    if (data.success) {
+        setTimeout(refreshStatus, 500);
+    } else {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> Retry';
+        alert(data.error || 'Retry failed.');
+    }
+}
+
+function filterLog() {
+    const q = (document.getElementById('log-search')?.value || '').toLowerCase();
+    const f = document.getElementById('log-filter')?.value || '';
+    document.querySelectorAll('#log-table tbody tr').forEach(row => {
+        const title = row.dataset.title || '';
+        const status = row.dataset.status || '';
+        const matchTitle = !q || title.includes(q);
+        const matchStatus = !f || status === f;
+        row.style.display = matchTitle && matchStatus ? '' : 'none';
+    });
+}
+
+setInterval(refreshStatus, 30000);
+</script>
+{% endblock %}
