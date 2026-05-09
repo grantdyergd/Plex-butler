@@ -16,6 +16,23 @@
     </div>
 </div>
 
+<div class="card mb-4 border-0 shadow-sm" id="health-card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <h5 class="mb-0"><i class="bi bi-heart-pulse me-2"></i>Email Health Check</h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="runHealthCheck()" id="health-btn">
+            <i class="bi bi-arrow-clockwise me-1"></i>Check
+        </button>
+    </div>
+    <div class="card-body">
+        <div id="health-loading" class="text-muted small d-none"><span class="spinner-border spinner-border-sm me-1"></span>Checking…</div>
+        <div id="health-result" class="d-none">
+            <div id="health-checks" class="mb-3"></div>
+            <div id="health-extra" class="small text-muted"></div>
+        </div>
+        <div id="health-initial" class="text-muted small">Click <strong>Check</strong> to see why you may or may not be receiving warning emails.</div>
+    </div>
+</div>
+
 <div class="card mb-4">
     <div class="card-header"><h5 class="mb-0"><i class="bi bi-gear me-2"></i>Expiration Policy</h5></div>
     <div class="card-body">
@@ -482,5 +499,48 @@ async function scanNow() {
 }
 
 loadList();
+
+async function runHealthCheck() {
+    const btn = document.getElementById('health-btn');
+    const loading = document.getElementById('health-loading');
+    const result = document.getElementById('health-result');
+    const initial = document.getElementById('health-initial');
+    btn.disabled = true;
+    loading.classList.remove('d-none');
+    initial.classList.add('d-none');
+    result.classList.add('d-none');
+    try {
+        const res = await fetch('/api/expirations/health');
+        const d = await res.json();
+
+        // Build check rows
+        let html = '';
+        for (const c of d.checks) {
+            const icon = c.ok
+                ? '<span class="text-success me-2"><i class="bi bi-check-circle-fill"></i></span>'
+                : '<span class="text-danger me-2"><i class="bi bi-x-circle-fill"></i></span>';
+            const valNote = c.value ? `<span class="text-muted ms-1 small">${c.value}</span>` : '';
+            const fixNote = !c.ok ? `<div class="text-warning small ms-4 mt-1"><i class="bi bi-arrow-right me-1"></i>${c.fix}</div>` : '';
+            html += `<div class="mb-1">${icon}<strong>${c.label}</strong>${valNote}${fixNote}</div>`;
+        }
+        document.getElementById('health-checks').innerHTML = html;
+
+        // Extra info
+        let extra = [];
+        if (d.dry_run) extra.push('<span class="badge bg-info text-dark me-1">Dry-run ON</span> Deletions are skipped but emails still send with [TEST] prefix.');
+        if (d.on_cooldown > 0) extra.push(`<i class="bi bi-clock me-1"></i>${d.on_cooldown} item(s) in the warning window were warned in the last 7 days — they will be skipped until the cooldown expires.`);
+        if (d.no_email_items > 0) extra.push(`<i class="bi bi-envelope-slash me-1"></i>${d.no_email_items} item(s) previously had no email and were skipped (status = no_email). They will be retried on the next job run now that a fallback is set.`);
+        extra.push(`<i class="bi bi-calendar-check me-1"></i>Last job run: <strong>${d.last_run || 'never'}</strong> &nbsp;|&nbsp; Next eligible run: <strong>${d.next_eligible_run}</strong>`);
+        document.getElementById('health-extra').innerHTML = extra.map(e => `<div class="mb-1">${e}</div>`).join('');
+
+        result.classList.remove('d-none');
+    } catch(e) {
+        alert('Health check failed: ' + e);
+        initial.classList.remove('d-none');
+    } finally {
+        btn.disabled = false;
+        loading.classList.add('d-none');
+    }
+}
 </script>
 {% endblock %}

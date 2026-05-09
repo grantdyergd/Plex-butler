@@ -6638,6 +6638,118 @@ def expirations_send_test_warning():
     return jsonify({'success': False, 'error': err or 'SMTP send failed'}), 500
 
 
+@app.route('/api/expirations/health')
+@login_required
+def expirations_health():
+    """Diagnostic: check every condition that could prevent warning emails from being sent."""
+    policy = get_expiration_policy()
+    now = datetime.utcnow()
+
+    smtp_ok = bool(get_setting('SMTP_HOST', '').strip() and get_setting('SMTP_USER', '').strip())
+    fallback = (get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', '') or '').strip()
+    last_run_str = get_setting('EXPIRATION_LAST_RUN_AT', '') or ''
+    dry_run = _is_dry_run()
+
+    # Parse last run
+    last_run_dt = None
+    try:
+        if last_run_str:
+            last_run_dt = datetime.fromisoformat(last_run_str)
+    except Exception:
+        pass
+    next_eligible = None
+    if last_run_dt:
+        next_eligible = last_run_dt + timedelta(hours=23)
+
+    threshold = now + timedelta(days=policy['warn_days'])
+
+    in_warn_window = MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended']),
+        MediaExpiration.permanent == False,
+        MediaExpiration.expires_at <= threshold,
+        MediaExpiration.expires_at > now - timedelta(days=policy['grace_days']),
+    ).count()
+
+    cooldown_cutoff = now - timedelta(days=7)
+    on_cooldown = MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended']),
+        MediaExpiration.permanent == False,
+        MediaExpiration.expires_at <= threshold,
+        MediaExpiration.last_warning_sent_at >= cooldown_cutoff,
+    ).count()
+
+    no_email_items = MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended']),
+        MediaExpiration.permanent == False,
+        MediaExpiration.last_warning_status == 'no_email',
+    ).count()
+
+    # Items that WOULD get emails on next run (in window, not on cooldown, have email or fallback)
+    eligible_q = MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended']),
+        MediaExpiration.permanent == False,
+        MediaExpiration.expires_at <= threshold,
+        MediaExpiration.expires_at > now - timedelta(days=policy['grace_days']),
+        db.or_(
+            MediaExpiration.last_warning_sent_at.is_(None),
+            MediaExpiration.last_warning_sent_at < cooldown_cutoff,
+        ),
+    )
+    eligible_with_email = eligible_q.filter(
+        MediaExpiration.requester_email.isnot(None),
+    ).count()
+    eligible_no_email = eligible_q.filter(
+        MediaExpiration.requester_email.is_(None),
+    ).count()
+
+    checks = [
+        {
+            'label': 'Expiration system enabled',
+            'ok': policy['enabled'],
+            'fix': 'Turn on "Enable Expiration System" in the policy panel above and click Save Policy.',
+        },
+        {
+            'label': 'SMTP configured',
+            'ok': smtp_ok,
+            'fix': 'Add your SMTP host and username in Settings → Email.',
+        },
+        {
+            'label': 'Admin fallback email set',
+            'ok': bool(fallback),
+            'value': fallback or '(not set)',
+            'fix': 'Set "Admin fallback email" in the policy panel above so unclaimed items reach you.',
+        },
+        {
+            'label': 'Items expiring within warning window',
+            'ok': in_warn_window > 0,
+            'value': f'{in_warn_window} item(s) within {policy["warn_days"]}-day window',
+            'fix': (f'No items expire within {policy["warn_days"]} days. Either reduce warn_days, '
+                    'or wait — items will enter the window as their expiry approaches.'),
+        },
+        {
+            'label': 'Items eligible for email on next run',
+            'ok': (eligible_with_email + (eligible_no_email if fallback else 0)) > 0,
+            'value': (f'{eligible_with_email} with requester email'
+                      + (f', {eligible_no_email} going to fallback ({fallback})' if fallback and eligible_no_email else '')
+                      + (f', {eligible_no_email} with no email at all' if not fallback and eligible_no_email else '')),
+            'fix': 'All in-window items are either on cooldown (warned in last 7 days) or have no email address.',
+        },
+    ]
+
+    return jsonify({
+        'checks': checks,
+        'dry_run': dry_run,
+        'last_run': last_run_str,
+        'next_eligible_run': next_eligible.strftime('%Y-%m-%d %H:%M UTC') if next_eligible else 'Now (never run)',
+        'on_cooldown': on_cooldown,
+        'no_email_items': no_email_items,
+        'eligible_with_email': eligible_with_email,
+        'eligible_no_email': eligible_no_email,
+        'fallback': fallback,
+        'warn_days': policy['warn_days'],
+    })
+
+
 @app.route('/api/expirations/scan-now', methods=['POST'])
 @login_required
 def expirations_scan_now():
