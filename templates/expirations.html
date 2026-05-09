@@ -210,6 +210,7 @@
                     <button class="btn btn-outline-success" onclick="bulkAction('permanent')" disabled id="bulk-perm">Keep</button>
                     <button class="btn btn-outline-warning" onclick="bulkAction('reset')" disabled id="bulk-reset">Reset</button>
                     <button class="btn btn-outline-secondary" onclick="bulkAction('forget')" disabled id="bulk-forget">Forget</button>
+                    <button class="btn btn-danger" onclick="bulkAction('delete-now')" disabled id="bulk-delete"><i class="bi bi-trash me-1"></i>Delete</button>
                 </div>
             </div>
         </div>
@@ -244,7 +245,7 @@ function fmtLocalDate(iso){ if(!iso) return '—'; try { return new Date(iso).to
 function updateBulkButtons() {
     document.getElementById('selected-count').textContent = selectedIds.size;
     const dis = selectedIds.size === 0;
-    ['bulk-extend','bulk-perm','bulk-reset','bulk-forget'].forEach(id => document.getElementById(id).disabled = dis);
+    ['bulk-extend','bulk-perm','bulk-reset','bulk-forget','bulk-delete'].forEach(id => document.getElementById(id).disabled = dis);
 }
 
 function toggleAll(cb) {
@@ -408,8 +409,11 @@ async function adminAction(id, action) {
 
 async function bulkAction(action) {
     if (selectedIds.size === 0) return;
-    const labels = {extend:'Extend',permanent:'Keep permanently',reset:'Reset to default schedule',forget:'Stop tracking'};
-    if (!confirm(`${labels[action]} ${selectedIds.size} item(s)?`)) return;
+    const labels = {extend:'Extend',permanent:'Keep permanently',reset:'Reset to default schedule',forget:'Stop tracking',['delete-now']:'Delete from server'};
+    const msg = action === 'delete-now'
+        ? `⚠️ Permanently delete ${selectedIds.size} item(s) from the server?\n\nThis removes the files from Sonarr/Radarr. This cannot be undone.`
+        : `${labels[action]} ${selectedIds.size} item(s)?`;
+    if (!confirm(msg)) return;
     const res = await fetch('/api/expirations/bulk-action', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
