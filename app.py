@@ -245,6 +245,7 @@ class WatchlistSyncItem(db.Model):
     processed_at = db.Column(db.DateTime, nullable=True)
     status = db.Column(db.String(30), nullable=True, index=True)  # added|already_exists|failed|skipped
     status_message = db.Column(db.Text, nullable=True)
+    removed_watched_at = db.Column(db.DateTime, nullable=True)  # set when removed from watchlist after being watched
 
 
 @login_manager.user_loader
@@ -5111,6 +5112,7 @@ def _run_expiration_migrations():
         "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS last_warning_error TEXT",
         "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS requester_lookup_attempts INTEGER DEFAULT 0",
         "ALTER TABLE ombi_intro_email_log ADD COLUMN IF NOT EXISTS ombi_user_id VARCHAR(100)",
+        "ALTER TABLE watchlist_sync_item ADD COLUMN IF NOT EXISTS removed_watched_at TIMESTAMP",
     ]
     with app.app_context():
         for sql in statements:
@@ -6152,6 +6154,102 @@ def _sync_watchlist_item(item_row):
     return 'skipped', f'Unknown media type: {media_type}'
 
 
+def _remove_watched_from_watchlist(watchlist_items, plex_url, plex_token, plex_headers):
+    """Check each watchlist item against the local Plex library. Remove fully-watched items.
+
+    Movies: removed if viewCount > 0.
+    TV shows: removed if viewedLeafCount == leafCount (all episodes watched).
+    Returns list of (title, year) tuples that were removed.
+    """
+    try:
+        sections_resp = requests.get(
+            f"{plex_url}/library/sections",
+            params={'X-Plex-Token': plex_token},
+            headers={'Accept': 'application/json'},
+            timeout=10,
+        )
+        if sections_resp.status_code != 200:
+            print(f'[WatchlistSync/RemoveWatched] Could not fetch Plex sections: {sections_resp.status_code}')
+            return []
+        dirs = sections_resp.json().get('MediaContainer', {}).get('Directory', [])
+    except Exception as e:
+        print(f'[WatchlistSync/RemoveWatched] Sections error: {e}')
+        return []
+
+    # Build lookup: (title_lower, year_or_none, plex_type) -> fully_watched bool
+    watched = {}
+    for section in dirs:
+        sec_type = section.get('type')
+        sec_key = section.get('key')
+        if sec_type not in ('movie', 'show'):
+            continue
+        try:
+            lib_resp = requests.get(
+                f"{plex_url}/library/sections/{sec_key}/all",
+                params={'X-Plex-Token': plex_token, 'type': 1 if sec_type == 'movie' else 2},
+                headers={'Accept': 'application/json'},
+                timeout=20,
+            )
+            if lib_resp.status_code != 200:
+                continue
+            for m in lib_resp.json().get('MediaContainer', {}).get('Metadata', []):
+                tl = (m.get('title') or '').lower()
+                yr = m.get('year')
+                try:
+                    yr = int(yr) if yr else None
+                except (ValueError, TypeError):
+                    yr = None
+                if sec_type == 'movie':
+                    watched[(tl, yr, 'movie')] = (m.get('viewCount') or 0) > 0
+                else:
+                    leaf = m.get('leafCount') or 0
+                    viewed = m.get('viewedLeafCount') or 0
+                    watched[(tl, yr, 'show')] = leaf > 0 and viewed >= leaf
+        except Exception as e:
+            print(f'[WatchlistSync/RemoveWatched] Section {sec_key} error: {e}')
+
+    removed = []
+    for item in watchlist_items:
+        tl = (item.get('title') or '').lower()
+        raw_y = item.get('year')
+        try:
+            yr = int(raw_y) if raw_y else None
+        except (ValueError, TypeError):
+            yr = None
+        ptype = item.get('type', '')
+        if ptype not in ('movie', 'show'):
+            continue
+        rating_key = item.get('ratingKey', '')
+        if not rating_key:
+            continue
+
+        # Match with year first, then title-only fallback
+        is_watched = (
+            watched.get((tl, yr, ptype))
+            or watched.get((tl, None, ptype))
+            or any(v for (tt, ty, tp), v in watched.items() if tt == tl and tp == ptype)
+        )
+        if not is_watched:
+            continue
+
+        try:
+            r = requests.put(
+                "https://discover.provider.plex.tv/actions/removeFromWatchlist",
+                params={'ratingKey': rating_key},
+                headers=plex_headers,
+                timeout=15,
+            )
+            if r.status_code in (200, 201, 204):
+                removed.append((item.get('title', ''), yr, item.get('guid', '')))
+                print(f"[WatchlistSync/RemoveWatched] Removed '{item.get('title')}' ({yr}) — fully watched")
+            else:
+                print(f"[WatchlistSync/RemoveWatched] Could not remove '{item.get('title')}': HTTP {r.status_code}")
+        except Exception as e:
+            print(f"[WatchlistSync/RemoveWatched] Error removing '{tl}': {e}")
+
+    return removed
+
+
 def watchlist_sync_job():
     """Background job: poll Plex watchlist and auto-add new items to Sonarr/Radarr."""
     with app.app_context():
@@ -6250,10 +6348,38 @@ def watchlist_sync_job():
                 elif status == 'failed':
                     fail_count += 1
 
+            # Optional: remove fully-watched items from the Plex watchlist
+            removed_count = 0
+            if get_setting('WATCHLIST_SYNC_REMOVE_WATCHED', 'false').lower() == 'true':
+                plex_url_local = get_setting('PLEX_URL', '').strip().rstrip('/')
+                if plex_url_local:
+                    removed = _remove_watched_from_watchlist(all_items, plex_url_local, plex_token, plex_headers)
+                    removed_count = len(removed)
+                    for (r_title, r_year, r_guid) in removed:
+                        row = WatchlistSyncItem.query.filter_by(plex_guid=r_guid).first()
+                        if not row:
+                            row = WatchlistSyncItem.query.filter(
+                                WatchlistSyncItem.title == r_title,
+                                WatchlistSyncItem.year == r_year,
+                            ).first()
+                        if row:
+                            row.removed_watched_at = now
+                    try:
+                        db.session.commit()
+                    except Exception:
+                        db.session.rollback()
+
+            summary_parts = [
+                f'{len(all_items)} on watchlist',
+                f'{new_count} new',
+                f'{added_count} added',
+                f'{fail_count} failed',
+            ]
+            if removed_count:
+                summary_parts.append(f'{removed_count} removed (watched)')
             set_setting('WATCHLIST_SYNC_LAST_RUN', now.strftime('%Y-%m-%d %H:%M:%S UTC'))
-            set_setting('WATCHLIST_SYNC_LAST_SUMMARY',
-                        f'{len(all_items)} on watchlist, {new_count} new, {added_count} added, {fail_count} failed')
-            print(f'[WatchlistSync] Done — {len(all_items)} items, {new_count} new, {added_count} added, {fail_count} failed')
+            set_setting('WATCHLIST_SYNC_LAST_SUMMARY', ', '.join(summary_parts))
+            print(f'[WatchlistSync] Done — {", ".join(summary_parts)}')
         except Exception as e:
             print(f'[WatchlistSync] Unhandled error: {e}')
 
@@ -6834,6 +6960,7 @@ def expire_action_submit(token):
 @login_required
 def watchlist_sync_page():
     enabled = get_setting('WATCHLIST_SYNC_ENABLED', 'false').lower() == 'true'
+    remove_watched = get_setting('WATCHLIST_SYNC_REMOVE_WATCHED', 'false').lower() == 'true'
     last_run = get_setting('WATCHLIST_SYNC_LAST_RUN', '')
     last_summary = get_setting('WATCHLIST_SYNC_LAST_SUMMARY', '')
     recent = (WatchlistSyncItem.query
@@ -6841,6 +6968,7 @@ def watchlist_sync_page():
               .limit(200).all())
     return render_template('watchlist_sync.html',
                            enabled=enabled,
+                           remove_watched=remove_watched,
                            last_run=last_run,
                            last_summary=last_summary,
                            recent=recent)
@@ -6850,9 +6978,11 @@ def watchlist_sync_page():
 @login_required
 def watchlist_sync_toggle():
     data = request.get_json() or {}
-    enabled = bool(data.get('enabled'))
-    set_setting('WATCHLIST_SYNC_ENABLED', 'true' if enabled else 'false')
-    return jsonify({'success': True, 'enabled': enabled})
+    if 'enabled' in data:
+        set_setting('WATCHLIST_SYNC_ENABLED', 'true' if data.get('enabled') else 'false')
+    if 'remove_watched' in data:
+        set_setting('WATCHLIST_SYNC_REMOVE_WATCHED', 'true' if data.get('remove_watched') else 'false')
+    return jsonify({'success': True})
 
 
 @app.route('/api/watchlist-sync/run-now', methods=['POST'])

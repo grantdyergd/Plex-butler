@@ -20,15 +20,27 @@
                 <div class="card-body">
                     <h5 class="card-title fw-semibold mb-3"><i class="bi bi-toggles me-2"></i>Controls</h5>
 
-                    <div class="d-flex align-items-center gap-3 mb-4">
+                    <div class="d-flex align-items-center gap-3 mb-3">
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" id="sync-enabled" role="switch"
                                    {% if enabled %}checked{% endif %}
-                                   onchange="toggleSync(this.checked)" style="width:2.5em;height:1.4em;">
+                                   onchange="toggleSetting('enabled', this.checked)" style="width:2.5em;height:1.4em;">
                         </div>
                         <span id="enabled-label" class="fw-semibold {% if enabled %}text-success{% else %}text-muted{% endif %}">
                             {% if enabled %}Enabled — syncing every 5 minutes{% else %}Disabled{% endif %}
                         </span>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-3 mb-4">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="remove-watched" role="switch"
+                                   {% if remove_watched %}checked{% endif %}
+                                   onchange="toggleSetting('remove_watched', this.checked)" style="width:2.5em;height:1.4em;">
+                        </div>
+                        <div>
+                            <span class="fw-semibold">Auto-remove watched items</span>
+                            <div class="small text-muted">Removes movies (once watched) and TV shows (once every episode is watched) from your Plex watchlist automatically.</div>
+                        </div>
                     </div>
 
                     <div class="mb-3">
@@ -249,17 +261,17 @@ async function runDiagnostic() {
     btn.innerHTML = '<i class="bi bi-search me-1"></i>Check Now';
 }
 
-async function toggleSync(enabled) {
-    const label = document.getElementById('enabled-label');
+async function toggleSetting(key, value) {
     const res = await fetch('/api/watchlist-sync/toggle', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({enabled})
+        body: JSON.stringify({[key]: value})
     });
     const data = await res.json();
-    if (data.success) {
-        label.textContent = enabled ? 'Enabled — syncing every 5 minutes' : 'Disabled';
-        label.className = 'fw-semibold ' + (enabled ? 'text-success' : 'text-muted');
+    if (data.success && key === 'enabled') {
+        const label = document.getElementById('enabled-label');
+        label.textContent = value ? 'Enabled — syncing every 5 minutes' : 'Disabled';
+        label.className = 'fw-semibold ' + (value ? 'text-success' : 'text-muted');
     }
 }
 
