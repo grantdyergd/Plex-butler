@@ -6486,7 +6486,13 @@ def expirations_page():
             MediaExpiration.permanent == False,
             MediaExpiration.requester_email.is_(None),
         ),
-    ))
+    )).filter(
+        db.or_(
+            MediaExpiration.media_type != 'show',
+            MediaExpiration.series_status.is_(None),
+            MediaExpiration.series_status.in_(['ended', 'deleted']),
+        )
+    )
     counts = {
         'active': MediaExpiration.query.filter_by(status='active').count(),
         'extended': MediaExpiration.query.filter_by(status='extended').count(),
