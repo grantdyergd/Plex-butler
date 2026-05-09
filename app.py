@@ -170,6 +170,7 @@ class MediaExpiration(db.Model):
     last_warning_status = db.Column(db.String(20), nullable=True)    # sent|failed|skipped|no_email
     last_warning_error = db.Column(db.Text, nullable=True)
     requester_lookup_attempts = db.Column(db.Integer, default=0)
+    series_status = db.Column(db.String(20), nullable=True)          # Sonarr: continuing|ended|upcoming (shows only)
 
     __table_args__ = (db.UniqueConstraint('media_type', 'service_id', name='uq_expiration_type_id'),)
 
@@ -5113,6 +5114,7 @@ def _run_expiration_migrations():
         "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS requester_lookup_attempts INTEGER DEFAULT 0",
         "ALTER TABLE ombi_intro_email_log ADD COLUMN IF NOT EXISTS ombi_user_id VARCHAR(100)",
         "ALTER TABLE watchlist_sync_item ADD COLUMN IF NOT EXISTS removed_watched_at TIMESTAMP",
+        "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS series_status VARCHAR(20)",
     ]
     with app.app_context():
         for sql in statements:
@@ -5447,9 +5449,13 @@ def _process_arr_item(media_type, item, requesters_by_title, policy, use_oldest_
         if oldest and oldest < added_dt:
             added_dt = oldest
 
+    arr_series_status = item.get('status', '').lower() if media_type == 'show' else None
+
     existing = MediaExpiration.query.filter_by(media_type=media_type, service_id=sid).first()
     if existing:
         existing.last_seen_at = datetime.utcnow()
+        if arr_series_status:
+            existing.series_status = arr_series_status
         if not existing.title and title:
             existing.title = title
         # Re-attempt requester lookup if missing
@@ -5500,6 +5506,7 @@ def _process_arr_item(media_type, item, requesters_by_title, policy, use_oldest_
         expires_at=expires_at,
         permanent=excluded,
         status='permanent' if excluded else 'active',
+        series_status=arr_series_status,
         notes=('on-exclusion-list' if excluded else
                ('first-sync-grace' if expires_at != natural else None)),
         **ids,
@@ -5593,6 +5600,12 @@ def expiration_send_warnings():
             rec.permanent = True
             rec.status = 'permanent'
             rec.notes = 'on-exclusion-list'
+            db.session.commit()
+            continue
+        # Never warn for shows that are still airing
+        if rec.media_type == 'show' and rec.series_status and rec.series_status not in ('ended', 'deleted'):
+            rec.last_warning_status = 'skipped'
+            rec.last_warning_error = f'Series is still airing (status: {rec.series_status})'
             db.session.commit()
             continue
         # Skip if we sent a warning recently (within the past 7 days)
@@ -5800,6 +5813,11 @@ def expiration_process_due():
             rec.permanent = True
             rec.status = 'permanent'
             rec.notes = 'on-exclusion-list'
+            db.session.commit()
+            continue
+        # Never auto-delete shows that are still airing
+        if rec.media_type == 'show' and rec.series_status and rec.series_status not in ('ended', 'deleted'):
+            rec.notes = f'protected-still-airing ({rec.series_status})'
             db.session.commit()
             continue
         # SAFETY: never auto-delete without a successful warning at least grace_days old
@@ -6507,6 +6525,7 @@ def expirations_list_api():
             'last_seen_at': i.last_seen_at.isoformat() if i.last_seen_at else None,
             'extension_count': i.extension_count or 0,
             'notes': i.notes,
+            'series_status': i.series_status,
         } for i in items]
     })
 

@@ -366,10 +366,14 @@ async function loadList(btn) {
         const typeIcon = i.media_type === 'show' ? '<i class="bi bi-tv"></i> Show' : '<i class="bi bi-film"></i> Movie';
         const titleStr = i.title + (i.year ? ` (${i.year})` : '');
         const checked = selectedIds.has(i.id) ? 'checked' : '';
+        const isContinuing = i.media_type === 'show' && i.series_status && i.series_status !== 'ended' && i.series_status !== 'deleted';
+        const airingBadge = isContinuing
+            ? ` <span class="badge bg-success-subtle text-success border border-success-subtle ms-1" title="Still airing — protected from expiration"><i class="bi bi-broadcast me-1"></i>${escapeHtml(i.series_status)}</span>`
+            : '';
         return `<tr>
             <td><input type="checkbox" class="form-check-input row-check" data-id="${i.id}" onclick="toggleRow(this)" ${checked}></td>
             <td>${typeIcon}</td>
-            <td><strong>${escapeHtml(titleStr)}</strong>${i.notes ? `<br><small class="text-muted">${escapeHtml(i.notes)}</small>` : ''}</td>
+            <td><strong>${escapeHtml(titleStr)}</strong>${airingBadge}${i.notes ? `<br><small class="text-muted">${escapeHtml(i.notes)}</small>` : ''}</td>
             <td>${requester}${reqEmail}${addtl}</td>
             <td><small>${fmtLocalDate(i.added_at)}</small></td>
             <td><small>${fmtLocalDate(i.expires_at)}</small></td>
