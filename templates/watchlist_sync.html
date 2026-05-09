@@ -139,6 +139,7 @@
                                 <option value="already_exists">Already exists</option>
                                 <option value="failed">Failed</option>
                                 <option value="skipped">Skipped</option>
+                                <option value="removed_watched">Removed (watched)</option>
                             </select>
                         </div>
                     </div>
@@ -159,7 +160,7 @@
                             </thead>
                             <tbody>
                                 {% for item in recent %}
-                                <tr data-title="{{ item.title|lower }}" data-status="{{ item.status or '' }}" id="row-{{ item.id }}">
+                                <tr data-title="{{ item.title|lower }}" data-status="{{ 'removed_watched' if item.removed_watched_at else (item.status or '') }}" id="row-{{ item.id }}">
                                     <td class="fw-semibold">{{ item.title }}{% if item.year %} <span class="text-muted fw-normal">({{ item.year }})</span>{% endif %}</td>
                                     <td>
                                         {% if item.media_type == 'movie' %}
@@ -169,7 +170,9 @@
                                         {% endif %}
                                     </td>
                                     <td>
-                                        {% if item.status == 'added' %}
+                                        {% if item.removed_watched_at %}
+                                        <span class="badge bg-purple text-white" style="background:#6f42c1!important;" title="Removed from Plex watchlist after being watched"><i class="bi bi-eye-fill me-1"></i>Removed (watched)</span>
+                                        {% elif item.status == 'added' %}
                                         <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Added</span>
                                         {% elif item.status == 'already_exists' %}
                                         <span class="badge bg-secondary"><i class="bi bi-check me-1"></i>Already exists</span>
@@ -183,7 +186,12 @@
                                     </td>
                                     <td class="text-muted small" style="max-width:300px;">{{ item.status_message or '—' }}</td>
                                     <td class="text-muted small">{{ item.first_seen_at.strftime('%b %d %H:%M') if item.first_seen_at else '—' }}</td>
-                                    <td class="text-muted small">{{ item.processed_at.strftime('%b %d %H:%M') if item.processed_at else '—' }}</td>
+                                    <td class="text-muted small">
+                                        {{ item.processed_at.strftime('%b %d %H:%M') if item.processed_at else '—' }}
+                                        {% if item.removed_watched_at %}
+                                        <br><span class="text-purple" style="color:#6f42c1;"><i class="bi bi-eye me-1"></i>Removed {{ item.removed_watched_at.strftime('%b %d %H:%M') }}</span>
+                                        {% endif %}
+                                    </td>
                                     <td>
                                         {% if item.status == 'failed' %}
                                         <button class="btn btn-sm btn-outline-warning py-0 px-2" onclick="retryItem({{ item.id }}, this)">
@@ -305,6 +313,7 @@ async function refreshStatus() {
     if (!tbody || !data.recent.length) return;
 
     const statusBadge = (s) => {
+        if (s === 'removed_watched') return '<span class="badge text-white" style="background:#6f42c1;"><i class="bi bi-eye-fill me-1"></i>Removed (watched)</span>';
         if (s === 'added') return '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Added</span>';
         if (s === 'already_exists') return '<span class="badge bg-secondary"><i class="bi bi-check me-1"></i>Already exists</span>';
         if (s === 'failed') return '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>';
@@ -312,20 +321,25 @@ async function refreshStatus() {
         return '<span class="badge bg-light text-dark">Pending</span>';
     };
 
-    tbody.innerHTML = data.recent.map(r => `
-        <tr data-title="${(r.title || '').toLowerCase()}" data-status="${r.status || ''}" id="row-${r.id}">
+    tbody.innerHTML = data.recent.map(r => {
+        const effectiveStatus = r.removed_watched_at ? 'removed_watched' : (r.status || '');
+        const processedCell = r.removed_watched_at
+            ? `${r.processed_at || '—'}<br><span style="color:#6f42c1;"><i class="bi bi-eye me-1"></i>Removed ${r.removed_watched_at}</span>`
+            : (r.processed_at || '—');
+        return `
+        <tr data-title="${(r.title || '').toLowerCase()}" data-status="${effectiveStatus}" id="row-${r.id}">
             <td class="fw-semibold">${r.title}${r.year ? ` <span class="text-muted fw-normal">(${r.year})</span>` : ''}</td>
             <td>${r.media_type === 'movie'
                 ? '<span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-camera-film me-1"></i>Movie</span>'
                 : '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-tv me-1"></i>TV Show</span>'
             }</td>
-            <td>${statusBadge(r.status)}</td>
+            <td>${statusBadge(effectiveStatus)}</td>
             <td class="text-muted small" style="max-width:300px;">${r.status_message || '—'}</td>
             <td class="text-muted small">${r.first_seen_at || '—'}</td>
-            <td class="text-muted small">${r.processed_at || '—'}</td>
+            <td class="text-muted small">${processedCell}</td>
             <td>${r.status === 'failed' ? `<button class="btn btn-sm btn-outline-warning py-0 px-2" onclick="retryItem(${r.id},this)"><i class="bi bi-arrow-clockwise"></i> Retry</button>` : ''}</td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
     filterLog();
 }
 

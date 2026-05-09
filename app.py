@@ -7204,6 +7204,7 @@ def watchlist_sync_status():
                 'status_message': r.status_message,
                 'processed_at': r.processed_at.strftime('%Y-%m-%d %H:%M') if r.processed_at else None,
                 'first_seen_at': r.first_seen_at.strftime('%Y-%m-%d %H:%M') if r.first_seen_at else None,
+                'removed_watched_at': r.removed_watched_at.strftime('%Y-%m-%d %H:%M') if r.removed_watched_at else None,
             }
             for r in WatchlistSyncItem.query.order_by(WatchlistSyncItem.last_seen_at.desc()).limit(200).all()
         ]
