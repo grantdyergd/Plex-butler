@@ -7320,14 +7320,20 @@ def watchlist_sync_diagnostic():
         sync_status = sync_row.status if sync_row else None
         sync_message = sync_row.status_message if sync_row else None
 
+        # Trust the sync job's result — if it got 'added' or 'already_exists' from
+        # Sonarr/Radarr, the item IS in the library (title matching may differ from Plex)
+        sync_confirmed = sync_status in ('added', 'already_exists')
+
         if ptype == 'show':
-            found = (tl, y) in sonarr_titles or any(st == tl for (st, _) in sonarr_titles)
+            title_match = (tl, y) in sonarr_titles or any(st == tl for (st, _) in sonarr_titles)
+            found = title_match or sync_confirmed
             (in_library if found else missing).append({
                 'title': t, 'year': y, 'type': 'show', 'in_library': found,
                 'sync_status': sync_status, 'sync_message': sync_message,
             })
         elif ptype == 'movie':
-            found = (tl, y) in radarr_titles or any(mt == tl for (mt, _) in radarr_titles)
+            title_match = (tl, y) in radarr_titles or any(mt == tl for (mt, _) in radarr_titles)
+            found = title_match or sync_confirmed
             (in_library if found else missing).append({
                 'title': t, 'year': y, 'type': 'movie', 'in_library': found,
                 'sync_status': sync_status, 'sync_message': sync_message,
