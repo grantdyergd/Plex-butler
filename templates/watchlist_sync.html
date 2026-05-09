@@ -102,7 +102,7 @@
                             <h6 class="fw-semibold text-danger mb-2"><i class="bi bi-exclamation-circle me-1"></i>On watchlist but NOT in Sonarr/Radarr</h6>
                             <div class="table-responsive">
                                 <table class="table table-sm">
-                                    <thead class="table-light"><tr><th>Title</th><th>Year</th><th>Type</th></tr></thead>
+                                    <thead class="table-light"><tr><th>Title</th><th>Year</th><th>Type</th><th>Sync status</th></tr></thead>
                                     <tbody id="diag-missing-body"></tbody>
                                 </table>
                             </div>
@@ -239,6 +239,16 @@ async function runDiagnostic() {
                 ? '<span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-camera-film me-1"></i>Movie</span>'
                 : '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-tv me-1"></i>TV Show</span>';
 
+            const syncBadge = (status, msg) => {
+                if (!status) return '<span class="text-muted small">Not yet attempted</span>';
+                const colors = {failed:'danger', skipped:'warning', added:'success', already_exists:'secondary'};
+                const col = colors[status] || 'secondary';
+                const tip = msg ? ` title="${msg.replace(/"/g,'&quot;')}"` : '';
+                return `<span class="badge bg-${col} text-${col==='warning'?'dark':'white'}"${tip}>${status}</span>${msg ? `<br><small class="text-muted">${msg}</small>` : ''}`;
+            };
+            const missingRowsHtml = items => items.map(r =>
+                `<tr><td class="fw-semibold">${r.title}</td><td class="text-muted">${r.year || '—'}</td><td>${typeLabel(r.type)}</td><td class="small">${syncBadge(r.sync_status, r.sync_message)}</td></tr>`
+            ).join('');
             const rowsHtml = items => items.map(r =>
                 `<tr><td class="fw-semibold">${r.title}</td><td class="text-muted">${r.year || '—'}</td><td>${typeLabel(r.type)}</td></tr>`
             ).join('');
@@ -251,7 +261,7 @@ async function runDiagnostic() {
                 `<span class="text-success">${data.in_library.length} already in library</span>`;
 
             const missingSection = document.getElementById('diag-missing-section');
-            document.getElementById('diag-missing-body').innerHTML = rowsHtml(data.missing);
+            document.getElementById('diag-missing-body').innerHTML = missingRowsHtml(data.missing);
             missingSection.classList.toggle('d-none', data.missing.length === 0);
 
             const foundSection = document.getElementById('diag-found-section');

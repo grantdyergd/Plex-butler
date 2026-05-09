@@ -6337,9 +6337,10 @@ def watchlist_sync_job():
                 row = WatchlistSyncItem.query.filter_by(plex_guid=guid).first()
                 if row:
                     row.last_seen_at = now
-                    if row.status in ('added', 'already_exists', 'skipped'):
+                    if row.status in ('added', 'already_exists'):
                         db.session.commit()
                         continue
+                    # 'skipped' and 'failed' are always retried — conditions may have changed
                 else:
                     row = WatchlistSyncItem(
                         plex_guid=guid,
@@ -7299,6 +7300,9 @@ def watchlist_sync_diagnostic():
     except Exception as e:
         return jsonify({'success': False, 'errors': [f'Radarr error: {e}']})
 
+    # Build a lookup of sync status by guid and by title for diagnostic enrichment
+    sync_rows = {r.plex_guid: r for r in WatchlistSyncItem.query.all()}
+
     missing = []
     in_library = []
     for item in all_wl:
@@ -7310,16 +7314,23 @@ def watchlist_sync_diagnostic():
             y = None
         ptype = item.get('type', '')
         tl = t.lower()
+        guid = item.get('guid', '')
+
+        sync_row = sync_rows.get(guid)
+        sync_status = sync_row.status if sync_row else None
+        sync_message = sync_row.status_message if sync_row else None
 
         if ptype == 'show':
             found = (tl, y) in sonarr_titles or any(st == tl for (st, _) in sonarr_titles)
             (in_library if found else missing).append({
-                'title': t, 'year': y, 'type': 'show', 'in_library': found
+                'title': t, 'year': y, 'type': 'show', 'in_library': found,
+                'sync_status': sync_status, 'sync_message': sync_message,
             })
         elif ptype == 'movie':
             found = (tl, y) in radarr_titles or any(mt == tl for (mt, _) in radarr_titles)
             (in_library if found else missing).append({
-                'title': t, 'year': y, 'type': 'movie', 'in_library': found
+                'title': t, 'year': y, 'type': 'movie', 'in_library': found,
+                'sync_status': sync_status, 'sync_message': sync_message,
             })
 
     return jsonify({
