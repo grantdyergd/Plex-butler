@@ -6906,5 +6906,114 @@ def watchlist_sync_retry(item_id):
     return jsonify({'success': True, 'status': status, 'message': msg})
 
 
+@app.route('/api/watchlist-sync/diagnostic')
+@login_required
+def watchlist_sync_diagnostic():
+    """Compare Plex watchlist against Sonarr/Radarr libraries and return what's missing."""
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
+    sonarr_key = get_setting('SONARR_API_KEY', '').strip()
+    radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
+    radarr_key = get_setting('RADARR_API_KEY', '').strip()
+
+    errors = []
+    if not plex_token:
+        errors.append('Plex token not configured')
+    if not sonarr_url or not sonarr_key:
+        errors.append('Sonarr not configured')
+    if not radarr_url or not radarr_key:
+        errors.append('Radarr not configured')
+    if errors:
+        return jsonify({'success': False, 'errors': errors})
+
+    plex_headers = {
+        'X-Plex-Token': plex_token,
+        'X-Plex-Client-Identifier': 'media-scrubber-diag',
+        'X-Plex-Product': 'Media Scrubber',
+        'X-Plex-Version': '1.0',
+        'Accept': 'application/json',
+    }
+
+    # Fetch full Plex watchlist
+    all_wl = []
+    try:
+        offset = 0
+        page_size = 50
+        total_size = None
+        while True:
+            r = requests.get(
+                "https://discover.provider.plex.tv/library/sections/watchlist/all",
+                params={'X-Plex-Container-Start': offset, 'X-Plex-Container-Size': page_size},
+                headers=plex_headers, timeout=20)
+            if r.status_code == 401:
+                return jsonify({'success': False, 'errors': ['Plex token is invalid or expired']})
+            if r.status_code != 200:
+                return jsonify({'success': False, 'errors': [f'Plex returned {r.status_code}']})
+            container = r.json().get('MediaContainer', {})
+            items = container.get('Metadata', [])
+            if total_size is None:
+                total_size = container.get('totalSize', len(items))
+            if not items:
+                break
+            all_wl.extend(items)
+            offset += len(items)
+            if offset >= total_size:
+                break
+    except Exception as e:
+        return jsonify({'success': False, 'errors': [f'Plex error: {e}']})
+
+    # Fetch Sonarr library
+    sonarr_titles = set()
+    try:
+        sv = requests.get(f"{sonarr_url}/api/v3/series", params={'apikey': sonarr_key}, timeout=15).json()
+        for s in sv:
+            sonarr_titles.add((s.get('title', '').lower(), s.get('year')))
+        sonarr_count = len(sv)
+    except Exception as e:
+        return jsonify({'success': False, 'errors': [f'Sonarr error: {e}']})
+
+    # Fetch Radarr library
+    radarr_titles = set()
+    try:
+        rv = requests.get(f"{radarr_url}/api/v3/movie", params={'apikey': radarr_key}, timeout=15).json()
+        for m in rv:
+            radarr_titles.add((m.get('title', '').lower(), m.get('year')))
+        radarr_count = len(rv)
+    except Exception as e:
+        return jsonify({'success': False, 'errors': [f'Radarr error: {e}']})
+
+    missing = []
+    in_library = []
+    for item in all_wl:
+        t = item.get('title', '')
+        raw_y = item.get('year')
+        try:
+            y = int(raw_y) if raw_y else None
+        except (ValueError, TypeError):
+            y = None
+        ptype = item.get('type', '')
+        tl = t.lower()
+
+        if ptype == 'show':
+            found = (tl, y) in sonarr_titles or any(st == tl for (st, _) in sonarr_titles)
+            (in_library if found else missing).append({
+                'title': t, 'year': y, 'type': 'show', 'in_library': found
+            })
+        elif ptype == 'movie':
+            found = (tl, y) in radarr_titles or any(mt == tl for (mt, _) in radarr_titles)
+            (in_library if found else missing).append({
+                'title': t, 'year': y, 'type': 'movie', 'in_library': found
+            })
+
+    return jsonify({
+        'success': True,
+        'watchlist_total': len(all_wl),
+        'sonarr_count': sonarr_count,
+        'radarr_count': radarr_count,
+        'missing': missing,
+        'in_library': in_library,
+    })
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)

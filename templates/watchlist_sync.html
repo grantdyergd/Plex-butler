@@ -71,6 +71,45 @@
             </div>
         </div>
 
+        <!-- Diagnostic -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h5 class="card-title fw-semibold mb-0">
+                            <i class="bi bi-clipboard2-pulse me-2"></i>Watchlist vs Library Check
+                        </h5>
+                        <button class="btn btn-outline-primary" onclick="runDiagnostic()" id="diag-btn">
+                            <i class="bi bi-search me-1"></i>Check Now
+                        </button>
+                    </div>
+                    <p class="text-muted small mb-3">Compares your current Plex watchlist against everything in Sonarr and Radarr and shows you what's missing.</p>
+                    <div id="diag-result" class="d-none">
+                        <div id="diag-summary" class="alert alert-info small mb-3"></div>
+                        <div id="diag-missing-section" class="d-none mb-3">
+                            <h6 class="fw-semibold text-danger mb-2"><i class="bi bi-exclamation-circle me-1"></i>On watchlist but NOT in Sonarr/Radarr</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead class="table-light"><tr><th>Title</th><th>Year</th><th>Type</th></tr></thead>
+                                    <tbody id="diag-missing-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="diag-found-section" class="d-none">
+                            <h6 class="fw-semibold text-success mb-2"><i class="bi bi-check-circle me-1"></i>Already in library</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead class="table-light"><tr><th>Title</th><th>Year</th><th>Type</th></tr></thead>
+                                    <tbody id="diag-found-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="diag-error" class="alert alert-danger small d-none"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Log table -->
         <div class="col-12">
             <div class="card">
@@ -159,6 +198,57 @@
 </div>
 
 <script>
+async function runDiagnostic() {
+    const btn = document.getElementById('diag-btn');
+    const result = document.getElementById('diag-result');
+    const errEl = document.getElementById('diag-error');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Checking…';
+    result.classList.add('d-none');
+    errEl.classList.add('d-none');
+
+    try {
+        const res = await fetch('/api/watchlist-sync/diagnostic');
+        const data = await res.json();
+
+        if (!data.success) {
+            errEl.textContent = data.errors ? data.errors.join(', ') : 'Check failed.';
+            errEl.classList.remove('d-none');
+        } else {
+            const typeLabel = t => t === 'movie'
+                ? '<span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-camera-film me-1"></i>Movie</span>'
+                : '<span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-tv me-1"></i>TV Show</span>';
+
+            const rowsHtml = items => items.map(r =>
+                `<tr><td class="fw-semibold">${r.title}</td><td class="text-muted">${r.year || '—'}</td><td>${typeLabel(r.type)}</td></tr>`
+            ).join('');
+
+            document.getElementById('diag-summary').innerHTML =
+                `Watchlist: <strong>${data.watchlist_total}</strong> items &nbsp;|&nbsp; ` +
+                `Sonarr: <strong>${data.sonarr_count}</strong> shows &nbsp;|&nbsp; ` +
+                `Radarr: <strong>${data.radarr_count}</strong> movies &nbsp;|&nbsp; ` +
+                `<span class="text-danger fw-semibold">${data.missing.length} missing</span> &nbsp;|&nbsp; ` +
+                `<span class="text-success">${data.in_library.length} already in library</span>`;
+
+            const missingSection = document.getElementById('diag-missing-section');
+            document.getElementById('diag-missing-body').innerHTML = rowsHtml(data.missing);
+            missingSection.classList.toggle('d-none', data.missing.length === 0);
+
+            const foundSection = document.getElementById('diag-found-section');
+            document.getElementById('diag-found-body').innerHTML = rowsHtml(data.in_library);
+            foundSection.classList.toggle('d-none', data.in_library.length === 0);
+
+            result.classList.remove('d-none');
+        }
+    } catch (e) {
+        errEl.textContent = 'Network error: ' + e.message;
+        errEl.classList.remove('d-none');
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-search me-1"></i>Check Now';
+}
+
 async function toggleSync(enabled) {
     const label = document.getElementById('enabled-label');
     const res = await fetch('/api/watchlist-sync/toggle', {
