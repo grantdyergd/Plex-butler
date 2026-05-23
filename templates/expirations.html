@@ -462,13 +462,13 @@ async function runBulkDeleteWithProgress(ids) {
 
     modal.show();
 
-    // Fetch the title of each item to show in the status — we have them in the rendered table
+    // Build title map keyed by item ID (data-id attribute, not cb.value which is always "on")
     const titleMap = {};
     document.querySelectorAll('#exp-table-body tr').forEach(tr => {
-        const cb = tr.querySelector('input[type=checkbox]');
+        const cb = tr.querySelector('input[type=checkbox][data-id]');
         if (cb) {
             const titleEl = tr.querySelector('td:nth-child(3)');
-            if (titleEl) titleMap[cb.value] = titleEl.textContent.trim();
+            if (titleEl) titleMap[cb.dataset.id] = titleEl.textContent.trim();
         }
     });
 
