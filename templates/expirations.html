@@ -505,9 +505,9 @@ async function runBulkDeleteWithProgress(ids) {
             errList.innerHTML = errors.slice(-10).map(e => `<li class="text-danger small">${e}</li>`).join('');
         }
 
-        // Small delay between items to avoid hammering Sonarr/Radarr
+        // Tiny yield so the UI can repaint between items
         if (!cancelled && i < ids.length - 1) {
-            await new Promise(r => setTimeout(r, 300));
+            await new Promise(r => setTimeout(r, 50));
         }
     }
 
