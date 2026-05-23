@@ -342,8 +342,8 @@ async function loadList(btn) {
 
     const tbody = document.getElementById('exp-tbody');
     tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">Loading...</td></tr>';
-    const params = new URLSearchParams({status: currentStatus, sort, media_type: type, search});
-    const res = await fetch(`/api/expirations/list?${params}`);
+    const params = new URLSearchParams({status: currentStatus, sort, media_type: type, search, _: Date.now()});
+    const res = await fetch(`/api/expirations/list?${params}`, {cache: 'no-store'});
     const data = await res.json();
     if (!data.items.length) {
         tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No items match.</td></tr>';
@@ -520,7 +520,11 @@ async function runBulkDeleteWithProgress(ids) {
         : `Complete — ${ok} deleted${failed > 0 ? `, ${failed} failed` : ''}.`;
     cancelBtn.classList.add('d-none');
     closeBtn.classList.remove('d-none');
-    closeBtn.onclick = () => { modal.hide(); loadList(); };
+    closeBtn.onclick = () => {
+        const modalEl = document.getElementById('bulkDeleteModal');
+        modalEl.addEventListener('hidden.bs.modal', () => loadList(), {once: true});
+        modal.hide();
+    };
 }
 
 async function savePolicy() {
