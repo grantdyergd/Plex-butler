@@ -2,14 +2,14 @@
 {% block title %}Media Scrubber{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col-12 text-center">
-        <h2><i class="bi bi-broom me-2"></i>Media Scrubber</h2>
-        <p class="text-muted">Clean up your Plex library by removing unwatched TV shows and movies</p>
+<div class="d-flex justify-content-between align-items-start mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-broom-fill me-2" style="color:var(--primary)"></i>Library Cleanup</h2>
+        <p class="text-muted mb-0">Scan your Plex library and remove unwatched TV shows and movies</p>
     </div>
 </div>
 
-<ul class="nav nav-tabs nav-justified mb-4" id="mediaTabs" role="tablist">
+<ul class="nav nav-tabs mb-4" id="mediaTabs" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active" id="tv-tab" data-bs-toggle="tab" data-bs-target="#tv-pane" type="button" role="tab">
             <i class="bi bi-tv me-2"></i>TV Shows

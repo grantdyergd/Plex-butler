@@ -1,30 +1,52 @@
 {% extends "base.html" %}
-{% block title %}Login - Media Scrubber{% endblock %}
+{% block title %}Sign In — Media Scrubber{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center mt-5">
-    <div class="col-md-5">
-        <div class="card">
-            <div class="card-header text-center">
-                <h4><i class="bi bi-tv me-2"></i>Media Scrubber</h4>
+<div class="row justify-content-center" style="margin-top: 8vh;">
+    <div class="col-sm-10 col-md-6 col-lg-4 col-xl-3">
+
+        <!-- Brand mark -->
+        <div class="text-center mb-4">
+            <div style="
+                width: 56px; height: 56px;
+                background: linear-gradient(135deg, #6366f1, #818cf8);
+                border-radius: 16px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.5rem;
+                color: white;
+                box-shadow: 0 4px 12px rgba(99,102,241,0.35);
+                margin-bottom: 1rem;
+            ">
+                <i class="bi bi-broom-fill"></i>
             </div>
+            <h1 style="font-size: 1.375rem; font-weight: 700; margin-bottom: 0.25rem;">Media Scrubber</h1>
+            <p class="text-muted" style="font-size: 0.875rem;">Sign in to manage your library</p>
+        </div>
+
+        <div class="card" style="border-radius: 20px; box-shadow: 0 8px 32px rgba(0,0,0,0.08);">
             <div class="card-body p-4">
-                <h5 class="text-center mb-4">Sign In</h5>
-                <form method="POST">
+                <form method="POST" autocomplete="on">
                     <div class="mb-3">
                         <label for="username" class="form-label">Username</label>
-                        <input type="text" class="form-control" id="username" name="username" required autofocus>
+                        <input type="text" class="form-control" id="username" name="username"
+                               required autofocus autocomplete="username"
+                               placeholder="your username">
                     </div>
                     <div class="mb-4">
                         <label for="password" class="form-label">Password</label>
-                        <input type="password" class="form-control" id="password" name="password" required>
+                        <input type="password" class="form-control" id="password" name="password"
+                               required autocomplete="current-password"
+                               placeholder="••••••••">
                     </div>
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="bi bi-box-arrow-in-right me-2"></i>Login
+                    <button type="submit" class="btn btn-primary w-100" style="padding: 0.625rem;">
+                        <i class="bi bi-box-arrow-in-right me-2"></i>Sign in
                     </button>
                 </form>
             </div>
         </div>
+
     </div>
 </div>
 {% endblock %}

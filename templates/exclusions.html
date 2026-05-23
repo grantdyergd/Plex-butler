@@ -2,16 +2,14 @@
 {% block title %}Exclusions - Media Cleanup{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col-12 d-flex justify-content-between align-items-start">
-        <div>
-            <h2><i class="bi bi-shield-check me-2"></i>Exclusion Lists</h2>
-            <p class="text-muted">Items in these lists will never appear as deletion candidates.</p>
-        </div>
-        <button class="btn btn-outline-primary" onclick="backfillRequesters()" id="backfill-btn">
-            <i class="bi bi-arrow-repeat me-1"></i>Sync Requester Info from Ombi
-        </button>
+<div class="d-flex justify-content-between align-items-start mb-4">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-shield-check me-2" style="color:var(--primary)"></i>Exclusion Lists</h2>
+        <p class="text-muted mb-0">Items in these lists will never appear as deletion candidates.</p>
     </div>
+    <button class="btn btn-outline-primary" onclick="backfillRequesters()" id="backfill-btn">
+        <i class="bi bi-arrow-repeat me-1"></i>Sync Requester Info from Ombi
+    </button>
 </div>
 
 <div class="alert alert-info d-none" id="backfill-result">
