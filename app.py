@@ -4360,18 +4360,30 @@ def storage_drives():
                 used_by_lib += m.get('sizeOnDisk', 0) or 0
                 if m.get('hasFile'):
                     item_count += 1
-        used_total = max(d['totalBytes'] - d['freeBytes'], 0)
+        free_bytes = d['freeBytes']
+        total_bytes = d['totalBytes']
+
+        # Some Sonarr/Radarr versions return totalSpace=0 even when freeSpace is correct.
+        # Fall back: estimate total as free + tracked library size.
+        if total_bytes == 0 and (free_bytes > 0 or used_by_lib > 0):
+            total_bytes = free_bytes + used_by_lib
+
+        used_total = max(total_bytes - free_bytes, 0)
+        # If total is still unknown, at least show the tracked library size as used
+        if total_bytes == 0:
+            used_total = used_by_lib
         other_used = max(used_total - used_by_lib, 0)
         out.append({
             'path': path,
-            'totalGB': round(d['totalBytes'] / 1024**3, 1),
-            'freeGB': round(d['freeBytes'] / 1024**3, 1),
+            'totalGB': round(total_bytes / 1024**3, 1),
+            'freeGB': round(free_bytes / 1024**3, 1),
             'usedGB': round(used_total / 1024**3, 1),
             'libraryGB': round(used_by_lib / 1024**3, 1),
             'otherGB': round(other_used / 1024**3, 1),
-            'percentUsed': round((used_total / d['totalBytes']) * 100, 1) if d['totalBytes'] else 0,
+            'percentUsed': round((used_total / total_bytes) * 100, 1) if total_bytes else 0,
             'itemCount': item_count,
             'sources': sorted(list(d['sources'])),
+            'totalSpaceKnown': d['totalBytes'] > 0,  # flag so UI can note if total was estimated
         })
 
     out.sort(key=lambda x: -x['percentUsed'])
