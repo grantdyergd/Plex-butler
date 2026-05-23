@@ -4105,12 +4105,16 @@ def media_discover():
         year = int(date_str[:4]) if date_str[:4].isdigit() else None
         poster = (img_base + raw['poster_path']) if raw.get('poster_path') else None
         tmdb_id = raw.get('id')
-        url_type = 'movie' if media_type == 'movie' else 'tv'
+        # Build IMDb search URL — reliable, no extra API call needed
+        imdb_q = f"{title} {year}" if year else title
+        imdb_q_enc = imdb_q.replace(' ', '+').replace('&', '%26').replace('?', '%3F')
+        imdb_type = 'ft' if media_type == 'movie' else 'tv'
+        imdb_url = f"https://www.imdb.com/find/?q={imdb_q_enc}&s=tt&ttype={imdb_type}"
         return {
             'title': title,
             'year': year,
             'tmdbId': tmdb_id,
-            'tmdbUrl': f'https://www.themoviedb.org/{url_type}/{tmdb_id}' if tmdb_id else None,
+            'imdbUrl': imdb_url,
             'mediaType': media_type,
             'rating': round(raw.get('vote_average') or 0, 1),
             'voteCount': raw.get('vote_count', 0),
@@ -4143,40 +4147,64 @@ def media_discover():
 
     base_params = {'api_key': tmdb_key, 'language': 'en-US'}
     today = datetime.now().strftime('%Y-%m-%d')
+    past_7   = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    past_14  = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
     future_90 = (datetime.now() + timedelta(days=90)).strftime('%Y-%m-%d')
     # Major English streaming providers: Netflix, Prime, Disney+, Apple TV+, Hulu, Max, Peacock, Paramount+
     streaming_providers = '8|9|15|337|350|386|531|1899'
 
+    # TMDB trending uses a social-signal algorithm aggregating play counts, search,
+    # watchlist additions, ratings, and external engagement (Twitter/Letterboxd/Reddit).
+    # "day" window = most real-time social buzz; "week" = sustained popularity.
     trending_movies = fetch(
-        f"{tmdb_base}/trending/movie/week", {**base_params}, 'movie', 20)
+        f"{tmdb_base}/trending/movie/day", {**base_params}, 'movie', 20)
     trending_tv = fetch(
-        f"{tmdb_base}/trending/tv/week", {**base_params}, 'tv', 20)
+        f"{tmdb_base}/trending/tv/day", {**base_params}, 'tv', 20)
+
+    # Currently in theaters (US)
+    now_in_theaters = fetch(
+        f"{tmdb_base}/movie/now_playing",
+        {**base_params, 'region': 'US'}, 'movie', 20)
+
+    # TV episodes airing this week
+    airing_this_week = fetch(
+        f"{tmdb_base}/tv/on_the_air",
+        {**base_params, 'with_original_language': 'en'}, 'tv', 20)
+
+    # Coming soon movies (next 90 days, sorted by social popularity)
     coming_soon = fetch(
-        f"{tmdb_base}/discover/movie",
-        {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
-         'primary_release_date.gte': today, 'primary_release_date.lte': future_90,
-         'region': 'US'}, 'movie', 20)
+        f"{tmdb_base}/movie/upcoming",
+        {**base_params, 'region': 'US'}, 'movie', 20)
+
+    # New TV seasons/shows premiering very soon
     upcoming_tv = fetch(
         f"{tmdb_base}/discover/tv",
         {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
          'first_air_date.gte': today, 'first_air_date.lte': future_90}, 'tv', 20)
-    streaming_now = fetch(
+
+    # Highest-rated content added to streaming in last 2 weeks
+    new_on_streaming = fetch(
         f"{tmdb_base}/discover/movie",
         {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
-         'with_watch_providers': streaming_providers, 'watch_region': 'US'}, 'movie', 20)
-    new_on_tv = fetch(
+         'with_watch_providers': streaming_providers, 'watch_region': 'US',
+         'release_date.gte': past_14}, 'movie', 20)
+
+    # TV shows with new episodes on streaming in last week
+    new_tv_streaming = fetch(
         f"{tmdb_base}/discover/tv",
         {**base_params, 'sort_by': 'popularity.desc', 'with_original_language': 'en',
          'with_watch_providers': streaming_providers, 'watch_region': 'US',
-         'air_date.gte': (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')}, 'tv', 20)
+         'air_date.gte': past_7}, 'tv', 20)
 
     return jsonify({
         'trending_movies': trending_movies,
         'trending_tv': trending_tv,
+        'now_in_theaters': now_in_theaters,
+        'airing_this_week': airing_this_week,
         'coming_soon': coming_soon,
         'upcoming_tv': upcoming_tv,
-        'streaming_now': streaming_now,
-        'new_on_tv': new_on_tv,
+        'new_on_streaming': new_on_streaming,
+        'new_tv_streaming': new_tv_streaming,
     })
 
 

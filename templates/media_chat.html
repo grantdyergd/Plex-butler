@@ -871,9 +871,8 @@
             ? `<button class="card-btn card-btn-done" disabled>✓ Owned</button>`
             : `<button class="card-btn card-btn-add" id="addbtn-${prefix}-${i}" onclick="addMedia('${item.mediaType}','${prefix}',${i})">+ Add</button>`;
 
-        const tmdbUrlType = item.mediaType === 'movie' ? 'movie' : 'tv';
-        const infoBtnHtml = item.tmdbId
-            ? `<a class="disc-btn-info" href="https://www.themoviedb.org/${tmdbUrlType}/${item.tmdbId}" target="_blank" rel="noopener" title="View on TMDb">ℹ️</a>`
+        const infoBtnHtml = item.imdbUrl
+            ? `<a class="disc-btn-info" href="${esc(item.imdbUrl)}" target="_blank" rel="noopener" title="View on IMDb"><strong style="font-style:italic;font-family:serif">i</strong></a>`
             : '';
 
         card.innerHTML = `
@@ -1182,16 +1181,19 @@
                     ${upcoming && dateLabel ? `<div class="disc-date">📅 ${dateLabel}</div>` : ''}
                     ${isLib ? `<span class="disc-badge-lib">In Library</span>` : ''}
                     ${item.overview ? `<div class="disc-overview">${esc(item.overview)}</div>` : ''}
-                    <div class="disc-btn">${addBtnHtml}${wlBtnHtml}${item.tmdbUrl ? `<a class="disc-btn-info" href="${esc(item.tmdbUrl)}" target="_blank" rel="noopener" title="View on TMDb">ℹ️</a>` : ''}</div>
+                    <div class="disc-btn">${addBtnHtml}${wlBtnHtml}${item.imdbUrl ? `<a class="disc-btn-info" href="${esc(item.imdbUrl)}" target="_blank" rel="noopener" title="View on IMDb"><strong style="font-style:italic;font-family:serif">i</strong></a>` : ''}</div>
                 </div>
             </div>`;
         }
 
         function discSection(label, items) {
             if (!items || items.length === 0) return '';
+            // Filter out anything already in the library
+            const fresh = items.filter(i => !i.inLibrary);
+            if (fresh.length === 0) return '';
             return `<div class="discover-section">
                 <div class="section-title">${label}</div>
-                <div class="discover-row">${items.map(discCard).join('')}</div>
+                <div class="discover-row">${fresh.map(discCard).join('')}</div>
             </div>`;
         }
 
@@ -1202,13 +1204,15 @@
             const data = await r.json();
             if (data.error) { el.innerHTML = `<div class="state-msg">${esc(data.error)}</div>`; return; }
             let html = '';
-            html += discSection('🔥 Trending Movies This Week', data.trending_movies);
-            html += discSection('📺 Trending TV This Week', data.trending_tv);
-            html += discSection('🎬 Coming Soon — Movies', data.coming_soon);
-            html += discSection('📺 Coming Soon — TV Shows', data.upcoming_tv);
-            html += discSection('🍿 Popular on Streaming', data.streaming_now);
-            html += discSection('📡 New on TV', data.new_on_tv);
-            el.innerHTML = html || '<div class="state-msg">No recommendations available.</div>';
+            html += discSection('🔥 Trending Today — Movies', data.trending_movies);
+            html += discSection('📺 Trending Today — TV Shows', data.trending_tv);
+            html += discSection('🎬 Now in Theaters', data.now_in_theaters);
+            html += discSection('📡 Airing This Week', data.airing_this_week);
+            html += discSection('🗓️ Coming Soon — Movies', data.coming_soon);
+            html += discSection('📅 Upcoming TV Shows', data.upcoming_tv);
+            html += discSection('🍿 New on Streaming — Movies', data.new_on_streaming);
+            html += discSection('📲 New on Streaming — TV', data.new_tv_streaming);
+            el.innerHTML = html || '<div class="state-msg">Nothing new to discover — your library is very comprehensive!</div>';
         } catch(e) {
             el.innerHTML = '<div class="state-msg">Failed to load recommendations.</div>';
         }

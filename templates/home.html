@@ -850,9 +850,12 @@ function renderTVCandidates() {
         const warnings = isLarge ? '<span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>' : '';
         const statusClass = show.status === 'Ended' ? 'text-muted' : 'text-success';
         
+        const tvImdbUrl = show.imdb_id
+            ? `https://www.imdb.com/title/${show.imdb_id}/`
+            : `https://www.imdb.com/find/?q=${encodeURIComponent(show.title + (show.year ? ' ' + show.year : ''))}&s=tt&ttype=tv`;
         return `<tr data-index="${i}" id="tv-row-${i}">
             <td><span class="badge ${priorityClass}">${show.priority_score}</span><br><small class="text-light">${show.priority_label}</small></td>
-            <td><strong class="text-white">${escapeHtml(show.title)}</strong>${warnings}</td>
+            <td><strong class="text-white">${escapeHtml(show.title)}</strong>${warnings} <a href="${tvImdbUrl}" target="_blank" rel="noopener" title="View on IMDb" style="text-decoration:none;font-style:italic;font-family:serif;font-weight:700;font-size:13px;color:#f5c518;opacity:0.85" class="ms-1">i</a></td>
             <td class="${statusClass}">${show.status || 'N/A'}</td>
             <td>${formatRating(show.rating_pct, show.rating_source)}</td>
             <td>${formatPopularity(show.popularity)}</td>
@@ -1182,9 +1185,12 @@ function renderMovieCandidates() {
         const isLarge = (movie.size_bytes || 0) >= 50 * 1024 * 1024 * 1024;
         const warnings = isLarge ? '<span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle"></i></span>' : '';
         
+        const movieImdbUrl = movie.imdb_id
+            ? `https://www.imdb.com/title/${movie.imdb_id}/`
+            : `https://www.imdb.com/find/?q=${encodeURIComponent(movie.title + (movie.year ? ' ' + movie.year : ''))}&s=tt&ttype=ft`;
         return `<tr data-index="${i}" id="movie-row-${i}">
             <td><span class="badge ${priorityClass}">${movie.priority_score}</span><br><small class="text-light">${movie.priority_label}</small></td>
-            <td><strong class="text-white">${escapeHtml(movie.title)}</strong>${warnings}</td>
+            <td><strong class="text-white">${escapeHtml(movie.title)}</strong>${warnings} <a href="${movieImdbUrl}" target="_blank" rel="noopener" title="View on IMDb" style="text-decoration:none;font-style:italic;font-family:serif;font-weight:700;font-size:13px;color:#f5c518;opacity:0.85" class="ms-1">i</a></td>
             <td class="text-light">${movie.year || 'N/A'}</td>
             <td>${formatRating(movie.rating_pct, movie.rating_source)}</td>
             <td>${formatPopularity(movie.popularity)}</td>
