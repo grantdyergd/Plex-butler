@@ -410,9 +410,16 @@ async function adminAction(id, action) {
 async function bulkAction(action) {
     if (selectedIds.size === 0) return;
     const labels = {extend:'Extend',permanent:'Keep permanently',reset:'Reset to default schedule',forget:'Stop tracking',['delete-now']:'Delete from server'};
-    const msg = action === 'delete-now'
-        ? `⚠️ Permanently delete ${selectedIds.size} item(s) from the server?\n\nThis removes the files from Sonarr/Radarr. This cannot be undone.`
-        : `${labels[action]} ${selectedIds.size} item(s)?`;
+
+    if (action === 'delete-now') {
+        const ids = Array.from(selectedIds);
+        const msg = `⚠️ Permanently delete ${ids.length} item(s) from the server?\n\nThis removes the files from Sonarr/Radarr. This cannot be undone.`;
+        if (!confirm(msg)) return;
+        await runBulkDeleteWithProgress(ids);
+        return;
+    }
+
+    const msg = `${labels[action]} ${selectedIds.size} item(s)?`;
     if (!confirm(msg)) return;
     const res = await fetch('/api/expirations/bulk-action', {
         method: 'POST',
@@ -423,6 +430,97 @@ async function bulkAction(action) {
     if (!data.success) { alert(data.error || 'Bulk action failed'); return; }
     alert(`Done. ${data.ok} succeeded, ${data.failed} failed.` + (data.errors && data.errors.length ? '\n' + data.errors.join('\n') : ''));
     loadList();
+}
+
+async function runBulkDeleteWithProgress(ids) {
+    // Populate and show the progress modal
+    const modal = new bootstrap.Modal(document.getElementById('bulkDeleteModal'), {backdrop:'static', keyboard:false});
+    const bar       = document.getElementById('bdel-bar');
+    const barLabel  = document.getElementById('bdel-bar-label');
+    const statusEl  = document.getElementById('bdel-status');
+    const countEl   = document.getElementById('bdel-count');
+    const errList   = document.getElementById('bdel-errors');
+    const cancelBtn = document.getElementById('bdel-cancel');
+    const closeBtn  = document.getElementById('bdel-close');
+
+    let cancelled = false;
+    let ok = 0, failed = 0;
+    const errors = [];
+    const total = ids.length;
+
+    bar.style.width = '0%';
+    bar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-danger';
+    barLabel.textContent = `0 / ${total}`;
+    statusEl.textContent = 'Starting…';
+    countEl.textContent = '';
+    errList.innerHTML = '';
+    cancelBtn.disabled = false;
+    cancelBtn.classList.remove('d-none');
+    closeBtn.classList.add('d-none');
+
+    cancelBtn.onclick = () => { cancelled = true; cancelBtn.disabled = true; cancelBtn.textContent = 'Cancelling…'; };
+
+    modal.show();
+
+    // Fetch the title of each item to show in the status — we have them in the rendered table
+    const titleMap = {};
+    document.querySelectorAll('#exp-table-body tr').forEach(tr => {
+        const cb = tr.querySelector('input[type=checkbox]');
+        if (cb) {
+            const titleEl = tr.querySelector('td:nth-child(3)');
+            if (titleEl) titleMap[cb.value] = titleEl.textContent.trim();
+        }
+    });
+
+    for (let i = 0; i < ids.length; i++) {
+        if (cancelled) break;
+
+        const eid = ids[i];
+        const title = titleMap[eid] || `#${eid}`;
+        statusEl.textContent = `Deleting: ${title}`;
+        const pct = Math.round((i / total) * 100);
+        bar.style.width = pct + '%';
+        barLabel.textContent = `${i} / ${total}`;
+
+        try {
+            const res = await fetch(`/api/expirations/${eid}/action`, {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({action: 'delete-now'})
+            });
+            const data = await res.json();
+            if (data.success) {
+                ok++;
+            } else {
+                failed++;
+                errors.push(`${title}: ${data.error || 'unknown error'}`);
+            }
+        } catch(e) {
+            failed++;
+            errors.push(`${title}: network error`);
+        }
+
+        countEl.textContent = `✓ ${ok} deleted   ${failed > 0 ? `✗ ${failed} failed` : ''}`;
+        if (errors.length > 0) {
+            errList.innerHTML = errors.slice(-10).map(e => `<li class="text-danger small">${e}</li>`).join('');
+        }
+
+        // Small delay between items to avoid hammering Sonarr/Radarr
+        if (!cancelled && i < ids.length - 1) {
+            await new Promise(r => setTimeout(r, 300));
+        }
+    }
+
+    // Done
+    bar.style.width = '100%';
+    bar.className = 'progress-bar ' + (failed > 0 ? 'bg-warning' : 'bg-success');
+    barLabel.textContent = `${Math.min(ok + failed, total)} / ${total}`;
+    statusEl.textContent = cancelled
+        ? `Cancelled after ${ok + failed} of ${total} items.`
+        : `Complete — ${ok} deleted${failed > 0 ? `, ${failed} failed` : ''}.`;
+    cancelBtn.classList.add('d-none');
+    closeBtn.classList.remove('d-none');
+    closeBtn.onclick = () => { modal.hide(); loadList(); };
 }
 
 async function savePolicy() {
@@ -551,4 +649,33 @@ async function runHealthCheck() {
     }
 }
 </script>
+
+<!-- Bulk Delete Progress Modal -->
+<div class="modal fade" id="bulkDeleteModal" tabindex="-1" aria-labelledby="bulkDeleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title" id="bulkDeleteModalLabel"><i class="bi bi-trash me-2 text-danger"></i>Deleting Items…</h5>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between small text-muted mb-1">
+                        <span id="bdel-status">Starting…</span>
+                        <span id="bdel-bar-label">0 / 0</span>
+                    </div>
+                    <div class="progress" style="height:18px;">
+                        <div id="bdel-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-danger"
+                             role="progressbar" style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+                <div id="bdel-count" class="fw-semibold small mb-2"></div>
+                <ul id="bdel-errors" class="mb-0 ps-3" style="max-height:120px;overflow-y:auto;list-style:disc;"></ul>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button id="bdel-cancel" class="btn btn-outline-secondary btn-sm">Cancel</button>
+                <button id="bdel-close" class="btn btn-success btn-sm d-none">Done — Refresh list</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
