@@ -544,6 +544,7 @@
             color: #f59e0b;
         }
         .disc-date { font-size: 10px; color: #6366f1; font-weight: 600; }
+        .disc-actors { font-size: 10px; color: var(--muted); font-style: italic; line-height: 1.3; }
         .disc-badge-lib {
             display: inline-block;
             font-size: 9px;
@@ -1180,6 +1181,7 @@
                     ${rating ? `<div class="disc-rating">${rating}</div>` : ''}
                     ${upcoming && dateLabel ? `<div class="disc-date">📅 ${dateLabel}</div>` : ''}
                     ${isLib ? `<span class="disc-badge-lib">In Library</span>` : ''}
+                    ${item.actors && item.actors.length ? `<div class="disc-actors">🎭 ${esc(item.actors.join(' · '))}</div>` : ''}
                     ${item.overview ? `<div class="disc-overview">${esc(item.overview)}</div>` : ''}
                     <div class="disc-btn">${addBtnHtml}${wlBtnHtml}${item.imdbUrl ? `<a class="disc-btn-info" href="${esc(item.imdbUrl)}" target="_blank" rel="noopener" title="View on IMDb"><strong style="font-style:italic;font-family:serif">i</strong></a>` : ''}</div>
                 </div>

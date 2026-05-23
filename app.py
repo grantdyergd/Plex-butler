@@ -4196,6 +4196,54 @@ def media_discover():
          'with_watch_providers': streaming_providers, 'watch_region': 'US',
          'air_date.gte': past_7}, 'tv', 20)
 
+    # ── Enrich all items with real IMDb ID + top-5 cast ──────────────────────
+    # Build a deduplicated map of tmdbId -> item so we only call TMDb once per title.
+    all_sections = [
+        trending_movies, trending_tv, now_in_theaters, airing_this_week,
+        coming_soon, upcoming_tv, new_on_streaming, new_tv_streaming,
+    ]
+    item_map = {}  # tmdbId -> item dict (shared reference)
+    for section in all_sections:
+        for it in section:
+            tid = it.get('tmdbId')
+            if tid and tid not in item_map:
+                item_map[tid] = it
+
+    def _enrich(tmdb_id, media_type):
+        """Fetch credits + external_ids for one TMDb ID; return enrichment dict."""
+        try:
+            if media_type == 'movie':
+                url = f"{tmdb_base}/movie/{tmdb_id}"
+                cast_key = 'credits'
+            else:
+                url = f"{tmdb_base}/tv/{tmdb_id}"
+                cast_key = 'aggregate_credits'
+            resp = requests.get(url, params={
+                'api_key': tmdb_key,
+                'append_to_response': f'{cast_key},external_ids',
+                'language': 'en-US',
+            }, timeout=8).json()
+            cast_list = resp.get(cast_key, {}).get('cast', [])
+            actors = [a.get('name') for a in cast_list[:5] if a.get('name')]
+            imdb_id = resp.get('external_ids', {}).get('imdb_id', '')
+            imdb_url = f"https://www.imdb.com/title/{imdb_id}/" if imdb_id else None
+            return tmdb_id, actors, imdb_url
+        except Exception:
+            return tmdb_id, [], None
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = {
+            executor.submit(_enrich, tid, item_map[tid]['mediaType']): tid
+            for tid in item_map
+        }
+        for future in as_completed(futures):
+            tid, actors, imdb_url = future.result()
+            if tid in item_map:
+                item_map[tid]['actors'] = actors
+                if imdb_url:
+                    item_map[tid]['imdbUrl'] = imdb_url
+
     return jsonify({
         'trending_movies': trending_movies,
         'trending_tv': trending_tv,
