@@ -22,42 +22,77 @@
                     <div class="wizard-line"></div>
                     <div class="wizard-step">6</div>
                 </div>
-                
-                <h5 class="text-center mb-4"><i class="bi bi-envelope me-2"></i>Email Configuration (Optional)</h5>
-                <p class="text-muted text-center mb-4">Set up email notifications to alert requesters when shows are removed.</p>
-                
-                <div class="alert alert-info">
+
+                <h5 class="text-center mb-1"><i class="bi bi-envelope me-2"></i>Email Configuration</h5>
+                <p class="text-muted text-center mb-3">Set up outgoing email so Plex Butler can notify requesters.</p>
+
+                <div class="alert alert-info py-2">
                     <i class="bi bi-info-circle me-2"></i>
-                    This step is optional. Skip if you don't want email notifications.
+                    This step is optional — skip it if you don't want email notifications.
                 </div>
-                
+
                 <form method="POST">
+                    <h6 class="text-uppercase text-muted small fw-bold mb-3 mt-2">SMTP Server</h6>
                     <div class="row">
                         <div class="col-md-8 mb-3">
                             <label for="smtp_host" class="form-label">SMTP Host</label>
-                            <input type="text" class="form-control" id="smtp_host" name="smtp_host" 
+                            <input type="text" class="form-control" id="smtp_host" name="smtp_host"
                                    value="{{ smtp_host|default('') }}" placeholder="smtp.gmail.com">
+                            <div class="form-text">Gmail: smtp.gmail.com &nbsp;|&nbsp; Outlook: smtp.office365.com</div>
                         </div>
                         <div class="col-md-4 mb-3">
                             <label for="smtp_port" class="form-label">Port</label>
-                            <input type="number" class="form-control" id="smtp_port" name="smtp_port" 
+                            <input type="number" class="form-control" id="smtp_port" name="smtp_port"
                                    value="{{ smtp_port|default('587') }}" placeholder="587">
+                            <div class="form-text">Usually 587</div>
                         </div>
                     </div>
                     <div class="mb-3">
                         <label for="smtp_user" class="form-label">SMTP Username</label>
-                        <input type="text" class="form-control" id="smtp_user" name="smtp_user" 
-                               value="{{ smtp_user|default('') }}">
+                        <input type="text" class="form-control" id="smtp_user" name="smtp_user"
+                               value="{{ smtp_user|default('') }}" placeholder="you@gmail.com">
+                        <div class="form-text">Usually your email address</div>
                     </div>
                     <div class="mb-3">
                         <label for="smtp_password" class="form-label">SMTP Password</label>
                         <input type="password" class="form-control" id="smtp_password" name="smtp_password">
+                        <div class="form-text">
+                            Gmail users: use an
+                            <a href="https://myaccount.google.com/apppasswords" target="_blank" class="text-info">App Password</a>,
+                            not your regular password.
+                        </div>
                     </div>
                     <div class="mb-4">
-                        <label for="smtp_from" class="form-label">From Email Address</label>
-                        <input type="email" class="form-control" id="smtp_from" name="smtp_from" 
-                               value="{{ smtp_from|default('') }}" placeholder="noreply@example.com">
+                        <label for="smtp_from" class="form-label">From Address</label>
+                        <input type="email" class="form-control" id="smtp_from" name="smtp_from"
+                               value="{{ smtp_from|default('') }}" placeholder="noreply@yourdomain.com">
+                        <div class="form-text">This is what recipients see in the "From" field</div>
                     </div>
+
+                    <hr class="my-3">
+                    <h6 class="text-uppercase text-muted small fw-bold mb-3">Email Link Settings</h6>
+
+                    <div class="mb-3">
+                        <label for="admin_fallback_email" class="form-label">Admin Fallback Email</label>
+                        <input type="email" class="form-control" id="admin_fallback_email" name="admin_fallback_email"
+                               value="{{ admin_fallback_email|default('') }}" placeholder="you@yourdomain.com">
+                        <div class="form-text">
+                            When media has no known requester, expiration warning emails go here instead.
+                            Set this to your own email so nothing slips through silently.
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="custom_domain" class="form-label">Your App's Public URL</label>
+                        <input type="url" class="form-control" id="custom_domain" name="custom_domain"
+                               value="{{ custom_domain|default('') }}" placeholder="https://myplex.yourdomain.com">
+                        <div class="form-text">
+                            The address people use to reach this app from outside your network.
+                            Used to build clickable links inside notification emails (e.g. "Extend" / "Keep" buttons).
+                            Leave blank if you're only using it locally.
+                        </div>
+                    </div>
+
                     <div class="d-flex gap-2">
                         <a href="{{ url_for('setup_step4') }}" class="btn btn-secondary">
                             <i class="bi bi-arrow-left me-2"></i>Back

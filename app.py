@@ -462,29 +462,41 @@ def setup_step2():
     if request.method == 'POST':
         sonarr_url = request.form.get('sonarr_url', '').strip().rstrip('/')
         sonarr_api_key = request.form.get('sonarr_api_key', '').strip()
-        
+        radarr_url = request.form.get('radarr_url', '').strip().rstrip('/')
+        radarr_api_key = request.form.get('radarr_api_key', '').strip()
+
         errors = []
         if not sonarr_url:
             errors.append('Sonarr URL is required')
         if not sonarr_api_key:
             errors.append('Sonarr API Key is required')
-        
+        if not radarr_url:
+            errors.append('Radarr URL is required')
+        if not radarr_api_key:
+            errors.append('Radarr API Key is required')
+
         if errors:
             for error in errors:
                 flash(error, 'error')
-            return render_template('setup/step2.html', 
-                                   sonarr_url=sonarr_url, 
-                                   sonarr_api_key=sonarr_api_key)
-        
+            return render_template('setup/step2.html',
+                                   sonarr_url=sonarr_url,
+                                   sonarr_api_key=sonarr_api_key,
+                                   radarr_url=radarr_url,
+                                   radarr_api_key=radarr_api_key)
+
         set_setting('SONARR_URL', sonarr_url)
         set_setting('SONARR_API_KEY', sonarr_api_key, is_secret=True)
-        
-        flash('Sonarr configuration saved!', 'success')
+        set_setting('RADARR_URL', radarr_url)
+        set_setting('RADARR_API_KEY', radarr_api_key, is_secret=True)
+
+        flash('Media server configuration saved!', 'success')
         return redirect(url_for('setup_step3'))
-    
+
     return render_template('setup/step2.html',
                            sonarr_url=get_setting('SONARR_URL'),
-                           sonarr_api_key=get_setting('SONARR_API_KEY'))
+                           sonarr_api_key=get_setting('SONARR_API_KEY'),
+                           radarr_url=get_setting('RADARR_URL'),
+                           radarr_api_key=get_setting('RADARR_API_KEY'))
 
 
 @app.route('/setup/step3', methods=['GET', 'POST'])
@@ -547,22 +559,31 @@ def setup_step5():
         smtp_user = request.form.get('smtp_user', '').strip()
         smtp_password = request.form.get('smtp_password', '').strip()
         smtp_from = request.form.get('smtp_from', '').strip()
-        
+        admin_fallback_email = request.form.get('admin_fallback_email', '').strip().lower()
+        custom_domain = request.form.get('custom_domain', '').strip().rstrip('/')
+
         if smtp_host:
             set_setting('SMTP_HOST', smtp_host)
             set_setting('SMTP_PORT', smtp_port)
             set_setting('SMTP_USER', smtp_user)
             set_setting('SMTP_PASSWORD', smtp_password, is_secret=True)
             set_setting('SMTP_FROM', smtp_from)
-        
+        if admin_fallback_email:
+            set_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', admin_fallback_email)
+        if custom_domain:
+            set_setting('CUSTOM_DOMAIN', custom_domain)
+            set_setting('EXPIRATION_PUBLIC_URL', custom_domain)
+
         flash('Email configuration saved!', 'success')
         return redirect(url_for('setup_step6'))
-    
+
     return render_template('setup/step5.html',
                            smtp_host=get_setting('SMTP_HOST'),
                            smtp_port=get_setting('SMTP_PORT', '587'),
                            smtp_user=get_setting('SMTP_USER'),
-                           smtp_from=get_setting('SMTP_FROM'))
+                           smtp_from=get_setting('SMTP_FROM'),
+                           admin_fallback_email=get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', ''),
+                           custom_domain=get_setting('CUSTOM_DOMAIN', ''))
 
 
 @app.route('/setup/step6', methods=['GET', 'POST'])
