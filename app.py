@@ -216,6 +216,21 @@ class DeletedMediaArchive(db.Model):
     notes = db.Column(db.Text, nullable=True)
 
 
+class BulkDeleteJob(db.Model):
+    """Tracks a server-side bulk delete job so all workers share state."""
+    __tablename__ = 'bulk_delete_job'
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    total = db.Column(db.Integer, default=0)
+    ok = db.Column(db.Integer, default=0)
+    failed = db.Column(db.Integer, default=0)
+    errors_json = db.Column(db.Text, default='[]')
+    done = db.Column(db.Boolean, default=False)
+    cancelled = db.Column(db.Boolean, default=False)
+    current = db.Column(db.String(500), default='')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class ScanCache(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     scan_type = db.Column(db.String(20), nullable=False)  # 'tv' or 'movie'
@@ -5233,8 +5248,8 @@ EXPIRATION_DEFAULTS = {
 # In-process lock to keep manual scan-now and scheduled tick from racing each other inside one worker
 _expiration_run_lock = threading.Lock()
 
-# In-memory store for server-side bulk delete jobs {job_id -> state_dict}
-_bulk_delete_jobs: dict = {}
+# (legacy in-memory fallback — no longer used; job state lives in BulkDeleteJob table)
+_bulk_delete_jobs: dict = {}  # kept to avoid NameError on any stale references
 
 
 def _run_expiration_migrations():
@@ -7207,10 +7222,21 @@ def expirations_bulk_action():
     return jsonify({'success': True, 'ok': ok_count, 'failed': fail_count, 'errors': errors[:5]})
 
 
+def _job_append_error(job_rec, msg):
+    """Append an error string to a BulkDeleteJob record's errors_json list."""
+    try:
+        errs = json.loads(job_rec.errors_json or '[]')
+    except Exception:
+        errs = []
+    errs.append(msg)
+    job_rec.errors_json = json.dumps(errs[-20:])
+
+
 @app.route('/api/expirations/bulk-delete-start', methods=['POST'])
 @login_required
 def expirations_bulk_delete_start():
-    """Kick off a server-side bulk delete. Returns job_id — client polls for progress."""
+    """Kick off a server-side bulk delete. Returns job_id — client polls for progress.
+    State is persisted in the DB so all workers can read it."""
     data = request.json or {}
     ids = [int(i) for i in data.get('ids', []) if str(i).isdigit()]
     if not ids:
@@ -7218,55 +7244,83 @@ def expirations_bulk_delete_start():
 
     job_id = secrets.token_hex(8)
     username = current_user.username if current_user.is_authenticated else 'admin'
-    _bulk_delete_jobs[job_id] = {
-        'ok': 0, 'failed': 0, 'errors': [], 'total': len(ids),
-        'done': False, 'cancelled': False, 'current': 'Starting…',
-    }
+
+    job_rec = BulkDeleteJob(job_id=job_id, total=len(ids), current='Starting…')
+    db.session.add(job_rec)
+    db.session.commit()
 
     def do_delete(jid, item_ids, uname):
-        job = _bulk_delete_jobs[jid]
         dry = _is_dry_run()
         with app.app_context():
             for eid in item_ids:
-                if job['cancelled']:
+                # Re-query job each iteration so cancellation is visible across workers
+                j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                if not j or j.cancelled:
                     break
                 try:
                     rec = db.session.get(MediaExpiration, eid)
                     if not rec:
-                        job['failed'] += 1
-                        job['errors'].append(f'#{eid}: not found')
+                        j.failed += 1
+                        _job_append_error(j, f'#{eid}: not found')
+                        db.session.commit()
                         continue
-                    job['current'] = rec.title
+
+                    j.current = rec.title
+                    db.session.commit()
+
                     try:
                         _archive_deletion(rec,
                                           deleted_by=('admin-dry-run' if dry else 'admin-delete-now'),
                                           dry_run=dry, notes=f'bulk delete by {uname}')
                     except Exception as e:
                         db.session.rollback()
-                        job['failed'] += 1
-                        job['errors'].append(f'{rec.title}: archive failed ({e})')
+                        j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                        if j:
+                            j.failed += 1
+                            _job_append_error(j, f'{rec.title}: archive failed ({e})')
+                            db.session.commit()
                         continue
+
                     arr_ok, arr_reason = _delete_via_arr(rec)
                     if not arr_ok:
                         db.session.rollback()
-                        job['failed'] += 1
-                        job['errors'].append(f'{rec.title}: {arr_reason or "delete failed"}')
+                        j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                        if j:
+                            j.failed += 1
+                            _job_append_error(j, f'{rec.title}: {arr_reason or "delete failed"}')
+                            db.session.commit()
                         continue
+
                     rec.status = 'deleted'
                     rec.deleted_at = datetime.utcnow()
                     if dry:
                         rec.notes = 'dry-run-deletion'
+                    j.ok += 1
                     db.session.commit()
-                    job['ok'] += 1
+
                 except Exception as e:
                     try:
                         db.session.rollback()
                     except Exception:
                         pass
-                    job['failed'] += 1
-                    job['errors'].append(f'#{eid}: unexpected error ({e})')
-        job['done'] = True
-        job['current'] = ''
+                    try:
+                        j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                        if j:
+                            j.failed += 1
+                            _job_append_error(j, f'#{eid}: unexpected error ({e})')
+                            db.session.commit()
+                    except Exception:
+                        pass
+
+            # Mark done
+            try:
+                j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                if j:
+                    j.done = True
+                    j.current = ''
+                    db.session.commit()
+            except Exception:
+                pass
 
     t = threading.Thread(target=do_delete, args=(job_id, ids, username), daemon=True)
     t.start()
@@ -7276,26 +7330,31 @@ def expirations_bulk_delete_start():
 @app.route('/api/expirations/bulk-delete-status/<job_id>')
 @login_required
 def expirations_bulk_delete_status(job_id):
-    job = _bulk_delete_jobs.get(job_id)
-    if not job:
+    j = BulkDeleteJob.query.filter_by(job_id=job_id).first()
+    if not j:
         return jsonify({'success': False, 'error': 'Job not found'}), 404
+    try:
+        errors = json.loads(j.errors_json or '[]')
+    except Exception:
+        errors = []
     return jsonify({
         'success': True,
-        'ok': job['ok'],
-        'failed': job['failed'],
-        'errors': job['errors'][-20:],
-        'total': job['total'],
-        'done': job['done'],
-        'current': job['current'],
+        'ok': j.ok,
+        'failed': j.failed,
+        'errors': errors,
+        'total': j.total,
+        'done': j.done,
+        'current': j.current,
     })
 
 
 @app.route('/api/expirations/bulk-delete-cancel/<job_id>', methods=['POST'])
 @login_required
 def expirations_bulk_delete_cancel(job_id):
-    job = _bulk_delete_jobs.get(job_id)
-    if job:
-        job['cancelled'] = True
+    j = BulkDeleteJob.query.filter_by(job_id=job_id).first()
+    if j:
+        j.cancelled = True
+        db.session.commit()
     return jsonify({'success': True})
 
 
