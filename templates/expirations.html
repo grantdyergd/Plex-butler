@@ -16,25 +16,36 @@
     </div>
 </div>
 
-<div class="card mb-4 border-0 shadow-sm" id="health-card">
-    <div class="card-header d-flex align-items-center justify-content-between">
+<div class="card mb-3 border-0 shadow-sm" id="health-card">
+    <div class="card-header d-flex align-items-center justify-content-between" role="button"
+         data-bs-toggle="collapse" data-bs-target="#health-body" aria-expanded="false" style="cursor:pointer;user-select:none">
         <h5 class="mb-0"><i class="bi bi-heart-pulse me-2"></i>Email Health Check</h5>
-        <button class="btn btn-sm btn-outline-secondary" onclick="runHealthCheck()" id="health-btn">
-            <i class="bi bi-arrow-clockwise me-1"></i>Check
-        </button>
+        <i class="bi bi-chevron-down" id="health-chevron" style="transition:transform .2s"></i>
     </div>
-    <div class="card-body">
-        <div id="health-loading" class="text-muted small d-none"><span class="spinner-border spinner-border-sm me-1"></span>Checking…</div>
-        <div id="health-result" class="d-none">
-            <div id="health-checks" class="mb-3"></div>
-            <div id="health-extra" class="small text-muted"></div>
+    <div class="collapse" id="health-body">
+        <div class="card-body">
+            <div class="mb-2">
+                <button class="btn btn-sm btn-outline-secondary" onclick="runHealthCheck()" id="health-btn">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Check
+                </button>
+            </div>
+            <div id="health-loading" class="text-muted small d-none"><span class="spinner-border spinner-border-sm me-1"></span>Checking…</div>
+            <div id="health-result" class="d-none">
+                <div id="health-checks" class="mb-3"></div>
+                <div id="health-extra" class="small text-muted"></div>
+            </div>
+            <div id="health-initial" class="text-muted small">Click <strong>Check</strong> to see why you may or may not be receiving warning emails.</div>
         </div>
-        <div id="health-initial" class="text-muted small">Click <strong>Check</strong> to see why you may or may not be receiving warning emails.</div>
     </div>
 </div>
 
-<div class="card mb-4">
-    <div class="card-header"><h5 class="mb-0"><i class="bi bi-gear me-2"></i>Expiration Policy</h5></div>
+<div class="card mb-3">
+    <div class="card-header d-flex align-items-center justify-content-between" role="button"
+         data-bs-toggle="collapse" data-bs-target="#policy-body" aria-expanded="false" style="cursor:pointer;user-select:none">
+        <h5 class="mb-0"><i class="bi bi-gear me-2"></i>Expiration Policy</h5>
+        <i class="bi bi-chevron-down" id="policy-chevron" style="transition:transform .2s"></i>
+    </div>
+    <div class="collapse" id="policy-body">
     <div class="card-body">
         <div class="row g-3">
             <div class="col-md-3">
@@ -138,6 +149,7 @@
         <p class="text-muted small mt-3 mb-0">Last automated run: <span id="last-run">{{ last_run }}</span></p>
         {% endif %}
         <div id="policy-msg" class="alert alert-success mt-3 d-none"></div>
+    </div>
     </div>
 </div>
 
@@ -792,6 +804,23 @@ async function runHealthCheck() {
         loading.classList.add('d-none');
     }
 }
+</script>
+
+<!-- Collapsible card chevron rotation -->
+<script>
+['health-body','policy-body'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const chevronId = id === 'health-body' ? 'health-chevron' : 'policy-chevron';
+    el.addEventListener('show.bs.collapse', () => {
+        const ch = document.getElementById(chevronId);
+        if (ch) ch.style.transform = 'rotate(-180deg)';
+    });
+    el.addEventListener('hide.bs.collapse', () => {
+        const ch = document.getElementById(chevronId);
+        if (ch) ch.style.transform = 'rotate(0deg)';
+    });
+});
 </script>
 
 <!-- Sticky floating action bar (appears when items are selected, stays visible while scrolling) -->
