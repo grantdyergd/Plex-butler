@@ -171,6 +171,7 @@ class MediaExpiration(db.Model):
     last_warning_error = db.Column(db.Text, nullable=True)
     requester_lookup_attempts = db.Column(db.Integer, default=0)
     series_status = db.Column(db.String(20), nullable=True)          # Sonarr: continuing|ended|upcoming (shows only)
+    plex_plays = db.Column(db.Integer, default=0)                    # total plays (episodes viewed for shows, views for movies) from Plex
 
     __table_args__ = (db.UniqueConstraint('media_type', 'service_id', name='uq_expiration_type_id'),)
 
@@ -5244,6 +5245,7 @@ def _run_expiration_migrations():
         "ALTER TABLE ombi_intro_email_log ADD COLUMN IF NOT EXISTS ombi_user_id VARCHAR(100)",
         "ALTER TABLE watchlist_sync_item ADD COLUMN IF NOT EXISTS removed_watched_at TIMESTAMP",
         "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS series_status VARCHAR(20)",
+        "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS plex_plays INTEGER DEFAULT 0",
     ]
     with app.app_context():
         for sql in statements:
@@ -5372,6 +5374,57 @@ def get_expiration_policy():
         'intro_email_enabled': get_setting('EXPIRATION_INTRO_EMAIL_ENABLED', 'true').lower() == 'true',
         'daily_intake_limit': int(get_setting('EXPIRATION_DAILY_INTAKE_LIMIT', '0') or '0'),
     }
+
+
+def _fetch_plex_view_counts():
+    """Query Plex library sections and return {(title_lower, year, media_type): play_count}.
+    For shows, play_count = total episodes viewed. For movies, play_count = viewCount."""
+    plex_url = get_setting('PLEX_URL', '').strip().rstrip('/')
+    plex_token = get_setting('PLEX_TOKEN', '').strip()
+    if not plex_url or not plex_token:
+        return {}
+    try:
+        sections_resp = requests.get(
+            f"{plex_url}/library/sections",
+            params={'X-Plex-Token': plex_token},
+            headers={'Accept': 'application/json'},
+            timeout=10,
+        )
+        if sections_resp.status_code != 200:
+            return {}
+        dirs = sections_resp.json().get('MediaContainer', {}).get('Directory', [])
+    except Exception as e:
+        print(f'[Plex ViewCounts] Sections error: {e}')
+        return {}
+    result = {}
+    for section in dirs:
+        sec_type = section.get('type')
+        sec_key = section.get('key')
+        if sec_type not in ('movie', 'show'):
+            continue
+        try:
+            lib_resp = requests.get(
+                f"{plex_url}/library/sections/{sec_key}/all",
+                params={'X-Plex-Token': plex_token},
+                headers={'Accept': 'application/json'},
+                timeout=30,
+            )
+            if lib_resp.status_code != 200:
+                continue
+            for m in lib_resp.json().get('MediaContainer', {}).get('Metadata', []):
+                tl = (m.get('title') or '').lower()
+                yr = m.get('year')
+                try:
+                    yr = int(yr) if yr else None
+                except (ValueError, TypeError):
+                    yr = None
+                media_type = 'movie' if sec_type == 'movie' else 'show'
+                play_count = int(m.get('viewCount') or 0) if sec_type == 'movie' else int(m.get('viewedLeafCount') or 0)
+                result[(tl, yr, media_type)] = play_count
+        except Exception as e:
+            print(f'[Plex ViewCounts] Section {sec_key} error: {e}')
+    print(f'[Plex ViewCounts] Fetched play counts for {len(result)} items')
+    return result
 
 
 def _mark_expiration_permanent(media_type, service_id, title, year=None):
@@ -5731,6 +5784,22 @@ def expiration_sync_new_items():
         except Exception as e:
             db.session.rollback()
             print(f"[Expiration Sync] {media_type} error: {e}")
+
+    # Update Plex play counts for all tracked items in one pass
+    try:
+        view_counts = _fetch_plex_view_counts()
+        if view_counts:
+            active_recs = MediaExpiration.query.filter(
+                MediaExpiration.status.in_(['active', 'extended', 'permanent'])
+            ).all()
+            for rec in active_recs:
+                key = ((rec.title or '').lower(), rec.year, rec.media_type)
+                if key in view_counts:
+                    rec.plex_plays = view_counts[key]
+            db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"[Expiration Sync] Plex play count update error: {e}")
 
     print(f"[Expiration Sync] {counts}")
     return counts
@@ -6756,6 +6825,7 @@ def expirations_list_api():
             'extension_count': i.extension_count or 0,
             'notes': i.notes,
             'series_status': i.series_status,
+            'plex_plays': i.plex_plays or 0,
         } for i in items]
     })
 

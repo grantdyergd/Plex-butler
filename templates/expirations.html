@@ -292,8 +292,8 @@ const CHIP_DEFS = [
     { id: 'movie',       label: 'Movies',            icon: 'bi-film',            filter: i => i.media_type === 'movie' },
     { id: 'no-req',      label: 'No requester',      icon: 'bi-person-x',        filter: i => !i.requester_email },
     { id: 'has-req',     label: 'Has requester',     icon: 'bi-person-check',    filter: i => !!i.requester_email },
-    { id: 'never-seen',  label: 'Never seen',        icon: 'bi-eye-slash',       filter: i => !i.last_seen_at },
-    { id: 'seen',        label: 'Seen in Plex',      icon: 'bi-eye',             filter: i => !!i.last_seen_at },
+    { id: 'never-seen',  label: 'Never seen',        icon: 'bi-eye-slash',       filter: i => (i.plex_plays || 0) === 0 },
+    { id: 'seen',        label: 'Seen in Plex',      icon: 'bi-eye',             filter: i => (i.plex_plays || 0) > 0 },
     { id: 'ended',       label: 'Series ended',      icon: 'bi-flag',            filter: i => i.series_status === 'ended' },
     { id: 'airing',      label: 'Still airing',      icon: 'bi-broadcast',       filter: i => i.media_type === 'show' && i.series_status && i.series_status !== 'ended' && i.series_status !== 'deleted' },
     { id: 'expiring',    label: 'Expiring < 30d',    icon: 'bi-hourglass-split', filter: i => i.days_left !== null && i.days_left >= 0 && i.days_left < 30 },
@@ -404,9 +404,25 @@ function escapeHtml(s){return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;'
 function fmtLocalDate(iso){ if(!iso) return '—'; try { return new Date(iso).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); } catch(_) { return iso.slice(0,10); } }
 
 function updateBulkButtons() {
-    document.getElementById('selected-count').textContent = selectedIds.size;
-    const dis = selectedIds.size === 0;
+    const count = selectedIds.size;
+    document.getElementById('selected-count').textContent = count;
+    const dis = count === 0;
     ['bulk-extend','bulk-perm','bulk-reset','bulk-forget','bulk-delete'].forEach(id => document.getElementById(id).disabled = dis);
+    // Floating sticky bar
+    const bar = document.getElementById('sticky-action-bar');
+    if (bar) {
+        bar.style.display = count > 0 ? 'block' : 'none';
+        const sc = document.getElementById('sticky-sel-count');
+        if (sc) sc.textContent = count;
+    }
+}
+
+function clearSelection() {
+    selectedIds.clear();
+    document.querySelectorAll('.row-check').forEach(c => c.checked = false);
+    const sa = document.getElementById('select-all');
+    if (sa) sa.checked = false;
+    updateBulkButtons();
 }
 
 function toggleAll(cb) {
@@ -777,6 +793,21 @@ async function runHealthCheck() {
     }
 }
 </script>
+
+<!-- Sticky floating action bar (appears when items are selected, stays visible while scrolling) -->
+<div id="sticky-action-bar" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:1040;background:#1e293b;border-top:2px solid #334155;padding:10px 20px;box-shadow:0 -4px 24px rgba(0,0,0,0.45);">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+        <span class="text-white fw-semibold" style="white-space:nowrap"><i class="bi bi-check2-square me-1"></i><span id="sticky-sel-count">0</span> selected</span>
+        <div class="btn-group btn-group-sm flex-grow-1 flex-wrap">
+            <button class="btn btn-outline-info" onclick="bulkAction('extend')"><i class="bi bi-calendar-plus me-1"></i>Extend</button>
+            <button class="btn btn-outline-success" onclick="bulkAction('permanent')"><i class="bi bi-shield-check me-1"></i>Keep</button>
+            <button class="btn btn-outline-warning" onclick="bulkAction('reset')"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>
+            <button class="btn btn-outline-secondary" onclick="bulkAction('forget')"><i class="bi bi-x-circle me-1"></i>Forget</button>
+            <button class="btn btn-danger" onclick="bulkAction('delete-now')"><i class="bi bi-trash me-1"></i>Delete Now</button>
+        </div>
+        <button class="btn btn-sm btn-outline-light" onclick="clearSelection()" style="white-space:nowrap"><i class="bi bi-x me-1"></i>Clear</button>
+    </div>
+</div>
 
 <!-- Bulk Delete Progress Modal -->
 <div class="modal fade" id="bulkDeleteModal" tabindex="-1" aria-labelledby="bulkDeleteModalLabel" aria-hidden="true">
