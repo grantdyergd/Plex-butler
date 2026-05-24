@@ -3533,6 +3533,11 @@ def media_chat_add():
                             json=payload, timeout=15)
             
             if r.ok:
+                permanent = bool(data.get('permanent', False))
+                if permanent:
+                    arr_id = r.json().get('id')
+                    if arr_id:
+                        _mark_expiration_permanent('show', arr_id, item.get('title'), item.get('year'))
                 return jsonify({'success': True, 'message': f'**{item.get("title")}** added to Sonarr and searching for episodes.'})
             
             error_data = r.json()
@@ -3595,6 +3600,11 @@ def media_chat_add():
                             json=payload, timeout=15)
             
             if r.ok:
+                permanent = bool(data.get('permanent', False))
+                if permanent:
+                    arr_id = r.json().get('id')
+                    if arr_id:
+                        _mark_expiration_permanent('movie', arr_id, item.get('title'), item.get('year'))
                 return jsonify({'success': True, 'message': f'**{item.get("title")}** added to Radarr and searching for download.'})
             
             error_data = r.json()
@@ -5360,7 +5370,35 @@ def get_expiration_policy():
         'grace_days': int(get_setting('EXPIRATION_GRACE_DAYS', '7') or '7'),
         'extend_months': int(get_setting('EXPIRATION_EXTEND_MONTHS', '6') or '6'),
         'intro_email_enabled': get_setting('EXPIRATION_INTRO_EMAIL_ENABLED', 'true').lower() == 'true',
+        'daily_intake_limit': int(get_setting('EXPIRATION_DAILY_INTAKE_LIMIT', '0') or '0'),
     }
+
+
+def _mark_expiration_permanent(media_type, service_id, title, year=None):
+    """Create or mark a MediaExpiration record as permanently kept (used when adding via Discovery/Watchlist)."""
+    try:
+        rec = MediaExpiration.query.filter_by(media_type=media_type, service_id=service_id).first()
+        if rec:
+            rec.permanent = True
+            rec.status = 'permanent'
+            rec.notes = 'marked-permanent-on-add'
+        else:
+            rec = MediaExpiration(
+                media_type=media_type,
+                service_id=service_id,
+                title=title,
+                year=year,
+                permanent=True,
+                status='permanent',
+                added_at=datetime.utcnow(),
+                last_seen_at=datetime.utcnow(),
+                notes='added-as-permanent',
+            )
+            db.session.add(rec)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"[Mark Permanent] {title}: {e}")
 
 
 def _base_url_for_email():
@@ -5548,8 +5586,8 @@ def _select_primary_requester(users, current_email=None):
     return primary['email'], primary['name'], [x['email'] for x in others], [x.get('user_id') for x in others]
 
 
-def _process_arr_item(media_type, item, requesters_by_title, policy, use_oldest_file):
-    """Upsert one *arr item into MediaExpiration. Returns ('added'|'revived'|'updated'|'skipped')."""
+def _process_arr_item(media_type, item, requesters_by_title, policy, use_oldest_file, intake_state=None):
+    """Upsert one *arr item into MediaExpiration. Returns ('added'|'revived'|'updated'|'skipped'|'capped')."""
     sid = item.get('id')
     if not sid:
         return 'skipped'
@@ -5611,6 +5649,12 @@ def _process_arr_item(media_type, item, requesters_by_title, policy, use_oldest_
     excluded = _is_title_excluded(media_type, title, item.get('year'))
     primary_email, primary_name, extra_emails, _ = _select_primary_requester(users)
 
+    # Daily intake cap: limit how many no-requester items are added per run (onboarding safety valve)
+    if not primary_email and not excluded and intake_state is not None:
+        cap = intake_state.get('limit', 0)
+        if cap > 0 and intake_state.get('count', 0) >= cap:
+            return 'capped'
+
     rec = MediaExpiration(
         media_type=media_type,
         service_id=sid,
@@ -5631,6 +5675,8 @@ def _process_arr_item(media_type, item, requesters_by_title, policy, use_oldest_
         **ids,
     )
     db.session.add(rec)
+    if not primary_email and not excluded and intake_state is not None:
+        intake_state['count'] = intake_state.get('count', 0) + 1
     return 'added'
 
 
@@ -5638,11 +5684,14 @@ def expiration_sync_new_items():
     """Discover new *arr items, refresh existing ones, mark zombies as missing."""
     policy = get_expiration_policy()
     use_oldest_file = get_setting('EXPIRATION_USE_OLDEST_FILE_DATE', 'false').lower() == 'true'
+    daily_limit = policy.get('daily_intake_limit', 0)
+    # Shared across both show+movie loops so the cap is total, not per-type
+    intake_state = {'limit': daily_limit, 'count': 0}
 
     tv_users = get_ombi_requesters_full('show')
     mv_users = get_ombi_requesters_full('movie')
 
-    counts = {'added': 0, 'revived': 0, 'updated': 0, 'missing': 0}
+    counts = {'added': 0, 'revived': 0, 'updated': 0, 'missing': 0, 'capped': 0}
 
     for media_type, arr_path, key_setting, url_setting in [
         ('show', '/api/v3/series', 'SONARR_API_KEY', 'SONARR_URL'),
@@ -5661,7 +5710,7 @@ def expiration_sync_new_items():
             present_ids = set()
             requesters = tv_users if media_type == 'show' else mv_users
             for it in items:
-                outcome = _process_arr_item(media_type, it, requesters, policy, use_oldest_file)
+                outcome = _process_arr_item(media_type, it, requesters, policy, use_oldest_file, intake_state=intake_state)
                 if outcome in counts:
                     counts[outcome] += 1
                 if it.get('id'):
@@ -6180,7 +6229,7 @@ def _sync_watchlist_item(item_row):
         sonarr_url = get_setting('SONARR_URL', '').strip().rstrip('/')
         sonarr_key = get_setting('SONARR_API_KEY', '').strip()
         if not sonarr_url or not sonarr_key:
-            return 'skipped', 'Sonarr not configured'
+            return 'skipped', 'Sonarr not configured', None
         try:
             roots = requests.get(f"{sonarr_url}/api/v3/rootfolder",
                                  params={'apikey': sonarr_key}, timeout=10).json()
@@ -6224,21 +6273,22 @@ def _sync_watchlist_item(item_row):
             r = requests.post(f"{sonarr_url}/api/v3/series",
                               params={'apikey': sonarr_key}, json=payload, timeout=15)
             if r.ok:
-                return 'added', f'Added to Sonarr (profile id {qual_id}, folder {root_path})'
+                arr_id = r.json().get('id')
+                return 'added', f'Added to Sonarr (profile id {qual_id}, folder {root_path})', arr_id
             err_data = r.json()
             err_msg = (err_data[0].get('errorMessage', '') if isinstance(err_data, list) and err_data
                        else str(err_data))
             if 'already' in err_msg.lower() or 'exists' in err_msg.lower():
-                return 'already_exists', 'Already in Sonarr'
-            return 'failed', f'Sonarr error: {err_msg}'
+                return 'already_exists', 'Already in Sonarr', None
+            return 'failed', f'Sonarr error: {err_msg}', None
         except Exception as e:
-            return 'failed', f'Exception: {e}'
+            return 'failed', f'Exception: {e}', None
 
     elif media_type == 'movie':
         radarr_url = get_setting('RADARR_URL', '').strip().rstrip('/')
         radarr_key = get_setting('RADARR_API_KEY', '').strip()
         if not radarr_url or not radarr_key:
-            return 'skipped', 'Radarr not configured'
+            return 'skipped', 'Radarr not configured', None
         try:
             roots = requests.get(f"{radarr_url}/api/v3/rootfolder",
                                  params={'apikey': radarr_key}, timeout=10).json()
@@ -6278,17 +6328,18 @@ def _sync_watchlist_item(item_row):
             r = requests.post(f"{radarr_url}/api/v3/movie",
                               params={'apikey': radarr_key}, json=payload, timeout=15)
             if r.ok:
-                return 'added', f'Added to Radarr (profile id {qual_id}, folder {root_path})'
+                arr_id = r.json().get('id')
+                return 'added', f'Added to Radarr (profile id {qual_id}, folder {root_path})', arr_id
             err_data = r.json()
             err_msg = (err_data[0].get('errorMessage', '') if isinstance(err_data, list) and err_data
                        else str(err_data))
             if 'already' in err_msg.lower() or 'exists' in err_msg.lower():
-                return 'already_exists', 'Already in Radarr'
-            return 'failed', f'Radarr error: {err_msg}'
+                return 'already_exists', 'Already in Radarr', None
+            return 'failed', f'Radarr error: {err_msg}', None
         except Exception as e:
-            return 'failed', f'Exception: {e}'
+            return 'failed', f'Exception: {e}', None
 
-    return 'skipped', f'Unknown media type: {media_type}'
+    return 'skipped', f'Unknown media type: {media_type}', None
 
 
 def _remove_watched_from_watchlist(watchlist_items, plex_url, plex_token, plex_headers):
@@ -6395,6 +6446,7 @@ def watchlist_sync_job():
             if not enabled:
                 return
 
+            default_permanent = get_setting('WATCHLIST_SYNC_DEFAULT_PERMANENT', 'false').lower() == 'true'
             plex_token = get_setting('PLEX_TOKEN', '').strip()
             if not plex_token:
                 print('[WatchlistSync] Skipping — Plex token not configured')
@@ -6474,7 +6526,7 @@ def watchlist_sync_job():
                     db.session.flush()
                     new_count += 1
 
-                status, msg = _sync_watchlist_item(row)
+                status, msg, arr_id = _sync_watchlist_item(row)
                 row.status = status
                 row.status_message = msg
                 row.processed_at = now
@@ -6483,6 +6535,8 @@ def watchlist_sync_job():
                 print(f'[WatchlistSync] {title} ({year}) [{plex_type}] → {status}: {msg}')
                 if status == 'added':
                     added_count += 1
+                    if default_permanent and arr_id:
+                        _mark_expiration_permanent(plex_type, arr_id, title, year)
                 elif status == 'failed':
                     fail_count += 1
 
@@ -6627,6 +6681,7 @@ def expirations_page():
                            use_oldest_file_date=(get_setting('EXPIRATION_USE_OLDEST_FILE_DATE', 'false').lower() == 'true'),
                            dry_run=_is_dry_run(),
                            max_per_run=int(get_setting('EXPIRATION_MAX_DELETIONS_PER_RUN', '10') or 10),
+                           daily_intake_limit=int(get_setting('EXPIRATION_DAILY_INTAKE_LIMIT', '0') or 0),
                            admin_fallback_email=get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', ''),
                            public_url=get_setting('EXPIRATION_PUBLIC_URL', ''),
                            detected_public_url=_base_url_for_email())
@@ -6722,6 +6777,7 @@ def expirations_save_policy():
         'EXPIRATION_MAX_DELETIONS_PER_RUN': str(max(0, int(data.get('max_per_run', 10)))),
         'EXPIRATION_ADMIN_FALLBACK_EMAIL': (data.get('admin_fallback_email') or '').strip(),
         'EXPIRATION_PUBLIC_URL': (data.get('public_url') or '').strip(),
+        'EXPIRATION_DAILY_INTAKE_LIMIT': str(max(0, int(data.get('daily_intake_limit', 0) or 0))),
     }
     for k, v in mapping.items():
         set_setting(k, v)
@@ -7267,6 +7323,7 @@ def expire_action_submit(token):
 def watchlist_sync_page():
     enabled = get_setting('WATCHLIST_SYNC_ENABLED', 'false').lower() == 'true'
     remove_watched = get_setting('WATCHLIST_SYNC_REMOVE_WATCHED', 'false').lower() == 'true'
+    default_permanent = get_setting('WATCHLIST_SYNC_DEFAULT_PERMANENT', 'false').lower() == 'true'
     last_run = get_setting('WATCHLIST_SYNC_LAST_RUN', '')
     last_summary = get_setting('WATCHLIST_SYNC_LAST_SUMMARY', '')
     recent = (WatchlistSyncItem.query
@@ -7275,6 +7332,7 @@ def watchlist_sync_page():
     return render_template('watchlist_sync.html',
                            enabled=enabled,
                            remove_watched=remove_watched,
+                           default_permanent=default_permanent,
                            last_run=last_run,
                            last_summary=last_summary,
                            recent=recent)
@@ -7288,6 +7346,8 @@ def watchlist_sync_toggle():
         set_setting('WATCHLIST_SYNC_ENABLED', 'true' if data.get('enabled') else 'false')
     if 'remove_watched' in data:
         set_setting('WATCHLIST_SYNC_REMOVE_WATCHED', 'true' if data.get('remove_watched') else 'false')
+    if 'default_permanent' in data:
+        set_setting('WATCHLIST_SYNC_DEFAULT_PERMANENT', 'true' if data.get('default_permanent') else 'false')
     return jsonify({'success': True})
 
 
@@ -7335,11 +7395,14 @@ def watchlist_sync_status():
 @login_required
 def watchlist_sync_retry(item_id):
     row = WatchlistSyncItem.query.get_or_404(item_id)
-    status, msg = _sync_watchlist_item(row)
+    status, msg, arr_id = _sync_watchlist_item(row)
     row.status = status
     row.status_message = msg
     row.processed_at = datetime.utcnow()
     db.session.commit()
+    if status == 'added' and arr_id:
+        if get_setting('WATCHLIST_SYNC_DEFAULT_PERMANENT', 'false').lower() == 'true':
+            _mark_expiration_permanent(row.media_type, arr_id, row.title, row.year)
     return jsonify({'success': True, 'status': status, 'message': msg})
 
 

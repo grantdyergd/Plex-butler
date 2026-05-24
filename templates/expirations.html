@@ -90,6 +90,11 @@
                 <input type="number" min="0" max="1000" class="form-control" id="pol-cap" value="{{ max_per_run }}">
                 <small class="text-muted">0 = unlimited. Items beyond the cap are deferred to the next run.</small>
             </div>
+            <div class="col-md-3">
+                <label class="form-label">Daily intake limit <span class="text-muted fw-normal">(no-requester items)</span></label>
+                <input type="number" min="0" max="10000" class="form-control" id="pol-intake" value="{{ daily_intake_limit }}">
+                <small class="text-muted">Max new items <em>without a requester</em> added per sync run. 0 = unlimited. Useful during large-library onboarding to avoid flooding the list.</small>
+            </div>
             <div class="col-md-6">
                 <label class="form-label">Admin fallback email (for unclaimed items)</label>
                 <input type="email" class="form-control" id="pol-fallback" value="{{ admin_fallback_email }}" placeholder="admin@example.com">
@@ -151,6 +156,8 @@
     <li class="nav-item"><button class="nav-link" data-status="missing" onclick="loadList(this)">Missing <span class="badge bg-secondary">{{ counts.missing }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="deleted" onclick="loadList(this)">Deleted <span class="badge bg-secondary">{{ counts.deleted }}</span></button></li>
     <li class="nav-item"><button class="nav-link" data-status="all" onclick="loadList(this)">All</button></li>
+    <li class="nav-item"><button class="nav-link text-success" data-status="all" id="tab-requesters" onclick="loadPreset(this,'requesters')"><i class="bi bi-person-check me-1"></i>Requesters</button></li>
+    <li class="nav-item"><button class="nav-link text-primary" data-status="all" id="tab-mine" onclick="loadPreset(this,'mine')"><i class="bi bi-person-gear me-1"></i>My Library</button></li>
     <li class="nav-item ms-auto"><button class="nav-link text-info" data-status="archive" onclick="loadArchive(this)"><i class="bi bi-archive me-1"></i>Archive</button></li>
 </ul>
 
@@ -478,6 +485,13 @@ async function reRequest(aid, btn){
     else { btn.disabled = false; btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i>Re-request'; }
 }
 
+function loadPreset(btn, preset) {
+    activeChips.clear();
+    if (preset === 'requesters') activeChips.add('has-req');
+    if (preset === 'mine') activeChips.add('no-req');
+    loadList(btn);
+}
+
 async function loadList(btn) {
     if (btn) {
         _setActiveTab(btn);
@@ -648,6 +662,7 @@ async function savePolicy() {
         display_timezone: document.getElementById('pol-tz').value.trim(),
         dry_run: document.getElementById('pol-dryrun').checked,
         max_per_run: +document.getElementById('pol-cap').value,
+        daily_intake_limit: +document.getElementById('pol-intake').value,
         admin_fallback_email: document.getElementById('pol-fallback').value.trim(),
         public_url: document.getElementById('pol-public-url').value.trim(),
     };

@@ -468,6 +468,21 @@
             accent-color: var(--accent);
         }
         .modal-watchlist-row label { cursor: pointer; }
+        .modal-exp-btn {
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s, border-color 0.15s;
+        }
+        .modal-exp-btn.active {
+            background: var(--accent);
+            color: #fff;
+            border-color: var(--accent);
+        }
         .modal-confirm-btn {
             flex: 1;
             padding: 10px;
@@ -721,6 +736,14 @@
             <label for="modalWatchlistCheck">Also add to Plex watchlist</label>
         </div>
 
+        <div class="modal-watchlist-row" style="margin-top:10px;gap:10px">
+            <span style="font-size:12px;color:var(--muted);white-space:nowrap">Expiration</span>
+            <div style="display:flex;gap:6px;margin-left:auto">
+                <button id="expAutoBtn" class="modal-exp-btn active" onclick="setModalExpiration('auto')">Auto-expire</button>
+                <button id="expPermBtn" class="modal-exp-btn" onclick="setModalExpiration('permanent')">Keep forever</button>
+            </div>
+        </div>
+
         <div style="display:flex;gap:8px;margin-top:16px">
             <button class="modal-confirm-btn" onclick="confirmAdd()">Add</button>
             <button class="modal-cancel" onclick="closeModal()">Cancel</button>
@@ -916,12 +939,12 @@
         }
     }
 
-    async function doAdd(mediaType, item, profileId, rootFolderPath, btn) {
+    async function doAdd(mediaType, item, profileId, rootFolderPath, btn, permanent = false) {
         try {
             const r = await fetch('/api/media-chat/add', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: mediaType === 'movie' ? 'movie' : 'show', item, profileId, rootFolderPath })
+                body: JSON.stringify({ type: mediaType === 'movie' ? 'movie' : 'show', item, profileId, rootFolderPath, permanent })
             });
             const result = await r.json();
             if (result.success || result.already_exists) {
@@ -977,7 +1000,16 @@
         // Reset watchlist checkbox
         document.getElementById('modalWatchlistCheck').checked = false;
 
+        // Reset expiration toggle
+        document.getElementById('expAutoBtn').classList.add('active');
+        document.getElementById('expPermBtn').classList.remove('active');
+
         document.getElementById('profileModal').classList.add('open');
+    }
+
+    function setModalExpiration(val) {
+        document.getElementById('expAutoBtn').classList.toggle('active', val === 'auto');
+        document.getElementById('expPermBtn').classList.toggle('active', val === 'permanent');
     }
 
     function selectProfile(el, profileId) {
@@ -1001,9 +1033,12 @@
         // Plex watchlist flag
         const addToWatchlist = document.getElementById('modalWatchlistCheck').checked;
 
+        // Expiration preference
+        const permanent = document.getElementById('expPermBtn').classList.contains('active');
+
         closeModal(false); // close without resetting btn
 
-        const succeeded = await doAdd(type, item, profileId, rootFolderPath, btn);
+        const succeeded = await doAdd(type, item, profileId, rootFolderPath, btn, permanent);
 
         if (succeeded && addToWatchlist) {
             toast('Adding to Plex watchlist…', 'info');
