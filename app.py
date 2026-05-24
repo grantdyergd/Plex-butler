@@ -5837,12 +5837,28 @@ def expiration_send_warnings():
         cap = 10
 
     # Oldest-expiring first, so the items closest to deletion get warned first.
-    candidates = MediaExpiration.query.filter(
+    main_candidates = MediaExpiration.query.filter(
         MediaExpiration.status.in_(['active', 'extended']),
         MediaExpiration.permanent == False,
         MediaExpiration.expires_at <= threshold,
         MediaExpiration.expires_at > datetime.utcnow() - timedelta(days=policy['grace_days']),
     ).order_by(MediaExpiration.expires_at.asc()).all()
+
+    # Also include items stuck with 'no_email' that are past the grace window — they were
+    # never warned (no fallback at the time), so the grace-period filter shouldn't block them.
+    # Now that a fallback may be configured, give them their first warning.
+    admin_fallback = (get_setting('EXPIRATION_ADMIN_FALLBACK_EMAIL', '') or '').strip()
+    stuck_no_email = []
+    if admin_fallback:
+        main_ids = {r.id for r in main_candidates}
+        stuck_no_email = [r for r in MediaExpiration.query.filter(
+            MediaExpiration.status.in_(['active', 'extended']),
+            MediaExpiration.permanent == False,
+            MediaExpiration.last_warning_status == 'no_email',
+            MediaExpiration.requester_email.is_(None),
+        ).order_by(MediaExpiration.expires_at.asc()).all() if r.id not in main_ids]
+
+    candidates = main_candidates + stuck_no_email
 
     sent_count = 0
     for rec in candidates:
@@ -7043,6 +7059,17 @@ def expirations_health():
         MediaExpiration.last_warning_status == 'no_email',
     ).count()
 
+    # Stuck no_email items — past grace window, never warned, now have a fallback available
+    stuck_no_email_count = 0
+    if fallback:
+        stuck_no_email_count = MediaExpiration.query.filter(
+            MediaExpiration.status.in_(['active', 'extended']),
+            MediaExpiration.permanent == False,
+            MediaExpiration.last_warning_status == 'no_email',
+            MediaExpiration.requester_email.is_(None),
+            MediaExpiration.expires_at <= now - timedelta(days=policy['grace_days']),
+        ).count()
+
     # Items that WOULD get emails on next run (in window, not on cooldown, have email or fallback)
     eligible_q = MediaExpiration.query.filter(
         MediaExpiration.status.in_(['active', 'extended']),
@@ -7092,6 +7119,16 @@ def expirations_health():
                       + (f', {eligible_no_email} going to fallback ({fallback})' if fallback and eligible_no_email else '')
                       + (f', {eligible_no_email} with no email at all' if not fallback and eligible_no_email else '')),
             'fix': 'All in-window items are either on cooldown (warned in last 7 days) or have no email address.',
+        },
+        {
+            'label': 'Stuck "no-email" items rescued by fallback',
+            'ok': stuck_no_email_count == 0 or bool(fallback),
+            'value': (f'{stuck_no_email_count} item(s) past grace window, never warned — will be included in next run via fallback'
+                      if stuck_no_email_count > 0 and fallback
+                      else f'{stuck_no_email_count} item(s) stuck (set a fallback email to rescue them)'
+                      if stuck_no_email_count > 0
+                      else 'None'),
+            'fix': 'Set an admin fallback email above. These items expired before a fallback was configured and were never warned.',
         },
     ]
 
