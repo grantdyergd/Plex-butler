@@ -221,6 +221,7 @@ class BulkDeleteJob(db.Model):
     __tablename__ = 'bulk_delete_job'
     id = db.Column(db.Integer, primary_key=True)
     job_id = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    started_by = db.Column(db.String(100), nullable=True)
     total = db.Column(db.Integer, default=0)
     ok = db.Column(db.Integer, default=0)
     failed = db.Column(db.Integer, default=0)
@@ -5264,6 +5265,7 @@ def _run_expiration_migrations():
         "ALTER TABLE watchlist_sync_item ADD COLUMN IF NOT EXISTS removed_watched_at TIMESTAMP",
         "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS series_status VARCHAR(20)",
         "ALTER TABLE media_expiration ADD COLUMN IF NOT EXISTS plex_plays INTEGER DEFAULT 0",
+        "ALTER TABLE bulk_delete_job ADD COLUMN IF NOT EXISTS started_by VARCHAR(100)",
     ]
     with app.app_context():
         for sql in statements:
@@ -7299,7 +7301,7 @@ def expirations_bulk_delete_start():
     job_id = secrets.token_hex(8)
     username = current_user.username if current_user.is_authenticated else 'admin'
 
-    job_rec = BulkDeleteJob(job_id=job_id, total=len(ids), current='Starting…')
+    job_rec = BulkDeleteJob(job_id=job_id, total=len(ids), current='Starting…', started_by=username)
     db.session.add(job_rec)
     db.session.commit()
 
@@ -7405,6 +7407,42 @@ def expirations_bulk_delete_status(job_id):
         'done': j.done,
         'cancelled': j.cancelled,
         'current': j.current,
+    })
+
+
+@app.route('/api/expirations/active-job')
+@login_required
+def expirations_active_job():
+    """Return the current user's most recent in-progress bulk delete job, if any."""
+    username = current_user.username if current_user.is_authenticated else 'admin'
+    j = BulkDeleteJob.query.filter_by(started_by=username, done=False, cancelled=False)\
+        .order_by(BulkDeleteJob.created_at.desc()).first()
+    if not j:
+        # Also check for a recently-done job (completed in last 10 seconds) so the
+        # banner can flash a completion message before disappearing.
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(seconds=10)
+        j = BulkDeleteJob.query.filter(
+            BulkDeleteJob.started_by == username,
+            BulkDeleteJob.done == True,
+            BulkDeleteJob.created_at >= cutoff,
+        ).order_by(BulkDeleteJob.created_at.desc()).first()
+    if not j:
+        return jsonify({'active': False})
+    try:
+        errors = json.loads(j.errors_json or '[]')
+    except Exception:
+        errors = []
+    return jsonify({
+        'active': True,
+        'job_id': j.job_id,
+        'ok': j.ok,
+        'failed': j.failed,
+        'total': j.total,
+        'done': j.done,
+        'cancelled': j.cancelled,
+        'current': j.current,
+        'errors': errors[-5:],
     })
 
 

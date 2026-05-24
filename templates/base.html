@@ -855,5 +855,114 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     {% block scripts %}{% endblock %}
+
+<!-- Persistent bulk-delete progress banner (visible on every page) -->
+<div id="global-delete-banner" style="
+    display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;
+    background:#1a1a2e;color:#fff;padding:10px 16px;
+    box-shadow:0 -2px 12px rgba(0,0,0,.35);font-size:14px;">
+  <div style="max-width:900px;margin:0 auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <span id="gdb-icon" style="font-size:18px;">🗑️</span>
+    <div style="flex:1;min-width:200px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span id="gdb-label" style="font-weight:600;">Deleting items…</span>
+        <span id="gdb-count" style="color:#aaa;font-size:12px;"></span>
+      </div>
+      <div style="background:#333;border-radius:4px;height:6px;overflow:hidden;">
+        <div id="gdb-bar" style="height:100%;width:0%;background:#e74c3c;border-radius:4px;transition:width .4s;"></div>
+      </div>
+      <div id="gdb-current" style="color:#aaa;font-size:11px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+      <a href="/expirations" id="gdb-view-link"
+         style="color:#7eb3ff;font-size:12px;text-decoration:none;">View details</a>
+      <button id="gdb-cancel-btn" onclick="globalDeleteCancel()"
+              style="background:transparent;border:1px solid #666;color:#ccc;padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer;">
+        Cancel
+      </button>
+      <button id="gdb-close-btn" onclick="globalDeleteDismiss()"
+              style="display:none;background:transparent;border:1px solid #666;color:#ccc;padding:3px 10px;border-radius:4px;font-size:12px;cursor:pointer;">
+        ✕ Dismiss
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+    let _gdbJobId = null;
+    let _gdbTimer = null;
+    let _gdbDismissed = false;
+
+    function gdbShow() { document.getElementById('global-delete-banner').style.display = 'block'; }
+    function gdbHide() { document.getElementById('global-delete-banner').style.display = 'none'; }
+
+    async function gdbPoll() {
+        if (_gdbDismissed) return;
+        let data;
+        try {
+            const res = await fetch('/api/expirations/active-job', {cache:'no-store'});
+            data = await res.json();
+        } catch(e) { return; }
+
+        if (!data.active) { gdbHide(); _gdbJobId = null; return; }
+
+        _gdbJobId = data.job_id;
+        const done = data.ok + data.failed;
+        const pct  = data.total > 0 ? Math.round((done / data.total) * 100) : 0;
+
+        document.getElementById('gdb-bar').style.width = pct + '%';
+        document.getElementById('gdb-count').textContent = `${done} / ${data.total}`;
+
+        if (data.done) {
+            const bar = document.getElementById('gdb-bar');
+            bar.style.background = data.cancelled ? '#6c757d' : data.failed > 0 ? '#f0ad4e' : '#27ae60';
+            document.getElementById('gdb-label').textContent = data.cancelled
+                ? `Cancelled — ${data.ok} deleted`
+                : data.failed > 0
+                    ? `Done — ${data.ok} deleted, ${data.failed} failed`
+                    : `Done — ${data.ok} item${data.ok !== 1 ? 's' : ''} deleted`;
+            document.getElementById('gdb-current').textContent = '';
+            document.getElementById('gdb-icon').textContent = data.cancelled ? '⛔' : data.failed > 0 ? '⚠️' : '✅';
+            document.getElementById('gdb-cancel-btn').style.display = 'none';
+            document.getElementById('gdb-close-btn').style.display = '';
+            gdbShow();
+            // Auto-dismiss after 8s on success
+            if (!data.cancelled && data.failed === 0) {
+                setTimeout(gdbHide, 8000);
+            }
+            return; // stop polling
+        }
+
+        document.getElementById('gdb-label').textContent = 'Deleting items…';
+        document.getElementById('gdb-icon').textContent = '🗑️';
+        document.getElementById('gdb-current').textContent = data.current || '';
+        document.getElementById('gdb-cancel-btn').style.display = '';
+        document.getElementById('gdb-close-btn').style.display = 'none';
+        document.getElementById('gdb-bar').style.background = '#e74c3c';
+        gdbShow();
+
+        _gdbTimer = setTimeout(gdbPoll, 2000);
+    }
+
+    window.globalDeleteCancel = async function() {
+        if (!_gdbJobId) return;
+        document.getElementById('gdb-cancel-btn').textContent = 'Cancelling…';
+        document.getElementById('gdb-cancel-btn').disabled = true;
+        await fetch(`/api/expirations/bulk-delete-cancel/${_gdbJobId}`, {method:'POST'}).catch(()=>{});
+        _gdbTimer = setTimeout(gdbPoll, 1500);
+    };
+
+    window.globalDeleteDismiss = function() {
+        _gdbDismissed = true;
+        gdbHide();
+    };
+
+    // Kick off polling on every page load
+    gdbPoll();
+    // Re-check every 3s (catches a job started in another tab)
+    setInterval(() => { if (!_gdbJobId) gdbPoll(); }, 3000);
+})();
+</script>
 </body>
 </html>
