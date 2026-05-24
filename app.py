@@ -7304,77 +7304,82 @@ def expirations_bulk_delete_start():
     db.session.commit()
 
     def do_delete(jid, item_ids, uname):
-        dry = _is_dry_run()
         with app.app_context():
-            for eid in item_ids:
-                # Re-query job each iteration so cancellation is visible across workers
-                j = BulkDeleteJob.query.filter_by(job_id=jid).first()
-                if not j or j.cancelled:
-                    break
-                try:
-                    rec = db.session.get(MediaExpiration, eid)
-                    if not rec:
-                        j.failed += 1
-                        _job_append_error(j, f'#{eid}: not found')
-                        db.session.commit()
-                        continue
-
-                    j.current = rec.title
-                    db.session.commit()
-
-                    try:
-                        _archive_deletion(rec,
-                                          deleted_by=('admin-dry-run' if dry else 'admin-delete-now'),
-                                          dry_run=dry, notes=f'bulk delete by {uname}')
-                    except Exception as e:
-                        db.session.rollback()
-                        j = BulkDeleteJob.query.filter_by(job_id=jid).first()
-                        if j:
-                            j.failed += 1
-                            _job_append_error(j, f'{rec.title}: archive failed ({e})')
-                            db.session.commit()
-                        continue
-
-                    arr_ok, arr_reason = _delete_via_arr(rec)
-                    if not arr_ok:
-                        db.session.rollback()
-                        j = BulkDeleteJob.query.filter_by(job_id=jid).first()
-                        if j:
-                            j.failed += 1
-                            _job_append_error(j, f'{rec.title}: {arr_reason or "delete failed"}')
-                            db.session.commit()
-                        continue
-
-                    rec.status = 'deleted'
-                    rec.deleted_at = datetime.utcnow()
-                    if dry:
-                        rec.notes = 'dry-run-deletion'
-                    j.ok += 1
-                    db.session.commit()
-
-                except Exception as e:
-                    try:
-                        db.session.rollback()
-                    except Exception:
-                        pass
-                    try:
-                        j = BulkDeleteJob.query.filter_by(job_id=jid).first()
-                        if j:
-                            j.failed += 1
-                            _job_append_error(j, f'#{eid}: unexpected error ({e})')
-                            db.session.commit()
-                    except Exception:
-                        pass
-
-            # Mark done
             try:
-                j = BulkDeleteJob.query.filter_by(job_id=jid).first()
-                if j:
-                    j.done = True
-                    j.current = ''
-                    db.session.commit()
-            except Exception:
-                pass
+                dry = _is_dry_run()
+                for eid in item_ids:
+                    # Re-query job each iteration so cancellation is visible across workers
+                    j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                    if not j or j.cancelled:
+                        break
+                    try:
+                        rec = db.session.get(MediaExpiration, eid)
+                        if not rec:
+                            j.failed += 1
+                            _job_append_error(j, f'#{eid}: not found')
+                            db.session.commit()
+                            continue
+
+                        j.current = rec.title
+                        db.session.commit()
+
+                        try:
+                            _archive_deletion(rec,
+                                              deleted_by=('admin-dry-run' if dry else 'admin-delete-now'),
+                                              dry_run=dry, notes=f'bulk delete by {uname}')
+                        except Exception as e:
+                            db.session.rollback()
+                            j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                            if j:
+                                j.failed += 1
+                                _job_append_error(j, f'{rec.title}: archive failed ({e})')
+                                db.session.commit()
+                            continue
+
+                        arr_ok, arr_reason = _delete_via_arr(rec)
+                        if not arr_ok:
+                            db.session.rollback()
+                            j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                            if j:
+                                j.failed += 1
+                                _job_append_error(j, f'{rec.title}: {arr_reason or "delete failed"}')
+                                db.session.commit()
+                            continue
+
+                        rec.status = 'deleted'
+                        rec.deleted_at = datetime.utcnow()
+                        if dry:
+                            rec.notes = 'dry-run-deletion'
+                        j.ok += 1
+                        db.session.commit()
+
+                    except Exception as e:
+                        try:
+                            db.session.rollback()
+                        except Exception:
+                            pass
+                        try:
+                            j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                            if j:
+                                j.failed += 1
+                                _job_append_error(j, f'#{eid}: unexpected error ({e})')
+                                db.session.commit()
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                print(f'[BulkDelete] Thread crashed before completing: {e}')
+
+            finally:
+                # Always mark done so the polling loop can exit
+                try:
+                    j = BulkDeleteJob.query.filter_by(job_id=jid).first()
+                    if j:
+                        j.done = True
+                        j.current = ''
+                        db.session.commit()
+                except Exception:
+                    pass
 
     t = threading.Thread(target=do_delete, args=(job_id, ids, username), daemon=True)
     t.start()
