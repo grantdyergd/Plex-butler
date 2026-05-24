@@ -389,7 +389,7 @@ function renderItems(items) {
         const airingBadge  = isContinuing
             ? ` <span class="badge bg-success-subtle text-success border border-success-subtle ms-1" title="Still airing"><i class="bi bi-broadcast me-1"></i>${escapeHtml(i.series_status)}</span>`
             : '';
-        return `<tr>
+        return `<tr data-id="${i.id}">
             <td><input type="checkbox" class="form-check-input row-check" data-id="${i.id}" onclick="toggleRow(this)" ${checked}></td>
             <td>${typeIcon}</td>
             <td><strong>${escapeHtml(titleStr)}</strong>${airingBadge}${i.notes ? `<br><small class="text-muted">${escapeHtml(i.notes)}</small>` : ''}</td>
@@ -555,7 +555,17 @@ async function adminAction(id, action) {
     });
     const data = await res.json();
     if (!data.success) { alert(data.error || 'Action failed'); return; }
-    loadList();
+    // Remove just this row in-place — preserves scroll position and all other selections
+    const row = document.querySelector(`tr[data-id="${id}"]`);
+    if (row) row.remove();
+    allFetchedItems = allFetchedItems.filter(i => i.id !== id);
+    selectedIds.delete(id);
+    updateBulkButtons();
+    // Update chip summary counts
+    const filteredCount = document.getElementById('chip-filtered-count');
+    const totalCount    = document.getElementById('chip-total-count');
+    if (filteredCount) filteredCount.textContent = parseInt(filteredCount.textContent || 0) - 1;
+    if (totalCount)    totalCount.textContent    = allFetchedItems.length;
 }
 
 async function bulkAction(action) {
