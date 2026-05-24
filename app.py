@@ -2018,93 +2018,60 @@ def requester_review_page(token):
         items = json.loads(review.items_json or '{}')
         requester_email_lower = review.requester_email.lower() if review.requester_email else ''
         
-        print(f"[DEBUG] Review page for: {requester_email_lower}")
-        
         # Get Ombi requester data to find admin-excluded items that this requester originally requested
         ombi_tv_requesters = get_ombi_tv_requesters()
         ombi_movie_requesters = get_ombi_movie_requesters()
-        
-        print(f"[DEBUG] Ombi TV requesters found: {len(ombi_tv_requesters)}")
-        print(f"[DEBUG] Ombi Movie requesters found: {len(ombi_movie_requesters)}")
-        
-        # Log which titles this requester has in Ombi
+
         requester_ombi_tv = [title for title, email in ombi_tv_requesters.items() if email == requester_email_lower]
         requester_ombi_movies = [title for title, email in ombi_movie_requesters.items() if email == requester_email_lower]
-        print(f"[DEBUG] Requester's Ombi TV titles: {requester_ombi_tv}")
-        print(f"[DEBUG] Requester's Ombi Movie titles: {requester_ombi_movies}")
-        
+
         # Get all exclusions and filter to find ones relevant to this requester
         all_tv_exclusions = Exclusion.query.all()
         all_movie_exclusions = MovieExclusion.query.all()
-        
-        print(f"[DEBUG] Total TV exclusions: {len(all_tv_exclusions)}")
-        
-        # Log exclusion titles (lowercase) for matching comparison
-        exclusion_titles_lower = [exc.title.lower() for exc in all_tv_exclusions]
-        print(f"[DEBUG] First 20 exclusion titles: {exclusion_titles_lower[:20]}")
-        
-        # Check for matches between requester's Ombi titles and exclusion titles
-        matching_titles = set(requester_ombi_tv) & set(exclusion_titles_lower)
-        print(f"[DEBUG] Matching titles (Ombi & Exclusions): {matching_titles}")
-        print(f"[DEBUG] Total Movie exclusions: {len(all_movie_exclusions)}")
-        
+
         existing_tv_exclusions = []
         updates_made = False
         for exc in all_tv_exclusions:
             # Include if: requester excluded it themselves, OR original_requester matches, OR Ombi says they requested it
             if exc.excluded_by_email and exc.excluded_by_email.lower() == requester_email_lower:
-                print(f"[DEBUG] TV match (excluded_by_email): {exc.title}")
                 existing_tv_exclusions.append(exc)
             elif exc.original_requester_email and exc.original_requester_email.lower() == requester_email_lower:
-                print(f"[DEBUG] TV match (original_requester): {exc.title}")
                 existing_tv_exclusions.append(exc)
             elif exc.excluded_by == 'admin' or exc.excluded_by is None or exc.excluded_by == '':
                 # Admin exclusions (including legacy ones with NULL excluded_by)
                 ombi_email = ombi_tv_requesters.get(exc.title.lower(), '')
                 if ombi_email == requester_email_lower:
-                    print(f"[DEBUG] TV match (ombi lookup): {exc.title}")
                     existing_tv_exclusions.append(exc)
                     # Auto-populate original_requester_email if not set
                     if not exc.original_requester_email:
                         exc.original_requester_email = requester_email_lower
                         exc.original_requester_name = review.requester_name
                         updates_made = True
-                        print(f"[DEBUG] Auto-populated original_requester_email for: {exc.title}")
-                else:
-                    print(f"[DEBUG] TV admin exclusion '{exc.title}' - Ombi email: '{ombi_email}' vs requester: '{requester_email_lower}'")
-        
+
         existing_movie_exclusions = []
         for exc in all_movie_exclusions:
             if exc.excluded_by_email and exc.excluded_by_email.lower() == requester_email_lower:
-                print(f"[DEBUG] Movie match (excluded_by_email): {exc.title}")
                 existing_movie_exclusions.append(exc)
             elif exc.original_requester_email and exc.original_requester_email.lower() == requester_email_lower:
-                print(f"[DEBUG] Movie match (original_requester): {exc.title}")
                 existing_movie_exclusions.append(exc)
             elif exc.excluded_by == 'admin' or exc.excluded_by is None or exc.excluded_by == '':
                 # Admin exclusions (including legacy ones with NULL excluded_by)
                 ombi_email = ombi_movie_requesters.get(exc.title.lower(), '')
                 if ombi_email == requester_email_lower:
-                    print(f"[DEBUG] Movie match (ombi lookup): {exc.title}")
                     existing_movie_exclusions.append(exc)
                     # Auto-populate original_requester_email if not set
                     if not exc.original_requester_email:
                         exc.original_requester_email = requester_email_lower
                         exc.original_requester_name = review.requester_name
                         updates_made = True
-                        print(f"[DEBUG] Auto-populated original_requester_email for movie: {exc.title}")
-        
+
         # Commit any auto-populated requester info
         if updates_made:
             try:
                 db.session.commit()
-                print(f"[DEBUG] Committed auto-populated original_requester data")
             except Exception as commit_err:
                 db.session.rollback()
-                print(f"[DEBUG] Failed to commit auto-populated data: {commit_err}")
-        
-        print(f"[DEBUG] Final TV exclusions for requester: {len(existing_tv_exclusions)}")
-        print(f"[DEBUG] Final Movie exclusions for requester: {len(existing_movie_exclusions)}")
+                print(f"[ERROR] Failed to commit auto-populated requester data: {commit_err}")
         
         ombi_url = get_setting('OMBI_URL', '')
         
@@ -7899,4 +7866,5 @@ def watchlist_sync_diagnostic():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode, use_reloader=False)
