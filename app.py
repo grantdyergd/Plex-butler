@@ -376,7 +376,7 @@ def index():
         return redirect(url_for('setup_step1'))
     if not current_user.is_authenticated:
         return redirect(url_for('login'))
-    return redirect(url_for('home'))
+    return redirect(url_for('landing_page'))
 
 
 @app.route('/home')
@@ -606,11 +606,42 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route('/landing')
+@login_required
+def landing_page():
+    attention_count = MediaExpiration.query.filter(db.or_(
+        MediaExpiration.status == 'missing',
+        MediaExpiration.last_warning_status.in_(['failed', 'no_email']),
+        db.and_(
+            MediaExpiration.status.in_(['active', 'extended']),
+            MediaExpiration.permanent == False,
+            MediaExpiration.requester_email.is_(None),
+        ),
+    )).filter(
+        db.or_(
+            MediaExpiration.media_type != 'show',
+            MediaExpiration.series_status.is_(None),
+            MediaExpiration.series_status.in_(['ended', 'deleted']),
+        )
+    ).count()
+    active_count = MediaExpiration.query.filter(
+        MediaExpiration.status.in_(['active', 'extended'])
+    ).count()
+    watchlist_enabled = get_setting('WATCHLIST_SYNC_ENABLED', 'false').lower() == 'true'
+    watchlist_last_run = get_setting('WATCHLIST_SYNC_LAST_RUN', '')
+    watchlist_last_summary = get_setting('WATCHLIST_SYNC_LAST_SUMMARY', '')
+    return render_template('landing.html',
+                           attention_count=attention_count,
+                           active_count=active_count,
+                           watchlist_enabled=watchlist_enabled,
+                           watchlist_last_run=watchlist_last_run,
+                           watchlist_last_summary=watchlist_last_summary)
+
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    # Redirect old dashboard to new home page
-    return redirect(url_for('home'))
+    return redirect(url_for('landing_page'))
 
 
 @app.route('/settings', methods=['GET', 'POST'])

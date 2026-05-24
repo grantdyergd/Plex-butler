@@ -154,6 +154,22 @@
     <li class="nav-item ms-auto"><button class="nav-link text-info" data-status="archive" onclick="loadArchive(this)"><i class="bi bi-archive me-1"></i>Archive</button></li>
 </ul>
 
+<!-- ── Chip filter bar ── -->
+<div class="card mb-3" id="chip-filter-bar" data-main-pane>
+    <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-start flex-wrap gap-2">
+            <span class="text-muted small fw-semibold mt-1 me-1" style="white-space:nowrap;min-width:42px">Filter:</span>
+            <div id="chip-available-list" class="d-flex flex-wrap gap-1 flex-grow-1"></div>
+            <button id="chip-clear-btn" class="btn btn-sm btn-link text-muted d-none py-0 px-1" onclick="clearAllChips()" style="white-space:nowrap">
+                <i class="bi bi-x-circle me-1"></i>Clear all
+            </button>
+        </div>
+        <div id="chip-summary" class="small text-muted mt-1 d-none">
+            Showing <strong id="chip-filtered-count">0</strong> of <strong id="chip-total-count">0</strong> items
+        </div>
+    </div>
+</div>
+
 <div id="archive-pane" class="d-none">
     <div class="card mb-3">
         <div class="card-body py-2 d-flex align-items-center gap-3 flex-wrap">
@@ -235,9 +251,147 @@
     </div>
 </div>
 
+<style>
+.chip-btn {
+    font-size: .75rem;
+    padding: 3px 9px;
+    border-radius: 20px;
+    transition: all 0.1s ease;
+}
+.chip-active {
+    font-size: .75rem;
+    padding: 3px 9px;
+    border-radius: 20px;
+    background: var(--primary, #6366f1);
+    border-color: var(--primary, #6366f1);
+    color: #fff !important;
+}
+.chip-active:hover {
+    filter: brightness(1.1);
+    background: var(--primary, #6366f1);
+    border-color: var(--primary, #6366f1);
+    color: #fff;
+}
+</style>
+
 <script>
 let currentStatus = 'active';
 let selectedIds = new Set();
+let allFetchedItems = [];
+let activeChips = new Set();
+
+const CHIP_DEFS = [
+    { id: 'tv',          label: 'TV Shows',         icon: 'bi-tv',              filter: i => i.media_type === 'show' },
+    { id: 'movie',       label: 'Movies',            icon: 'bi-film',            filter: i => i.media_type === 'movie' },
+    { id: 'no-req',      label: 'No requester',      icon: 'bi-person-x',        filter: i => !i.requester_email },
+    { id: 'has-req',     label: 'Has requester',     icon: 'bi-person-check',    filter: i => !!i.requester_email },
+    { id: 'never-seen',  label: 'Never seen',        icon: 'bi-eye-slash',       filter: i => !i.last_seen_at },
+    { id: 'seen',        label: 'Seen in Plex',      icon: 'bi-eye',             filter: i => !!i.last_seen_at },
+    { id: 'ended',       label: 'Series ended',      icon: 'bi-flag',            filter: i => i.series_status === 'ended' },
+    { id: 'airing',      label: 'Still airing',      icon: 'bi-broadcast',       filter: i => i.media_type === 'show' && i.series_status && i.series_status !== 'ended' && i.series_status !== 'deleted' },
+    { id: 'expiring',    label: 'Expiring < 30d',    icon: 'bi-hourglass-split', filter: i => i.days_left !== null && i.days_left >= 0 && i.days_left < 30 },
+    { id: 'overdue',     label: 'Overdue',           icon: 'bi-alarm',           filter: i => i.days_left !== null && i.days_left < 0 },
+    { id: 'warn-fail',   label: 'Warning failed',    icon: 'bi-envelope-x',      filter: i => i.last_warning_status === 'failed' || i.last_warning_status === 'no_email' },
+    { id: 'pre2000',     label: 'Pre-2000',          icon: 'bi-calendar3',       filter: i => i.year && i.year < 2000 },
+    { id: '2000s',       label: '2000s',             icon: 'bi-calendar3',       filter: i => i.year && i.year >= 2000 && i.year < 2010 },
+    { id: '2010s',       label: '2010s',             icon: 'bi-calendar3',       filter: i => i.year && i.year >= 2010 && i.year < 2020 },
+    { id: '2020s',       label: '2020s',             icon: 'bi-calendar3',       filter: i => i.year && i.year >= 2020 },
+];
+
+function renderChipBar() {
+    const container = document.getElementById('chip-available-list');
+    const clearBtn  = document.getElementById('chip-clear-btn');
+    const summary   = document.getElementById('chip-summary');
+    container.innerHTML = CHIP_DEFS.map(def => {
+        const on = activeChips.has(def.id);
+        const xIcon = on ? '<i class="bi bi-x-circle-fill ms-1" style="font-size:.7em;opacity:.8"></i>' : '';
+        return `<button class="btn chip-btn ${on ? 'chip-active' : 'btn-outline-secondary'}"
+                        onclick="toggleChip('${def.id}')">
+            <i class="bi ${def.icon} me-1"></i>${escapeHtml(def.label)}${xIcon}
+        </button>`;
+    }).join('');
+    clearBtn.classList.toggle('d-none', activeChips.size === 0);
+    summary.classList.toggle('d-none', activeChips.size === 0);
+}
+
+function toggleChip(id) {
+    if (activeChips.has(id)) activeChips.delete(id); else activeChips.add(id);
+    renderChipBar();
+    renderItems(applyChipFilter(allFetchedItems));
+}
+
+function clearAllChips() {
+    activeChips.clear();
+    renderChipBar();
+    renderItems(applyChipFilter(allFetchedItems));
+}
+
+function applyChipFilter(items) {
+    if (activeChips.size === 0) return items;
+    const filters = [...activeChips].map(id => CHIP_DEFS.find(d => d.id === id)?.filter).filter(Boolean);
+    return items.filter(item => filters.every(f => f(item)));
+}
+
+function renderItems(items) {
+    const tbody = document.getElementById('exp-tbody');
+    const filteredCount = document.getElementById('chip-filtered-count');
+    const totalCount    = document.getElementById('chip-total-count');
+    const summary       = document.getElementById('chip-summary');
+    if (filteredCount) filteredCount.textContent = items.length;
+    if (totalCount)    totalCount.textContent    = allFetchedItems.length;
+    if (summary)       summary.classList.toggle('d-none', activeChips.size === 0);
+
+    if (!items.length) {
+        const msg = (activeChips.size > 0 && allFetchedItems.length > 0)
+            ? 'No items match the active filters — try removing some chips.'
+            : 'No items match.';
+        tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted py-4">${msg}</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = items.map(i => {
+        const days = i.days_left;
+        let dayClass = 'text-muted';
+        if (days !== null && days < 0) dayClass = 'text-danger fw-bold';
+        else if (days !== null && days < 14) dayClass = 'text-warning fw-bold';
+        const requester = i.requester_name || i.requester_email || '<span class="text-warning">— no email —</span>';
+        const reqEmail  = i.requester_email ? `<br><small class="text-muted">${escapeHtml(i.requester_email)}</small>` : '';
+        const addtl     = i.additional_requester_emails ? `<br><small class="text-muted">+ ${escapeHtml(i.additional_requester_emails.split(',').length)} other(s)</small>` : '';
+        const statusBadge = i.permanent
+            ? '<span class="badge bg-success">Permanent</span>'
+            : `<span class="badge bg-${i.status==='active'?'primary':i.status==='extended'?'info':i.status==='deleted'?'danger':i.status==='missing'?'dark':'secondary'}">${escapeHtml(i.status)}</span>`;
+        let warnCell = `<small>${i.warning_count} sent</small>`;
+        if (i.last_warning_status === 'failed')   warnCell = `<span class="badge bg-danger" title="${escapeHtml(i.last_warning_error||'')}">failed</span>`;
+        else if (i.last_warning_status === 'no_email') warnCell = `<span class="badge bg-warning text-dark">no email</span>`;
+        else if (i.last_warning_sent_at) warnCell += `<br><small class="text-muted">${fmtLocalDate(i.last_warning_sent_at)}</small>`;
+        const typeIcon    = i.media_type === 'show' ? '<i class="bi bi-tv"></i> Show' : '<i class="bi bi-film"></i> Movie';
+        const titleStr    = i.title + (i.year ? ` (${i.year})` : '');
+        const checked     = selectedIds.has(i.id) ? 'checked' : '';
+        const isContinuing = i.media_type === 'show' && i.series_status && i.series_status !== 'ended' && i.series_status !== 'deleted';
+        const airingBadge  = isContinuing
+            ? ` <span class="badge bg-success-subtle text-success border border-success-subtle ms-1" title="Still airing"><i class="bi bi-broadcast me-1"></i>${escapeHtml(i.series_status)}</span>`
+            : '';
+        return `<tr>
+            <td><input type="checkbox" class="form-check-input row-check" data-id="${i.id}" onclick="toggleRow(this)" ${checked}></td>
+            <td>${typeIcon}</td>
+            <td><strong>${escapeHtml(titleStr)}</strong>${airingBadge}${i.notes ? `<br><small class="text-muted">${escapeHtml(i.notes)}</small>` : ''}</td>
+            <td>${requester}${reqEmail}${addtl}</td>
+            <td><small>${fmtLocalDate(i.added_at)}</small></td>
+            <td><small>${fmtLocalDate(i.expires_at)}</small></td>
+            <td class="${dayClass}">${days !== null ? (days < 0 ? `${Math.abs(days)} overdue` : `${days}`) : '—'}</td>
+            <td>${statusBadge}</td>
+            <td>${warnCell}</td>
+            <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                    <button class="btn btn-outline-info" onclick="adminAction(${i.id},'extend')" title="Extend"><i class="bi bi-arrow-clockwise"></i></button>
+                    <button class="btn btn-outline-success" onclick="adminAction(${i.id},'permanent')" title="Keep permanently"><i class="bi bi-shield-check"></i></button>
+                    <button class="btn btn-outline-warning" onclick="adminAction(${i.id},'reset')" title="Reset to default schedule"><i class="bi bi-arrow-counterclockwise"></i></button>
+                    <button class="btn btn-outline-danger" onclick="adminAction(${i.id},'delete-now')" title="Delete now"><i class="bi bi-trash"></i></button>
+                    <button class="btn btn-outline-secondary" onclick="adminAction(${i.id},'forget')" title="Stop tracking"><i class="bi bi-x-circle"></i></button>
+                </div>
+            </td>
+        </tr>`;
+    }).join('');
+}
 
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmtLocalDate(iso){ if(!iso) return '—'; try { return new Date(iso).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}); } catch(_) { return iso.slice(0,10); } }
@@ -329,7 +483,6 @@ async function loadList(btn) {
         _setActiveTab(btn);
         currentStatus = btn.dataset.status;
     }
-    // Always make sure archive is hidden and main panes are visible
     document.getElementById('archive-pane').classList.add('d-none');
     document.querySelectorAll('[data-main-pane]').forEach(el => el.classList.remove('d-none'));
     selectedIds.clear();
@@ -337,61 +490,17 @@ async function loadList(btn) {
     updateBulkButtons();
 
     const search = document.getElementById('filter-search').value;
-    const type = document.getElementById('filter-type').value;
-    const sort = document.getElementById('filter-sort').value;
+    const type   = document.getElementById('filter-type').value;
+    const sort   = document.getElementById('filter-sort').value;
 
     const tbody = document.getElementById('exp-tbody');
     tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">Loading...</td></tr>';
     const params = new URLSearchParams({status: currentStatus, sort, media_type: type, search, _: Date.now()});
-    const res = await fetch(`/api/expirations/list?${params}`, {cache: 'no-store'});
+    const res  = await fetch(`/api/expirations/list?${params}`, {cache: 'no-store'});
     const data = await res.json();
-    if (!data.items.length) {
-        tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted py-4">No items match.</td></tr>';
-        return;
-    }
-    tbody.innerHTML = data.items.map(i => {
-        const days = i.days_left;
-        let dayClass = 'text-muted';
-        if (days !== null && days < 0) dayClass = 'text-danger fw-bold';
-        else if (days !== null && days < 14) dayClass = 'text-warning fw-bold';
-        const requester = i.requester_name || i.requester_email || '<span class="text-warning">— no email —</span>';
-        const reqEmail = i.requester_email ? `<br><small class="text-muted">${escapeHtml(i.requester_email)}</small>` : '';
-        const addtl = i.additional_requester_emails ? `<br><small class="text-muted">+ ${escapeHtml(i.additional_requester_emails.split(',').length)} other(s)</small>` : '';
-        const statusBadge = i.permanent
-            ? '<span class="badge bg-success">Permanent</span>'
-            : `<span class="badge bg-${i.status==='active'?'primary':i.status==='extended'?'info':i.status==='deleted'?'danger':i.status==='missing'?'dark':'secondary'}">${escapeHtml(i.status)}</span>`;
-        let warnCell = `<small>${i.warning_count} sent</small>`;
-        if (i.last_warning_status === 'failed') warnCell = `<span class="badge bg-danger" title="${escapeHtml(i.last_warning_error||'')}">failed</span>`;
-        else if (i.last_warning_status === 'no_email') warnCell = `<span class="badge bg-warning text-dark">no email</span>`;
-        else if (i.last_warning_sent_at) warnCell += `<br><small class="text-muted">${fmtLocalDate(i.last_warning_sent_at)}</small>`;
-        const typeIcon = i.media_type === 'show' ? '<i class="bi bi-tv"></i> Show' : '<i class="bi bi-film"></i> Movie';
-        const titleStr = i.title + (i.year ? ` (${i.year})` : '');
-        const checked = selectedIds.has(i.id) ? 'checked' : '';
-        const isContinuing = i.media_type === 'show' && i.series_status && i.series_status !== 'ended' && i.series_status !== 'deleted';
-        const airingBadge = isContinuing
-            ? ` <span class="badge bg-success-subtle text-success border border-success-subtle ms-1" title="Still airing — protected from expiration"><i class="bi bi-broadcast me-1"></i>${escapeHtml(i.series_status)}</span>`
-            : '';
-        return `<tr>
-            <td><input type="checkbox" class="form-check-input row-check" data-id="${i.id}" onclick="toggleRow(this)" ${checked}></td>
-            <td>${typeIcon}</td>
-            <td><strong>${escapeHtml(titleStr)}</strong>${airingBadge}${i.notes ? `<br><small class="text-muted">${escapeHtml(i.notes)}</small>` : ''}</td>
-            <td>${requester}${reqEmail}${addtl}</td>
-            <td><small>${fmtLocalDate(i.added_at)}</small></td>
-            <td><small>${fmtLocalDate(i.expires_at)}</small></td>
-            <td class="${dayClass}">${days !== null ? (days < 0 ? `${Math.abs(days)} overdue` : `${days}`) : '—'}</td>
-            <td>${statusBadge}</td>
-            <td>${warnCell}</td>
-            <td class="text-end">
-                <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-info" onclick="adminAction(${i.id},'extend')" title="Extend"><i class="bi bi-arrow-clockwise"></i></button>
-                    <button class="btn btn-outline-success" onclick="adminAction(${i.id},'permanent')" title="Keep permanently"><i class="bi bi-shield-check"></i></button>
-                    <button class="btn btn-outline-warning" onclick="adminAction(${i.id},'reset')" title="Reset to default schedule"><i class="bi bi-arrow-counterclockwise"></i></button>
-                    <button class="btn btn-outline-danger" onclick="adminAction(${i.id},'delete-now')" title="Delete now"><i class="bi bi-trash"></i></button>
-                    <button class="btn btn-outline-secondary" onclick="adminAction(${i.id},'forget')" title="Stop tracking"><i class="bi bi-x-circle"></i></button>
-                </div>
-            </td>
-        </tr>`;
-    }).join('');
+    allFetchedItems = data.items || [];
+    renderChipBar();
+    renderItems(applyChipFilter(allFetchedItems));
 }
 
 async function adminAction(id, action) {

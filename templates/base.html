@@ -715,7 +715,7 @@
     <nav class="navbar navbar-expand-lg">
         <div class="container-fluid">
 
-            <a class="navbar-brand" href="{{ url_for('home') }}">
+            <a class="navbar-brand" href="{{ url_for('landing_page') }}">
                 <div class="brand-icon"><i class="bi bi-broom"></i></div>
                 Media Scrubber
             </a>
@@ -727,14 +727,6 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <!-- ── Left: primary navigation ── -->
                 <ul class="navbar-nav me-auto align-items-lg-center gap-1">
-
-                    <!-- Cleanup (main feature) -->
-                    <li class="nav-item">
-                        <a class="nav-link {% if ep == 'home' %}active{% endif %}"
-                           href="{{ url_for('home') }}">
-                            <i class="bi bi-broom-fill"></i>Cleanup
-                        </a>
-                    </li>
 
                     <!-- Automation -->
                     <li class="nav-item dropdown">

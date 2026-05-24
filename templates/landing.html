@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}Home — Media Scrubber{% endblock %}
+
+{% block styles %}
+<style>
+.feature-card {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    border-width: 1px;
+}
+.feature-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25) !important;
+}
+.feature-icon-wrap {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+.feature-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: .78rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+.hero-tagline {
+    font-size: 1.1rem;
+    max-width: 520px;
+    margin: 0 auto;
+}
+.flow-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: .9rem;
+    color: var(--text-muted);
+}
+.flow-arrow {
+    color: var(--primary);
+    font-size: 1rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<div class="text-center py-4 mb-5">
+    <h1 class="fw-bold mb-2" style="font-size:2rem">
+        <i class="bi bi-broom-fill me-2" style="color:var(--primary)"></i>Media Scrubber
+    </h1>
+    <p class="hero-tagline text-muted mb-4">
+        Your Plex library, managed automatically — from request to watchlist to expiration.
+    </p>
+    <div class="d-flex justify-content-center align-items-center flex-wrap gap-2 text-muted small">
+        <span class="flow-step"><i class="bi bi-bookmark-star flow-arrow"></i> Add to Plex watchlist</span>
+        <span class="flow-arrow"><i class="bi bi-arrow-right"></i></span>
+        <span class="flow-step"><i class="bi bi-download flow-arrow"></i> Auto-downloads</span>
+        <span class="flow-arrow"><i class="bi bi-arrow-right"></i></span>
+        <span class="flow-step"><i class="bi bi-eye flow-arrow"></i> You watch it</span>
+        <span class="flow-arrow"><i class="bi bi-arrow-right"></i></span>
+        <span class="flow-step"><i class="bi bi-hourglass-split flow-arrow"></i> Expires automatically</span>
+    </div>
+</div>
+
+<!-- Feature cards -->
+<div class="row g-4">
+
+    <!-- 1 — Watchlist Sync (top seller) -->
+    <div class="col-md-6">
+        <div class="card feature-card h-100" style="border-color: var(--primary)">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div class="feature-icon-wrap" style="background:rgba(99,102,241,.15)">
+                        <i class="bi bi-bookmark-star-fill" style="color:var(--primary)"></i>
+                    </div>
+                    {% if watchlist_enabled %}
+                    <span class="feature-pill" style="background:rgba(34,197,94,.12);color:#22c55e">
+                        <i class="bi bi-circle-fill" style="font-size:.5rem"></i>Running
+                    </span>
+                    {% else %}
+                    <span class="feature-pill" style="background:rgba(100,116,139,.15);color:var(--text-muted)">
+                        <i class="bi bi-circle" style="font-size:.5rem"></i>Disabled
+                    </span>
+                    {% endif %}
+                </div>
+                <h3 class="h5 fw-bold mb-1">Watchlist Sync</h3>
+                <p class="text-muted small mb-3">
+                    The star feature. Add anything to your Plex watchlist and it downloads automatically.
+                    Once you've watched it, it removes itself from your watchlist. Zero admin.
+                </p>
+                {% if watchlist_last_run %}
+                <div class="small text-muted mb-3">
+                    <i class="bi bi-clock me-1"></i>Last run: {{ watchlist_last_run }}
+                    {% if watchlist_last_summary %}<br><i class="bi bi-check2 me-1 text-success"></i>{{ watchlist_last_summary }}{% endif %}
+                </div>
+                {% endif %}
+                <a href="{{ url_for('watchlist_sync_page') }}" class="btn btn-primary btn-sm px-3">
+                    <i class="bi bi-arrow-right-circle me-1"></i>{% if watchlist_enabled %}Manage{% else %}Set Up{% endif %}
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2 — Smart Expirations -->
+    <div class="col-md-6">
+        <div class="card feature-card h-100" style="border-color: {% if attention_count > 0 %}var(--warning, #f59e0b){% else %}var(--border-color){% endif %}">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div class="feature-icon-wrap" style="background:rgba(245,158,11,.12)">
+                        <i class="bi bi-hourglass-split" style="color:#f59e0b"></i>
+                    </div>
+                    {% if attention_count > 0 %}
+                    <a href="{{ url_for('expirations_page') }}" class="feature-pill text-decoration-none"
+                       style="background:rgba(245,158,11,.15);color:#f59e0b">
+                        <i class="bi bi-exclamation-triangle-fill" style="font-size:.75rem"></i>
+                        {{ attention_count }} need attention
+                    </a>
+                    {% else %}
+                    <span class="feature-pill" style="background:rgba(34,197,94,.12);color:#22c55e">
+                        <i class="bi bi-check-circle-fill" style="font-size:.75rem"></i>All clear
+                    </span>
+                    {% endif %}
+                </div>
+                <h3 class="h5 fw-bold mb-1">Smart Expirations</h3>
+                <p class="text-muted small mb-3">
+                    Media automatically expires after a set period. Requesters get a heads-up email
+                    with a choice to extend, keep permanently, or let it go.
+                </p>
+                <div class="small text-muted mb-3">
+                    <i class="bi bi-collection me-1"></i>{{ active_count }} items tracked
+                    &nbsp;&middot;&nbsp;
+                    <span style="color:{% if attention_count > 0 %}#f59e0b{% else %}#22c55e{% endif %}">
+                        {{ attention_count }} need attention
+                    </span>
+                </div>
+                <a href="{{ url_for('expirations_page') }}"
+                   class="btn btn-sm px-3 {% if attention_count > 0 %}btn-warning{% else %}btn-outline-secondary{% endif %}">
+                    <i class="bi bi-arrow-right-circle me-1"></i>View Expirations
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3 — Discovery & Media Chat -->
+    <div class="col-md-6">
+        <div class="card feature-card h-100">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div class="feature-icon-wrap" style="background:rgba(6,182,212,.12)">
+                        <i class="bi bi-stars" style="color:#06b6d4"></i>
+                    </div>
+                    <span class="feature-pill" style="background:rgba(6,182,212,.12);color:#06b6d4">
+                        <i class="bi bi-circle-fill" style="font-size:.5rem"></i>Live
+                    </span>
+                </div>
+                <h3 class="h5 fw-bold mb-1">Discovery &amp; Media Chat</h3>
+                <p class="text-muted small mb-3">
+                    Browse trending movies and shows pulled from TMDb. Or just ask in plain English —
+                    "add the new season of Severance" — and Media Chat handles the rest.
+                </p>
+                <div class="d-flex gap-2 flex-wrap">
+                    <a href="{{ url_for('media_chat') }}" class="btn btn-sm px-3" style="background:#06b6d4;border-color:#06b6d4;color:#fff">
+                        <i class="bi bi-collection-play-fill me-1"></i>Media Chat
+                    </a>
+                    <a href="{{ url_for('media_chat') }}#discover" class="btn btn-sm btn-outline-secondary px-3">
+                        <i class="bi bi-stars me-1"></i>Discovery
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4 — Insights -->
+    <div class="col-md-6">
+        <div class="card feature-card h-100">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div class="feature-icon-wrap" style="background:rgba(34,197,94,.12)">
+                        <i class="bi bi-bar-chart-line-fill" style="color:#22c55e"></i>
+                    </div>
+                    <span class="feature-pill" style="background:rgba(100,116,139,.15);color:var(--text-muted)">
+                        Reports
+                    </span>
+                </div>
+                <h3 class="h5 fw-bold mb-1">Insights</h3>
+                <p class="text-muted small mb-3">
+                    See who requested what, which shows are being watched, which are being ignored,
+                    and what's accumulating dust. Make smarter decisions about your library.
+                </p>
+                <div class="d-flex gap-2 flex-wrap">
+                    <a href="{{ url_for('user_analytics_page') }}" class="btn btn-sm btn-outline-success px-3">
+                        <i class="bi bi-people me-1"></i>User Analytics
+                    </a>
+                    <a href="{{ url_for('email_history_page') }}" class="btn btn-sm btn-outline-secondary px-3">
+                        <i class="bi bi-envelope me-1"></i>Email History
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Secondary quick links -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body py-3">
+                <div class="d-flex align-items-center flex-wrap gap-3">
+                    <span class="text-muted small fw-semibold">More tools:</span>
+                    <a href="{{ url_for('exclusions') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-shield-check me-1"></i>Exclusions
+                    </a>
+                    <a href="{{ url_for('history') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-clock-history me-1"></i>Deletion History
+                    </a>
+                    <a href="{{ url_for('home') }}" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-broom me-1"></i>Manual Cleanup
+                    </a>
+                    <a href="{{ url_for('settings_page') }}" class="btn btn-sm btn-outline-secondary ms-auto">
+                        <i class="bi bi-gear me-1"></i>Settings
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
