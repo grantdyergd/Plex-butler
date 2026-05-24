@@ -252,6 +252,12 @@
     </div>
 </div>
 
+<div id="attention-continuing-note" class="alert alert-info d-none py-2 mb-2" data-main-pane>
+    <i class="bi bi-info-circle me-1"></i>
+    <span id="attention-continuing-text"></span>
+    TV shows that are still airing are protected from deletion and hidden here.
+</div>
+
 <div class="card" data-main-pane>
     <div class="card-body">
         <div class="table-responsive">
@@ -543,6 +549,17 @@ async function loadList(btn) {
     allFetchedItems = data.items || [];
     renderChipBar();
     renderItems(applyChipFilter(allFetchedItems));
+
+    // Show/hide the "continuing shows hidden" note for Needs Attention tab
+    const note = document.getElementById('attention-continuing-note');
+    const noteText = document.getElementById('attention-continuing-text');
+    const hc = data.hidden_continuing || 0;
+    if (currentStatus === 'attention' && hc > 0) {
+        noteText.textContent = `${hc} TV show${hc === 1 ? '' : 's'} with no-email or failed warning status are hidden — `;
+        note.classList.remove('d-none');
+    } else {
+        note.classList.add('d-none');
+    }
 }
 
 async function adminAction(id, action) {

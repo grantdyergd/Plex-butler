@@ -625,6 +625,11 @@ def logout():
 @app.route('/landing')
 @login_required
 def landing_page():
+    _not_continuing_badge = db.or_(
+        MediaExpiration.media_type != 'show',
+        MediaExpiration.series_status.is_(None),
+        MediaExpiration.series_status.in_(['ended', 'deleted']),
+    )
     attention_count = MediaExpiration.query.filter(db.or_(
         MediaExpiration.status == 'missing',
         MediaExpiration.last_warning_status.in_(['failed', 'no_email']),
@@ -632,14 +637,9 @@ def landing_page():
             MediaExpiration.status.in_(['active', 'extended']),
             MediaExpiration.permanent == False,
             MediaExpiration.requester_email.is_(None),
+            _not_continuing_badge,
         ),
-    )).filter(
-        db.or_(
-            MediaExpiration.media_type != 'show',
-            MediaExpiration.series_status.is_(None),
-            MediaExpiration.series_status.in_(['ended', 'deleted']),
-        )
-    ).count()
+    )).count()
     active_count = MediaExpiration.query.filter(
         MediaExpiration.status.in_(['active', 'extended'])
     ).count()
@@ -6823,22 +6823,23 @@ def expirations_list_api():
     if status == 'permanent':
         q = q.filter_by(permanent=True)
     elif status == 'attention':
+        _not_continuing = db.or_(
+            MediaExpiration.media_type != 'show',
+            MediaExpiration.series_status.is_(None),
+            MediaExpiration.series_status.in_(['ended', 'deleted']),
+        )
         q = q.filter(db.or_(
+            # Always surface comms failures regardless of airing status
             MediaExpiration.status == 'missing',
             MediaExpiration.last_warning_status.in_(['failed', 'no_email']),
+            # No-requester active items: only surface non-continuing shows / all movies
             db.and_(
                 MediaExpiration.status.in_(['active', 'extended']),
                 MediaExpiration.permanent == False,
                 MediaExpiration.requester_email.is_(None),
+                _not_continuing,
             ),
-        )).filter(
-            # Continuing shows are protected — they don't need attention
-            db.or_(
-                MediaExpiration.media_type != 'show',
-                MediaExpiration.series_status.is_(None),
-                MediaExpiration.series_status.in_(['ended', 'deleted']),
-            )
-        )
+        ))
     elif status == 'all':
         pass
     else:
@@ -6855,8 +6856,24 @@ def expirations_list_api():
         q = q.order_by(MediaExpiration.added_at.desc())
     items = q.limit(500).all()
 
+    # Count continuing shows that are hidden from Needs Attention (so UI can explain why)
+    hidden_continuing = 0
+    if status == 'attention':
+        hidden_continuing = MediaExpiration.query.filter(
+            MediaExpiration.media_type == 'show',
+            MediaExpiration.status.in_(['active', 'extended']),
+            MediaExpiration.permanent == False,
+            db.or_(
+                MediaExpiration.last_warning_status.in_(['failed', 'no_email']),
+                MediaExpiration.requester_email.is_(None),
+            ),
+            MediaExpiration.series_status.isnot(None),
+            ~MediaExpiration.series_status.in_(['ended', 'deleted']),
+        ).count()
+
     now = datetime.utcnow()
     return jsonify({
+        'hidden_continuing': hidden_continuing,
         'items': [{
             'id': i.id,
             'media_type': i.media_type,
