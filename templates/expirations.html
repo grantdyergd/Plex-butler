@@ -643,10 +643,22 @@ async function runBulkDeleteWithProgress(ids) {
         return;
     }
 
+    let cancelRequested = false;
     cancelBtn.onclick = async () => {
+        if (cancelRequested) return;
+        cancelRequested = true;
         cancelBtn.disabled = true;
         cancelBtn.textContent = 'Cancelling…';
+        statusEl.textContent = 'Cancellation requested — finishing current item…';
         await fetch(`/api/expirations/bulk-delete-cancel/${jobId}`, {method:'POST'}).catch(() => {});
+        // Show Close immediately so user isn't stuck — background job will stop on its own
+        closeBtn.classList.remove('d-none');
+        closeBtn.textContent = 'Close (job still finishing in background)';
+        closeBtn.onclick = () => {
+            const modalEl = document.getElementById('bulkDeleteModal');
+            modalEl.addEventListener('hidden.bs.modal', () => loadList(), {once: true});
+            modal.hide();
+        };
     };
 
     // 2) Poll until done
@@ -658,7 +670,7 @@ async function runBulkDeleteWithProgress(ids) {
             status = await res.json();
         } catch(e) {
             // Transient network blip — keep polling
-            statusEl.textContent = 'Reconnecting…';
+            if (!cancelRequested) statusEl.textContent = 'Reconnecting…';
             continue;
         }
 
@@ -666,7 +678,7 @@ async function runBulkDeleteWithProgress(ids) {
         const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
         bar.style.width = pct + '%';
         barLabel.textContent = `${done} / ${total}`;
-        if (status.current) statusEl.textContent = `Deleting: ${status.current}`;
+        if (status.current && !cancelRequested) statusEl.textContent = `Deleting: ${status.current}`;
         countEl.textContent = `✓ ${status.ok} deleted${status.failed > 0 ? `   ✗ ${status.failed} failed` : ''}`;
         if (status.errors && status.errors.length > 0) {
             errList.innerHTML = status.errors.slice(-10).map(e => `<li class="text-danger small">${escapeHtml(e)}</li>`).join('');
@@ -674,11 +686,15 @@ async function runBulkDeleteWithProgress(ids) {
 
         if (status.done) {
             bar.style.width = '100%';
-            bar.className = 'progress-bar ' + (status.failed > 0 ? 'bg-warning' : 'bg-success');
-            barLabel.textContent = `${total} / ${total}`;
-            statusEl.textContent = `Complete — ${status.ok} deleted${status.failed > 0 ? `, ${status.failed} failed` : ''}.`;
+            const wasCancelled = status.cancelled;
+            bar.className = 'progress-bar ' + (wasCancelled ? 'bg-secondary' : status.failed > 0 ? 'bg-warning' : 'bg-success');
+            barLabel.textContent = `${done} / ${total}`;
+            statusEl.textContent = wasCancelled
+                ? `Cancelled — ${status.ok} deleted before stopping${status.failed > 0 ? `, ${status.failed} failed` : ''}.`
+                : `Complete — ${status.ok} deleted${status.failed > 0 ? `, ${status.failed} failed` : ''}.`;
             cancelBtn.classList.add('d-none');
             closeBtn.classList.remove('d-none');
+            closeBtn.textContent = 'Done — Refresh list';
             closeBtn.onclick = () => {
                 const modalEl = document.getElementById('bulkDeleteModal');
                 modalEl.addEventListener('hidden.bs.modal', () => loadList(), {once: true});

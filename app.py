@@ -7344,6 +7344,7 @@ def expirations_bulk_delete_status(job_id):
         'errors': errors,
         'total': j.total,
         'done': j.done,
+        'cancelled': j.cancelled,
         'current': j.current,
     })
 
