@@ -42,3 +42,16 @@ logs/
 
 # Replit
 .cache/
+.local/
+
+# Runtime data — contains personal library info, should not be shared
+excluded_shows.txt
+excluded_movies.txt
+instance/
+
+# Uploaded/pasted assets from development — may contain personal info
+attached_assets/
+
+# Database files
+*.db
+*.sqlite
