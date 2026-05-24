@@ -594,7 +594,8 @@ async function bulkAction(action) {
 }
 
 async function runBulkDeleteWithProgress(ids) {
-    // Populate and show the progress modal
+    // Deletion runs entirely on the server — browser just polls for progress.
+    // You can switch apps freely; the server keeps going.
     const modal = new bootstrap.Modal(document.getElementById('bulkDeleteModal'), {backdrop:'static', keyboard:false});
     const bar       = document.getElementById('bdel-bar');
     const barLabel  = document.getElementById('bdel-bar-label');
@@ -604,100 +605,88 @@ async function runBulkDeleteWithProgress(ids) {
     const cancelBtn = document.getElementById('bdel-cancel');
     const closeBtn  = document.getElementById('bdel-close');
 
-    let cancelled = false;
-    let ok = 0, failed = 0;
-    const errors = [];
     const total = ids.length;
-
     bar.style.width = '0%';
     bar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-danger';
     barLabel.textContent = `0 / ${total}`;
-    statusEl.textContent = 'Starting…';
+    statusEl.textContent = 'Starting on server…';
     countEl.textContent = '';
     errList.innerHTML = '';
     cancelBtn.disabled = false;
+    cancelBtn.textContent = 'Cancel';
     cancelBtn.classList.remove('d-none');
     closeBtn.classList.add('d-none');
-
-    cancelBtn.onclick = () => { cancelled = true; cancelBtn.disabled = true; cancelBtn.textContent = 'Cancelling…'; };
-
     modal.show();
 
-    // Build title map keyed by item ID (data-id attribute, not cb.value which is always "on")
-    const titleMap = {};
-    document.querySelectorAll('#exp-table-body tr').forEach(tr => {
-        const cb = tr.querySelector('input[type=checkbox][data-id]');
-        if (cb) {
-            const titleEl = tr.querySelector('td:nth-child(3)');
-            if (titleEl) titleMap[cb.dataset.id] = titleEl.textContent.trim();
+    // 1) Start the job server-side
+    let jobId;
+    try {
+        const startRes = await fetch('/api/expirations/bulk-delete-start', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ids})
+        });
+        const startData = await startRes.json();
+        if (!startData.success) {
+            statusEl.textContent = `Error: ${startData.error || 'Could not start job'}`;
+            cancelBtn.classList.add('d-none');
+            closeBtn.classList.remove('d-none');
+            closeBtn.onclick = () => modal.hide();
+            return;
         }
-    });
-
-    for (let i = 0; i < ids.length; i++) {
-        if (cancelled) break;
-
-        const eid = ids[i];
-        const title = titleMap[eid] || `#${eid}`;
-        statusEl.textContent = `Deleting: ${title}`;
-        const pct = Math.round((i / total) * 100);
-        bar.style.width = pct + '%';
-        barLabel.textContent = `${i} / ${total}`;
-
-        try {
-            const controller = new AbortController();
-            const tid = setTimeout(() => controller.abort(), 60000);
-            let res, data;
-            try {
-                res = await fetch(`/api/expirations/${eid}/action`, {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({action: 'delete-now'}),
-                    signal: controller.signal
-                });
-                clearTimeout(tid);
-                data = await res.json();
-            } catch(e) {
-                clearTimeout(tid);
-                failed++;
-                errors.push(`${title}: ${e.name === 'AbortError' ? 'request timed out (server too slow)' : 'network error — check connection'}`);
-                continue;
-            }
-            if (data.success) {
-                ok++;
-            } else {
-                failed++;
-                errors.push(`${title}: ${data.error || 'unknown error'}`);
-            }
-        } catch(e) {
-            failed++;
-            errors.push(`${title}: unexpected error`);
-        }
-
-        countEl.textContent = `✓ ${ok} deleted   ${failed > 0 ? `✗ ${failed} failed` : ''}`;
-        if (errors.length > 0) {
-            errList.innerHTML = errors.slice(-10).map(e => `<li class="text-danger small">${e}</li>`).join('');
-        }
-
-        // Tiny yield so the UI can repaint between items
-        if (!cancelled && i < ids.length - 1) {
-            await new Promise(r => setTimeout(r, 50));
-        }
+        jobId = startData.job_id;
+    } catch(e) {
+        statusEl.textContent = 'Network error starting job — check connection';
+        cancelBtn.classList.add('d-none');
+        closeBtn.classList.remove('d-none');
+        closeBtn.onclick = () => modal.hide();
+        return;
     }
 
-    // Done
-    bar.style.width = '100%';
-    bar.className = 'progress-bar ' + (failed > 0 ? 'bg-warning' : 'bg-success');
-    barLabel.textContent = `${Math.min(ok + failed, total)} / ${total}`;
-    statusEl.textContent = cancelled
-        ? `Cancelled after ${ok + failed} of ${total} items.`
-        : `Complete — ${ok} deleted${failed > 0 ? `, ${failed} failed` : ''}.`;
-    cancelBtn.classList.add('d-none');
-    closeBtn.classList.remove('d-none');
-    closeBtn.onclick = () => {
-        const modalEl = document.getElementById('bulkDeleteModal');
-        modalEl.addEventListener('hidden.bs.modal', () => loadList(), {once: true});
-        modal.hide();
+    cancelBtn.onclick = async () => {
+        cancelBtn.disabled = true;
+        cancelBtn.textContent = 'Cancelling…';
+        await fetch(`/api/expirations/bulk-delete-cancel/${jobId}`, {method:'POST'}).catch(() => {});
     };
+
+    // 2) Poll until done
+    while (true) {
+        await new Promise(r => setTimeout(r, 1500));
+        let status;
+        try {
+            const res = await fetch(`/api/expirations/bulk-delete-status/${jobId}`);
+            status = await res.json();
+        } catch(e) {
+            // Transient network blip — keep polling
+            statusEl.textContent = 'Reconnecting…';
+            continue;
+        }
+
+        const done  = status.ok + status.failed;
+        const pct   = total > 0 ? Math.round((done / total) * 100) : 0;
+        bar.style.width = pct + '%';
+        barLabel.textContent = `${done} / ${total}`;
+        if (status.current) statusEl.textContent = `Deleting: ${status.current}`;
+        countEl.textContent = `✓ ${status.ok} deleted${status.failed > 0 ? `   ✗ ${status.failed} failed` : ''}`;
+        if (status.errors && status.errors.length > 0) {
+            errList.innerHTML = status.errors.slice(-10).map(e => `<li class="text-danger small">${escapeHtml(e)}</li>`).join('');
+        }
+
+        if (status.done) {
+            bar.style.width = '100%';
+            bar.className = 'progress-bar ' + (status.failed > 0 ? 'bg-warning' : 'bg-success');
+            barLabel.textContent = `${total} / ${total}`;
+            statusEl.textContent = `Complete — ${status.ok} deleted${status.failed > 0 ? `, ${status.failed} failed` : ''}.`;
+            cancelBtn.classList.add('d-none');
+            closeBtn.classList.remove('d-none');
+            closeBtn.onclick = () => {
+                const modalEl = document.getElementById('bulkDeleteModal');
+                modalEl.addEventListener('hidden.bs.modal', () => loadList(), {once: true});
+                modal.hide();
+            };
+            break;
+        }
+    }
 }
 
 async function savePolicy() {

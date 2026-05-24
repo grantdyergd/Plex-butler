@@ -5233,6 +5233,9 @@ EXPIRATION_DEFAULTS = {
 # In-process lock to keep manual scan-now and scheduled tick from racing each other inside one worker
 _expiration_run_lock = threading.Lock()
 
+# In-memory store for server-side bulk delete jobs {job_id -> state_dict}
+_bulk_delete_jobs: dict = {}
+
 
 def _run_expiration_migrations():
     """Idempotently add new columns to existing tables (safe: ADD COLUMN IF NOT EXISTS)."""
@@ -7202,6 +7205,98 @@ def expirations_bulk_action():
             errors.append(f"{rec.title if rec else eid}: {e}")
     db.session.commit()
     return jsonify({'success': True, 'ok': ok_count, 'failed': fail_count, 'errors': errors[:5]})
+
+
+@app.route('/api/expirations/bulk-delete-start', methods=['POST'])
+@login_required
+def expirations_bulk_delete_start():
+    """Kick off a server-side bulk delete. Returns job_id — client polls for progress."""
+    data = request.json or {}
+    ids = [int(i) for i in data.get('ids', []) if str(i).isdigit()]
+    if not ids:
+        return jsonify({'success': False, 'error': 'No IDs provided'}), 400
+
+    job_id = secrets.token_hex(8)
+    username = current_user.username if current_user.is_authenticated else 'admin'
+    _bulk_delete_jobs[job_id] = {
+        'ok': 0, 'failed': 0, 'errors': [], 'total': len(ids),
+        'done': False, 'cancelled': False, 'current': 'Starting…',
+    }
+
+    def do_delete(jid, item_ids, uname):
+        job = _bulk_delete_jobs[jid]
+        dry = _is_dry_run()
+        with app.app_context():
+            for eid in item_ids:
+                if job['cancelled']:
+                    break
+                try:
+                    rec = db.session.get(MediaExpiration, eid)
+                    if not rec:
+                        job['failed'] += 1
+                        job['errors'].append(f'#{eid}: not found')
+                        continue
+                    job['current'] = rec.title
+                    try:
+                        _archive_deletion(rec,
+                                          deleted_by=('admin-dry-run' if dry else 'admin-delete-now'),
+                                          dry_run=dry, notes=f'bulk delete by {uname}')
+                    except Exception as e:
+                        db.session.rollback()
+                        job['failed'] += 1
+                        job['errors'].append(f'{rec.title}: archive failed ({e})')
+                        continue
+                    arr_ok, arr_reason = _delete_via_arr(rec)
+                    if not arr_ok:
+                        db.session.rollback()
+                        job['failed'] += 1
+                        job['errors'].append(f'{rec.title}: {arr_reason or "delete failed"}')
+                        continue
+                    rec.status = 'deleted'
+                    rec.deleted_at = datetime.utcnow()
+                    if dry:
+                        rec.notes = 'dry-run-deletion'
+                    db.session.commit()
+                    job['ok'] += 1
+                except Exception as e:
+                    try:
+                        db.session.rollback()
+                    except Exception:
+                        pass
+                    job['failed'] += 1
+                    job['errors'].append(f'#{eid}: unexpected error ({e})')
+        job['done'] = True
+        job['current'] = ''
+
+    t = threading.Thread(target=do_delete, args=(job_id, ids, username), daemon=True)
+    t.start()
+    return jsonify({'success': True, 'job_id': job_id, 'total': len(ids)})
+
+
+@app.route('/api/expirations/bulk-delete-status/<job_id>')
+@login_required
+def expirations_bulk_delete_status(job_id):
+    job = _bulk_delete_jobs.get(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    return jsonify({
+        'success': True,
+        'ok': job['ok'],
+        'failed': job['failed'],
+        'errors': job['errors'][-20:],
+        'total': job['total'],
+        'done': job['done'],
+        'current': job['current'],
+    })
+
+
+@app.route('/api/expirations/bulk-delete-cancel/<job_id>', methods=['POST'])
+@login_required
+def expirations_bulk_delete_cancel(job_id):
+    job = _bulk_delete_jobs.get(job_id)
+    if job:
+        job['cancelled'] = True
+    return jsonify({'success': True})
 
 
 @app.route('/api/expirations/<int:eid>/action', methods=['POST'])
