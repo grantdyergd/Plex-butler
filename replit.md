@@ -1,4 +1,4 @@
-# Media Scrubber
+# Plex Butler
 
 ## Overview
 A web-based media cleanup tool for Plex, Sonarr, Radarr, and Ombi libraries. This tool features a setup wizard, user authentication, and separate dashboards for TV shows and movies to intelligently identify and remove unwatched media while respecting exclusions and notifying original requesters via email.

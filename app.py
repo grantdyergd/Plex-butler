@@ -1110,7 +1110,7 @@ def send_exclusion_email(media_type, title, recipient_name, recipient_email, yea
     <body>
         <div class="container">
             <div class="header">
-                <h1>Media Scrubber</h1>
+                <h1>Plex Butler</h1>
             </div>
             <div class="content">
                 <p>{greeting}</p>
@@ -1121,10 +1121,10 @@ def send_exclusion_email(media_type, title, recipient_name, recipient_email, yea
                     <p>This {media_type_display} will be protected from future cleanup operations and will remain in our library indefinitely.</p>
                 </div>
                 <p>If you have any questions, please reach out to your media server administrator.</p>
-                <p>Best regards,<br>Media Scrubber</p>
+                <p>Best regards,<br>Plex Butler</p>
             </div>
             <div class="footer">
-                <p>This is an automated message from Media Scrubber</p>
+                <p>This is an automated message from Plex Butler</p>
             </div>
         </div>
     </body>
@@ -2573,8 +2573,8 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
             try:
                 plex_headers = {
                     'X-Plex-Token': plex_token,
-                    'X-Plex-Client-Identifier': 'media-scrubber-chat',
-                    'X-Plex-Product': 'Media Scrubber',
+                    'X-Plex-Client-Identifier': 'plex-butler-chat',
+                    'X-Plex-Product': 'Plex Butler',
                     'X-Plex-Version': '1.0',
                     'Accept': 'application/json'
                 }
@@ -2655,8 +2655,8 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
             
             plex_headers = {
                 'X-Plex-Token': plex_token,
-                'X-Plex-Client-Identifier': 'media-scrubber-chat',
-                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Client-Identifier': 'plex-butler-chat',
+                'X-Plex-Product': 'Plex Butler',
                 'X-Plex-Version': '1.0',
                 'Accept': 'application/json'
             }
@@ -2822,8 +2822,8 @@ When the user lists multiple titles, put them ALL in the query field as a comma-
             
             plex_headers = {
                 'X-Plex-Token': plex_token,
-                'X-Plex-Client-Identifier': 'media-scrubber-chat',
-                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Client-Identifier': 'plex-butler-chat',
+                'X-Plex-Product': 'Plex Butler',
                 'X-Plex-Version': '1.0',
                 'Accept': 'application/json'
             }
@@ -3650,8 +3650,8 @@ def media_chat_add():
         try:
             plex_headers = {
                 'X-Plex-Token': plex_token,
-                'X-Plex-Client-Identifier': 'media-scrubber-chat',
-                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Client-Identifier': 'plex-butler-chat',
+                'X-Plex-Product': 'Plex Butler',
                 'X-Plex-Version': '1.0',
                 'Accept': 'application/json'
             }
@@ -3756,8 +3756,8 @@ def media_chat_delete():
         try:
             plex_headers = {
                 'X-Plex-Token': plex_token,
-                'X-Plex-Client-Identifier': 'media-scrubber-chat',
-                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Client-Identifier': 'plex-butler-chat',
+                'X-Plex-Product': 'Plex Butler',
                 'X-Plex-Version': '1.0',
                 'Accept': 'application/json'
             }
@@ -3786,8 +3786,8 @@ def media_chat_delete():
 def _plex_headers(token):
     return {
         'X-Plex-Token': token,
-        'X-Plex-Client-Identifier': 'media-scrubber-browser',
-        'X-Plex-Product': 'Media Scrubber',
+        'X-Plex-Client-Identifier': 'plex-butler-browser',
+        'X-Plex-Product': 'Plex Butler',
         'X-Plex-Version': '1.0',
         'Accept': 'application/json'
     }
@@ -5038,8 +5038,8 @@ def media_plex_watchlist_add():
 
     headers = {
         'X-Plex-Token': plex_token,
-        'X-Plex-Client-Identifier': 'media-scrubber-browser',
-        'X-Plex-Product': 'Media Scrubber',
+        'X-Plex-Client-Identifier': 'plex-butler-browser',
+        'X-Plex-Product': 'Plex Butler',
         'X-Plex-Version': '1.0',
         'Accept': 'application/json'
     }
@@ -6578,8 +6578,8 @@ def watchlist_sync_job():
 
             plex_headers = {
                 'X-Plex-Token': plex_token,
-                'X-Plex-Client-Identifier': 'media-scrubber-watchlist-sync',
-                'X-Plex-Product': 'Media Scrubber',
+                'X-Plex-Client-Identifier': 'plex-butler-watchlist-sync',
+                'X-Plex-Product': 'Plex Butler',
                 'X-Plex-Version': '1.0',
                 'Accept': 'application/json',
             }
@@ -7736,8 +7736,8 @@ def watchlist_sync_diagnostic():
 
     plex_headers = {
         'X-Plex-Token': plex_token,
-        'X-Plex-Client-Identifier': 'media-scrubber-diag',
-        'X-Plex-Product': 'Media Scrubber',
+        'X-Plex-Client-Identifier': 'plex-butler-diag',
+        'X-Plex-Product': 'Plex Butler',
         'X-Plex-Version': '1.0',
         'Accept': 'application/json',
     }
