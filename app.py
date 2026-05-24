@@ -5970,26 +5970,47 @@ def _is_dry_run():
 
 
 def _delete_via_arr(rec, force_real=False):
-    """Remove from Sonarr/Radarr with file deletion. In dry-run, log only and return True."""
+    """Remove from Sonarr/Radarr with file deletion. In dry-run, log only and return (True, None).
+
+    Returns (ok: bool, reason: str|None).
+    404 from *arr means the item is already gone — treated as success so the caller can mark it deleted.
+    """
     if _is_dry_run() and not force_real:
         print(f"[DRY RUN] Would delete {rec.media_type} {rec.title!r} (id={rec.service_id})")
-        return True
+        return True, None
+    arr_label = 'Sonarr' if rec.media_type == 'show' else 'Radarr'
     if rec.media_type == 'show':
         url = get_setting('SONARR_URL', '').strip().rstrip('/')
         key = get_setting('SONARR_API_KEY', '').strip()
         if not url or not key:
-            return False
-        r = requests.delete(f"{url}/api/v3/series/{rec.service_id}",
-                            params={'apikey': key, 'deleteFiles': 'true'}, timeout=30)
-        return r.ok
+            return False, f'{arr_label} not configured'
+        try:
+            r = requests.delete(f"{url}/api/v3/series/{rec.service_id}",
+                                params={'apikey': key, 'deleteFiles': 'true'}, timeout=30)
+        except requests.RequestException as e:
+            return False, f'{arr_label} connection error: {e}'
     else:
         url = get_setting('RADARR_URL', '').strip().rstrip('/')
         key = get_setting('RADARR_API_KEY', '').strip()
         if not url or not key:
-            return False
-        r = requests.delete(f"{url}/api/v3/movie/{rec.service_id}",
-                            params={'apikey': key, 'deleteFiles': 'true'}, timeout=30)
-        return r.ok
+            return False, f'{arr_label} not configured'
+        try:
+            r = requests.delete(f"{url}/api/v3/movie/{rec.service_id}",
+                                params={'apikey': key, 'deleteFiles': 'true'}, timeout=30)
+        except requests.RequestException as e:
+            return False, f'{arr_label} connection error: {e}'
+    if r.status_code == 404:
+        # Item already gone from *arr — treat as success so the record gets marked deleted
+        print(f"[Expiration Delete] {arr_label} returned 404 for {rec.title!r} (id={rec.service_id}) — already removed, marking deleted")
+        return True, None
+    if not r.ok:
+        try:
+            detail = r.json()
+            msg = detail[0].get('errorMessage') or detail[0].get('message') if isinstance(detail, list) else str(detail)
+        except Exception:
+            msg = r.text[:200] if r.text else f'HTTP {r.status_code}'
+        return False, f'{arr_label} returned {r.status_code}: {msg}'
+    return True, None
 
 
 def _archive_deletion(rec, deleted_by, dry_run=False, notes=None):
@@ -6076,11 +6097,11 @@ def expiration_process_due():
             _archive_deletion(rec, deleted_by=('dry-run' if dry_run else 'auto-expiration'),
                               dry_run=dry_run, notes=note_val)
             # 2) External destructive call (no-op in dry-run).
-            ok = _delete_via_arr(rec)
+            ok, reason = _delete_via_arr(rec)
             if not ok:
                 # Roll back the archive row too — nothing was actually deleted.
                 db.session.rollback()
-                print(f"[Expiration Delete] Failed to delete {rec.title}; archive rolled back")
+                print(f"[Expiration Delete] Failed to delete {rec.title}: {reason}; archive rolled back")
                 continue
             # 3) Mark the source record + DeletionHistory, then commit.
             rec.status = 'deleted'
@@ -7157,10 +7178,11 @@ def expirations_bulk_action():
                 # Archive FIRST (flushes); abort cleanly if it fails.
                 _archive_deletion(rec, deleted_by=('bulk-dry-run' if dry else 'bulk-delete'),
                                   dry_run=dry, notes=f'bulk action by {by}')
-                if not _delete_via_arr(rec):
+                arr_ok, arr_reason = _delete_via_arr(rec)
+                if not arr_ok:
                     db.session.rollback()
                     fail_count += 1
-                    errors.append(f"{rec.title}: delete failed (archive rolled back)")
+                    errors.append(f"{rec.title}: {arr_reason or 'delete failed'} (archive rolled back)")
                     continue
                 rec.status = 'deleted'
                 rec.deleted_at = datetime.utcnow()
@@ -7224,9 +7246,10 @@ def expirations_admin_action(eid):
         except Exception as e:
             db.session.rollback()
             return jsonify({'success': False, 'error': f'Archive insert failed; deletion aborted: {e}'}), 500
-        if not _delete_via_arr(rec):
+        arr_ok, arr_reason = _delete_via_arr(rec)
+        if not arr_ok:
             db.session.rollback()
-            return jsonify({'success': False, 'error': 'Sonarr/Radarr delete failed (archive rolled back)'}), 502
+            return jsonify({'success': False, 'error': arr_reason or 'Delete failed (archive rolled back)'}), 502
         rec.status = 'deleted'
         rec.deleted_at = datetime.utcnow()
         if dry:
@@ -7371,9 +7394,10 @@ def expire_action_submit(token):
             # Archive FIRST so a deletion can never escape the audit log.
             _archive_deletion(rec, deleted_by=('requester-dry-run' if dry else 'requester-delete'),
                               dry_run=dry, notes='requester chose delete via token')
-            if not _delete_via_arr(rec):
+            arr_ok, arr_reason = _delete_via_arr(rec)
+            if not arr_ok:
                 db.session.rollback()  # releases the token claim AND the archive row
-                return jsonify({'success': False, 'error': 'Could not delete from server'}), 502
+                return jsonify({'success': False, 'error': arr_reason or 'Could not delete from server'}), 502
             rec.status = 'deleted'
             rec.deleted_at = now
             if dry:

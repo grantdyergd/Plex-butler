@@ -644,12 +644,24 @@ async function runBulkDeleteWithProgress(ids) {
         barLabel.textContent = `${i} / ${total}`;
 
         try {
-            const res = await fetch(`/api/expirations/${eid}/action`, {
-                method: 'POST',
-                headers: {'Content-Type':'application/json'},
-                body: JSON.stringify({action: 'delete-now'})
-            });
-            const data = await res.json();
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 60000);
+            let res, data;
+            try {
+                res = await fetch(`/api/expirations/${eid}/action`, {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action: 'delete-now'}),
+                    signal: controller.signal
+                });
+                clearTimeout(tid);
+                data = await res.json();
+            } catch(e) {
+                clearTimeout(tid);
+                failed++;
+                errors.push(`${title}: ${e.name === 'AbortError' ? 'request timed out (server too slow)' : 'network error — check connection'}`);
+                continue;
+            }
             if (data.success) {
                 ok++;
             } else {
@@ -658,7 +670,7 @@ async function runBulkDeleteWithProgress(ids) {
             }
         } catch(e) {
             failed++;
-            errors.push(`${title}: network error`);
+            errors.push(`${title}: unexpected error`);
         }
 
         countEl.textContent = `✓ ${ok} deleted   ${failed > 0 ? `✗ ${failed} failed` : ''}`;
